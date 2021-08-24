@@ -71,7 +71,7 @@ def get_gaps(match):
             gaps.append(max(gap1, gap2))
         # gaps = np.array([[match[i-1, 3], match[i, 2]] for i in range(1, len(match))])
         # return np.concatenate(([0], gaps[:,1] - gaps[:,0]))
-        return gaps
+        return np.array(gaps)
 
 # @njit
 def crop_match(match, w_start, w_end):
@@ -96,15 +96,17 @@ def crop_match(match, w_start, w_end):
 def prepare_seq(seq, cropped, max_gap):
     #TODO: handle superpositions
     gaps = get_gaps(cropped)
-    if sum(gaps) >= max_gap:
+    if sum(np.where(gaps > 0, gaps, 0)) >= max_gap:
         return 0
     q_coords = cropped[:,[2,3]]
     
     alig = ''
     gap_char = '-'
     for gp, coo in zip(gaps, q_coords):
-        alig += gap_char * gp
-        alig += seq[coo[0]:coo[1]]
+        alig += gap_char * max(0, gp)
+        seg_start = coo[0] - min(0, gp)
+        seg_end = coo[1]
+        alig += seq[seg_start:seg_end]
     return alig
 
 def make_matchdict(tab):
@@ -137,7 +139,7 @@ max_gap = 30
 
 for seqid, match in matchdict.items():
     seq = seqdict[seqid]
-    aligned = align_match(seqid, match, seq, w_start, w_end, 0.5)
+    aligned = align_match(seqid, match, seq, w_start, w_end, 50)
     if aligned != 0:
         alig[seqid] = aligned
         # break

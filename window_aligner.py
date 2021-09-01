@@ -4,144 +4,280 @@
 Created on Tue Aug 24 10:11:34 2021
 
 @author: hernan
-"""
 
+Extracts and aligns sequences from blast report
+"""
+#%% libraries
+from Bio import AlignIO
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
+from Bio.Align import MultipleSeqAlignment as msa
 from glob import glob
+# TODO implement numba
 from numba import njit
 import numpy as np
 import pandas as pd
 import toolkit as tools
 
-#%%
-gapped_file = '/home/hernan/PROYECTOS/Maestria/Graboid/Reference_data/blast_reports/18S_nem_gapped.tsv'
-ungapped_file = '/home/hernan/PROYECTOS/Maestria/Graboid/Reference_data/blast_reports/18S_nem_ungapped.tsv'
+#%% functions
+def load_ref(file):
+    with open(file, 'r') as handle:
+        ref = handle.read().splitlines()[1:]
+    ref = ''.join(ref)
+    return ref
 
-gapped_tab = pd.read_csv(gapped_file, sep = '\t', header = None)
-ungapped_tab = pd.read_csv(ungapped_file, sep = '\t', header = None)
+def load_report(report_file):
+    report_tab = pd.read_csv(report_file, sep = '\t', header = None)
+    report_tab.rename(columns = {0:'qseqid',
+                                 1:'sseqid',
+                                 2:'pident',
+                                 3:'length',
+                                 4:'mismatch',
+                                 5:'gapopen',
+                                 6:'qstart',
+                                 7:'qend',
+                                 8:'sstart',
+                                 9:'send',
+                                 10:'evalue',
+                                 11:'bitscore'}, inplace = True)
+    return report_tab
 
-gapped_tab.rename(columns = {0:'qseqid',
-                             1:'sseqid',
-                             2:'pident',
-                             3:'length',
-                             4:'mismatch',
-                             5:'gapopen',
-                             6:'qstart',
-                             7:'qend',
-                             8:'sstart',
-                             9:'send',
-                             10:'evalue',
-                             11:'bitscore'}, inplace = True)
-ungapped_tab.rename(columns = {0:'qseqid',
-                             1:'sseqid',
-                             2:'pident',
-                             3:'length',
-                             4:'mismatch',
-                             5:'gapopen',
-                             6:'qstart',
-                             7:'qend',
-                             8:'sstart',
-                             9:'send',
-                             10:'evalue',
-                             11:'bitscore'}, inplace = True)
-
-#%%
-test_qseq = 'AB009317'
-
-full_match = gapped_tab.loc[gapped_tab['qseqid'] == test_qseq, ['sstart', 'send', 'qstart', 'qend']].to_numpy()
-partial_match = ungapped_tab.loc[ungapped_tab['qseqid'] == test_qseq, ['sstart', 'send', 'qstart', 'qend']].sort_values(by = 'qstart').to_numpy()
-
-seqfile = '/home/hernan/PROYECTOS/Maestria/Data/18S_Nematoda.fasta'
-seqdict = tools.make_seqdict(seqfile)
-
-#%%
-# @njit
 def match_in_window(match, w_start, w_end):
+    """    
+    Lists match records that overlap with the given window.
+
+    Parameters
+    ----------
+    match : numpy.array
+        Coordinate matrix of matches to the reference seuqnce (sstart, ssend, qstart, qend).
+    w_start : int
+        Start position for the window.
+    w_end : int
+        End position for the window.
+
+    Returns
+    -------
+    miw : numpy.array
+        Match records overlapping with window..
+    """
+
     matches_in = np.where((match[:,0] < w_end) & (match[:,1] > w_start))
-    return match[matches_in]
+    miw = match[matches_in]
+    miw = miw[miw[:,0].argsort()] # sort by first column
+    return miw
 
-# @njit
 def get_gaps(match):
-    if match.shape[0] == 1:
-        return np.zeros(1, dtype = int)
-    else:
-        gaps = [0]
-        for i in range(1, len(match)):
-            gap1 = match[i,0] - match[i-1, 1]
-            gap2 = match[i,2] - match[i-1, 3]
-            gaps.append(max(gap1, gap2))
-        # gaps = np.array([[match[i-1, 3], match[i, 2]] for i in range(1, len(match))])
-        # return np.concatenate(([0], gaps[:,1] - gaps[:,0]))
-        return np.array(gaps)
+    """
+    Lists gaps in the subject alignment and the query alignment
 
-# @njit
+    Parameters
+    ----------
+    match : numpy.array
+        Coordinate matrix extracted from blast report (sstart, send, qstart, qend).
+
+    Returns
+    -------
+    gaps : numpy.array
+        Array of shape (2, # matches) with the lengths of the gaps between matches.
+        First row is gaps between subject matches.
+        Second row is gaps between query matches.
+
+    """
+    nsegs = match.shape[0]
+    gaps = np.zeros((nsegs, 2), dtype = int)
+    
+    for i in range(1, nsegs):
+        gaps[i-1, 0] = match[i, 0] - match[i-1, 1]
+        gaps[i-1, 1] = match[i, 2] - match[i-1, 3]
+    
+    gaps = gaps.T
+    return gaps
+
 def crop_match(match, w_start, w_end):
-    start_crop = w_start - match[0,0] # if + crop, if - pad
+    """
+    Adjusts the match array to fit the boundaries of the window.
+
+    Parameters
+    ----------
+    match : numpy.array
+        Match coordinates array.
+    w_start : int
+        Start position for the window.
+    w_end : int
+        End position for the window.
+
+    Returns
+    -------
+    cropped : numpy.array
+        Adjusted coordinates array.
+
+    """
+
+    start_crop = w_start - match[0,0] # if - crop, if + pad
     end_crop = w_end - match[-1, 1] # if - crop, if + pad
     
-    cropped_match = match
-    if start_crop >= 0:
-        cropped_match[0, [0, 2]] += start_crop
-    else:
-        start_pad = match[0,2] + start_crop
-        cropped_match = np.concatenate(([[0, match[0, 0], start_pad, start_pad]], match))
-    if end_crop <= 0:
-        cropped_match[-1, [1, 3]] += int(end_crop)
-    else:
-        end_pad = match[-1, 3] + end_crop
-        cropped_match = np.concatenate((match, [[match[-1, 1],0, end_pad, end_pad]]))
-    
-    return cropped_match
+    cropped = match.copy()
 
-# @njit
-def prepare_seq(seq, cropped, max_gap):
+    if start_crop >= 0:
+        # get starting point in query
+        q_start = cropped[0, 2] + start_crop
+        # adjust starting coords
+        cropped[:, 0] = np.where(cropped[:,0] < w_start, w_start, cropped[:,0])
+        cropped[:, 2] = np.where(cropped[:,2] < q_start, q_start, cropped[:,2])
+    else:
+        # add padding at the beginning of the match
+        start_pad = match[0, [0, 2]] + start_crop
+        cropped = np.concatenate(([[0, start_pad[0], start_pad[1], start_pad[1]]], cropped))
+
+    if end_crop <= 0:
+        # get ending point in query
+        q_end = cropped[-1, 3] + end_crop
+        # adjust ending coords
+        cropped[:, 1] = np.where(cropped[:,1] > w_end, w_end, cropped[:,1])
+        cropped[:, 3] = np.where(cropped[:,3] > q_end, q_end, cropped[:,3])
+    else:
+        # add padding at the beginning of the match
+        end_pad = match[-1, [1, 3]] + end_crop
+        cropped = np.concatenate((cropped, [[end_pad[0], 0, end_pad[1], end_pad[1]]]))
+    
+    return cropped
+
+def align_match(seq, cropped, gaps):
+    """
+    Extract the sequence segments given by the cropped match array, add gaps
+    where needed.
+
+    Parameters
+    ----------
+    seq : str
+        Queryequence string.
+    cropped : numpy.array
+        Adjusted coordinates array.
+
+    Returns
+    -------
+    alig : str
+        Aligned sequence.
+    sum_gaps : int
+        Number of gap positions in sequence.
+
+    """
     #TODO: handle superpositions
-    gaps = get_gaps(cropped)
-    if sum(np.where(gaps > 0, gaps, 0)) >= max_gap:
-        return 0
+    alig = ''
+    # gaps = get_gaps(cropped)[0]
+    sum_gaps = sum(np.where(gaps > 0, gaps, 0))
+
     q_coords = cropped[:,[2,3]]
     
-    alig = ''
     gap_char = '-'
+    
     for gp, coo in zip(gaps, q_coords):
-        alig += gap_char * max(0, gp)
-        seg_start = coo[0] - min(0, gp)
+        # start by adding gaps (that's why the gapped array always starts with 0)
+        alig += gap_char * max(0, gp) # number of gaps can only be positive
+        seg_start = coo[0] - min(0, gp) # this solves match overlap in query
         seg_end = coo[1]
         alig += seq[seg_start:seg_end]
-    return alig
+    return alig, sum_gaps
 
-def make_matchdict(tab):
+# second version of match dict, returns a dict of coordinate matrixes (sstart, send, qstart, qend) for each match ordered by sstart
+def make_matchdict(report):
+    """
+    Generate a dictionary with the coordinates array of all matches in the blast report
+
+    Parameters
+    ----------
+    report : pandas.DataFrame
+        BLAST report to base alignment on
+
+    Returns
+    -------
+    matchdict : dict
+        Dictionary of the form query_id:coord_array.
+
+    """
+    qid_array = report['qseqid'].to_numpy(dtype=str)
+    coord_array = report[['sstart', 'send', 'qstart', 'qend']].to_numpy(dtype = int)
+
     matchdict = {}
-    uniq_matches = tab['qseqid'].unique()
+    uniq_qids = np.unique(qid_array)
     
-    for match in uniq_matches:
-        match_matrix = tab.loc[ungapped_tab['qseqid'] == match, ['sstart', 'send', 'qstart', 'qend']].sort_values(by = 'qstart').to_numpy()
-        matchdict[match] = match_matrix
-    
+    for qid in uniq_qids:
+        idx = np.where(qid_array == qid)
+        match_matrix = coord_array[idx]
+        match_matrix = match_matrix[match_matrix[:,0].argsort()]
+        matchdict[qid] = match_matrix
     return matchdict
 
-def align_match(seqid, match, seq, w_start, w_end, max_gap):
-    in_window = match_in_window(match, w_start, w_end)
-    if len(in_window) == 0:
-        return 0
-    else:
-        cropped = crop_match(in_window, w_start, w_end)
-        aligned = prepare_seq(seq, cropped, max_gap)
+#%% classes
+class Windower():
+    def __init__(self, report_file, seqfile):
+        report = load_report(report_file)
+        self.matches = make_matchdict(report)
+        self.seqs = tools.make_seqdict(seqfile)
+        self.__w_start = 0
+        self.__w_end = 0
+    
+    @property
+    def w_start(self):
+        return self.__w_start
+    
+    @w_start.setter
+    def w_start(self, start):
+        if type(start) is int:
+            if start >= 0:
+                self.__w_start = start
+    
+    @property
+    def w_end(self):
+        return self.__w_end
+    
+    @w_end.setter
+    def w_end(self, end):
+        if type(end) is int:
+            if end >= self.w_start:
+                self.__w_end = end
+    
+    def update_window(self, start, end):
+        self.w_start = start
+        self.w_end = end
+    
+    def make_alignment(self):
+        self.aln_dict = {}
+        for seqid, match in self.matches.items():
+            seq = self.seqs[seqid]
+            in_window = match_in_window(match, self.w_start, self.w_end)
+            
+            if len(in_window) == 0:
+                continue
+            cropped = crop_match(in_window, self.w_start, self.w_end)
+            gaps = get_gaps(cropped)
+            self.aln_dict[seqid] = align_match(seq, cropped, gaps[0])
+    
+    def aln_report(self):
+        total_accs = list(self.aln_dict.keys())
+        window_len = self.w_end - self.w_start
+
+        aln_df = pd.DataFrame(index = range(len(total_accs)), columns = ['acc', 'seqlen', 'gaplen', 'seq'])
+
+        for idx, acc in enumerate(total_accs):
+            seq, gaps = self.aln_dict[acc]
+            seqlen = len(seq)
+            aln_df.at[idx] = [acc, seqlen, gaps, seq]
         
-        return aligned
-#%%
-matchdict = make_matchdict(ungapped_tab)
-#%%
-alig = {}
-w_start = 600
-w_end = 700
+        self.normal = aln_df.loc[aln_df['seqlen'] == window_len]
+        self.anormal = aln_df.loc[aln_df['seqlen'] != window_len]
+    
+    def store_alignment(self, prefix = 'alignment', max_gap = 30):
+        filtered = self.normal.loc[self.normal['gaplen'] <= max_gap]
+        records = []
+        for idx, row in filtered.iterrows():
+            acc = row['acc']
+            seq = row['seq']
+            
+            records.append(SeqRecord(Seq(seq), id = acc, name='', description = ''))
 
-max_gap = 30
-
-for seqid, match in matchdict.items():
-    seq = seqdict[seqid]
-    aligned = align_match(seqid, match, seq, w_start, w_end, 50)
-    if aligned != 0:
-        alig[seqid] = aligned
-        # break
-    else:
-        print(0)
+        alignment = msa(records)
+        filename = f'{prefix}_win_{self.w_start}-{self.w_end}_max-gap_{max_gap}.fasta'
+        with open(filename, 'w') as handle:
+            AlignIO.write(alignment, handle, 'fasta')
+        return

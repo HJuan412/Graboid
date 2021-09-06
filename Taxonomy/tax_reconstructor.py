@@ -98,14 +98,14 @@ def build_taxonomies(taxfile, nodesfile, ranks = ['phylum', 'class', 'order', 'f
     """
     tax_tab = pd.read_csv(taxfile)
     nodes = load_nodes(nodesfile)
-    taxonomy_df = pd.DataFrame(index=range(len(tax_tab)), columns = ['ACC'] + ranks)
+    taxonomy_df = pd.DataFrame(index=range(len(tax_tab)), columns = ['ACC', 'ACC short'] + ranks)
     
     for idx, row in tax_tab.iterrows():
         taxonomy_df.at[idx, 'ACC'] = row['1']
         builder = tax_generator(nodes, ranks, row['2'])
         for taxid, rank in builder:
             taxonomy_df.at[idx, rank] = taxid
-    
+    taxonomy_df.at[:, 'ACC short'] = [acc.split('.')[0] for acc in taxonomy_df['ACC']]
     if not outfile is None:
         taxonomy_df.to_csv(outfile)
     return taxonomy_df

@@ -107,5 +107,5 @@ def build_taxonomies(taxfile, nodesfile, ranks = ['phylum', 'class', 'order', 'f
             taxonomy_df.at[idx, rank] = taxid
     taxonomy_df.at[:, 'ACC short'] = [acc.split('.')[0] for acc in taxonomy_df['ACC']]
     if not outfile is None:
-        taxonomy_df.to_csv(outfile)
+        taxonomy_df.to_csv(outfile, index = None)
     return taxonomy_df

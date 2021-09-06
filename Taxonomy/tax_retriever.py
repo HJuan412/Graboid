@@ -13,7 +13,7 @@ import sys
 sys.path.append('../') # do this to import toolkit
 import toolkit as tools
 
-def make_taxid_tab(seqfile, acc2taxtab1, acc2taxtab2, outfile):
+def make_taxid_tab(seqfile, acc2taxtab1, acc2taxtab2, outfile = 'taxIDs.tab'):
     # get accessions present in fasta file
     seqdict = tools.make_seqdict(seqfile)
     acc_list = list(seqdict.keys())

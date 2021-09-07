@@ -28,20 +28,22 @@ def get_case(string_vals):
 #%%
 class alignment_loader():
     # Loads an alignment file in fasta format, converts it to a numpy array
-    def __init__(self, filename):
-        self.load_aln(filename)
+    def __init__(self, alnfile, taxfile):
+        self.load_aln(alnfile)
         self.aln_to_array()
         self.make_trans_dict()
         self.aln_to_numeric()
+        self.get_taxonomy(taxfile)
     
-    def load_aln(self, filename):
-        #TODO: enable other formats
-        with open(filename, 'r') as handle:
+    def load_aln(self, alnfile):
+        #TODO: enable other formats. (jariola)
+        with open(alnfile, 'r') as handle:
             self.alignment = AlignIO.read(handle, 'fasta')
 
     def aln_to_array(self):
-        self.acc_list = [seq.id for seq in self.alignment]
-        self.aln_array = np.array([list(seq.seq) for seq in alignment])
+        # self.acc_list = [seq.id for seq in self.alignment]
+        self.acc_list = [seq.id.split('.')[0] for seq in self.alignment]
+        self.aln_array = np.array([list(seq.seq) for seq in self.alignment])
 
     def make_trans_dict(self):
         self.translation_dict = {}
@@ -66,7 +68,15 @@ class alignment_loader():
         
         self.numeric_aln = numeric_aln
     
-    #TODO: add taxonomy codes
+    def get_taxonomy(self, taxfile):
+        taxonomy_df = pd.read_csv(taxfile, index_col = 'ACC short') # table containing taxonomies of all organisms in the database
+        # get intersection of organisms in alignment and organisms in table
+        acc_idx = set(taxonomy_df.index.to_list())
+        acc_aln = set(self.acc_list)
+        self.acc_in = list(acc_aln.intersection(acc_idx))
+        # select taxonomy codes
+        taxes_selected = taxonomy_df.loc[self.acc_in].fillna(0)
+        self.taxonomy_codes = taxes_selected.iloc[:,1:].to_numpy(dtype = int)
 
 class alignment_handler(alignment_loader):
     # TODO: this method will handle taxon and position filtering
@@ -88,12 +98,9 @@ align_number = report_df.iloc[0].name
 obj_wstart = align_number * 16
 obj_file = bacon.filetab.loc[bacon.filetab['wstart'] == obj_wstart].iloc[0,-1]
 
-#%%
-from Bio import AlignIO
-from Bio.Seq import Seq
-from Bio.SeqRecord import SeqRecord
+#%% test loader
 
 alnfile = f'{datadir}/{obj_file}'
+taxfile = '/home/hernan/PROYECTOS/Graboid/Taxonomy/Taxonomies.tab'
 
-with open(alnfile, 'r') as handle:
-    alignment = AlignIO.read(handle, 'fasta')
+loader = alignment_loader(alnfile, taxfile)

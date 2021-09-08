@@ -38,12 +38,11 @@ def entropy(matrix):
 #%%
 class alignment_loader():
     # Loads an alignment file in fasta format, converts it to a numpy array
-    def __init__(self, alnfile, taxfile):
+    def __init__(self, alnfile):
         self.load_aln(alnfile)
         self.aln_to_array()
         self.make_trans_dict()
         self.aln_to_numeric()
-        self.get_taxonomy(taxfile)
     
     def load_aln(self, alnfile):
         #TODO: enable other formats. (jariola)
@@ -77,90 +76,115 @@ class alignment_loader():
                 numeric_aln[idx] = np.where(aln == val, num_val, numeric_aln[idx])
         
         self.numeric_aln = numeric_aln
-    
-    def get_taxonomy(self, taxfile):
-        taxonomy_df = pd.read_csv(taxfile, index_col = 'ACC short') # table containing taxonomies of all organisms in the database
-        # get intersection of organisms in alignment and organisms in table
-        acc_idx = set(taxonomy_df.index.to_list())
-        acc_aln = set(self.acc_list)
-        self.acc_in = list(acc_aln.intersection(acc_idx))
-        # select taxonomy codes
-        taxes_selected = taxonomy_df.loc[self.acc_in].fillna(0)
-        self.taxonomy_codes = taxes_selected.iloc[:,1:].to_numpy(dtype = int)
 
-class alignment_handler(alignment_loader):
+class alignment_handler():
     def __init__(self, alnfile, taxfile):
-        alignment_loader.__init__(self, alnfile, taxfile)
-        self.locate_seqs()
-    
-    def locate_seqs(self):
-        # select only sequences that have a taxonomic code
-        acc_array = np.array(self.acc_list)
-        indexes = [np.where(acc_array == idx)[0][0] for idx in self.acc_in]
-        self.selected = self.numeric_aln[indexes]
-        self.selected_taxonomy = self.taxonomy_codes
-        self.selected_accs = np.array(self.acc_in)
-    
-    def get_orgs(self, tax, rank):
-        # get a subset of organisms belonging to the given taxon at the given rank
-        tax_idx = self.get_inds_idx(tax, rank)
-        return self.selected[tax_idx]
-    
-    def get_inds_idx(self, tax, rank):
-        # get the index of all organism belonging to the given taxon at the given rank
-        # tax can be a single entry or an array with multiple elements
-        ind_idx = np.where(np.isin(self.selected_taxonomy[:,rank], tax))
-        return ind_idx
+        # loader object used to get the alignment data in
+        # numeric form, stores matrix in a dataframe (using short accession as
+        # index) to facilitate joint manipulation with taxonomy table.
+        loader = alignment_loader(alnfile)
+        self.alignment_tab = pd.DataFrame(index = loader.acc_list, data = loader.numeric_aln)
+        # loads taxonomy table (converts to int) with short accessions as index
+        tax_tab = pd.read_csv(taxfile, index_col = 'ACC short')
+        self.taxonomy_tab = tax_tab.iloc[:,1:].fillna(0).astype(int)
+        # get intersection of alignment and taxonomy tables
+        aln_idx = set(self.alignment_tab.index)
+        tax_idx = set(tax_tab.index)
+        self.acc_in = aln_idx.intersection(tax_idx) # accessions both in alignment and taxonomy table
 
-    def select_data(self, ntaxes, rank, nbases):
-        # generate the data matrix to be used in the graboid pipeline
-        # select the ntaxes most populated taxes at the given rank
-        # select the nbases most populated bases
-        self.ntaxes = ntaxes
+        self.clear_selection()        
+
+    def clear_selection(self):
+        # resets selection
+        self.selected_acc = self.acc_in
+        self.selected_data = self.alignment_tab.loc[self.acc_in]
+        self.selected_taxonomy = self.taxonomy_tab.loc[self.acc_in]
+    
+    def set_parameters(self, ntax, rank, nbase):
+        # set selection parameters, called from data_selection
+        self.ntax = ntax
         self.rank = rank
-        self.nbases = nbases
-        
-        # clean slate data matrix
-        self.locate_seqs()
-        
-        # select taxes
-        self.get_taxes()
-        self.org_idx = self.get_inds_idx(self.selected_tax, self.rank)
-        # self.selected = self.get_orgs(self.selected_tax, self.rank)
-        self.selected = self.selected[self.org_idx]
-        self.selected_taxonomy = self.selected_taxonomy[self.org_idx]
-        self.selected_accs = self.selected_accs[self.org_idx]
-        
-        # select bases
-        self.get_bases()
-        self.selected = self.selected[:, self.selected_base_idx]
-    
-    def get_taxes(self):
-        # generates list of the ntaxes most populated taxes
-        # count each tax
-        tax_count = np.array(np.unique(self.taxonomy_codes[:,self.rank], return_counts=True))
-        # delete empty clade
-        to_del = np.where(tax_count[0] <= 0)
-        tax_count = np.delete(tax_count, to_del, axis = 1)
-        # sort remaining counts in decreasing order and retrieve the first ntaxes
-        sorted_count_idx = np.argsort(tax_count[1])[::-1]
-        selected_tax_idx = sorted_count_idx[:self.ntaxes]
-        self.selected_tax = tax_count[0][selected_tax_idx]
+        self.nbase = nbase
 
-    def get_bases(self):
-        general_entropy = entropy(self.selected) # entropy of each base for the given matrix
-        per_taxon_entropy = np.zeros((self.ntaxes, self.selected.shape[1])) # entropy for each base for each of the selected taxons
+    def select_taxons(self):
+        # select the ntax most populated taxons, called from data_selection
+        tax_count = self.selected_taxonomy[self.rank].value_counts(ascending = False)
+        if 0 in tax_count.index:
+            tax_count.drop(0, inplace = True)
+        self.selected_taxons = list(tax_count.iloc[:self.ntax].index)
+        self.selected_accs = self.select_inds(self.selected_taxons)
+    
+    def select_inds(self, tax_list):
+        # get a list of selected individuals (those whose taxon at the set rank are in the given tax_list), called from data_selection
+        selected_inds = list(self.selected_taxonomy.loc[self.selected_taxonomy[self.rank].isin(tax_list)].index)
+        return selected_inds
+
+    def select_bases(self):
+        # select the nbase most informative bases, called from data_selection, AFTER selecting taxons and individuals
+        general_entropy = entropy(self.selected_data.loc[self.selected_accs].to_numpy()) # entropy of each base for the given matrix
+        per_taxon_entropy = np.zeros((self.ntax, self.selected_data.shape[1])) # entropy for each base for each of the selected taxons
             
         # calculate entropy within each taxon
-        for idx, taxon in enumerate(self.selected_tax):
-            orgs = self.get_orgs(taxon, self.rank)
-            per_taxon_entropy[idx] = entropy(orgs)
+        for idx, taxon in enumerate(self.selected_taxons):
+            orgs = self.select_inds([taxon])
+            per_taxon_entropy[idx] = entropy(self.selected_data.loc[orgs].to_numpy())
         
-        # get entropy differences intra/inter taxon
-        entropy_diff = per_taxon_entropy - general_entropy
-        diff_sort = np.argsort(entropy_diff, 1)
+        ############### TESTING OTHER BLOCK
+        # # get entropy differences intra/inter taxon for each base, sort in each taxon
+        # entropy_diff = per_taxon_entropy - general_entropy
+        # diff_sort = np.argsort(entropy_diff, 1)
         
-        self.selected_base_idx = np.unique(diff_sort[:,-self.nbases:]) # store the column indexes of the selected bases
+        # # select the nbase most informative columns in each taxon
+        # # as the selected columns may not be the same for each taxon, the
+        # # final vector is usually larger than nbase
+        # self.selected_base_idx = np.unique(diff_sort[:,:self.nbase]) # store the column indexes of the selected bases
+        ###############
+
+        # get entropy differences intra/inter taxon for each base, sort in each taxon
+        gain = general_entropy - per_taxon_entropy # we want per_taxon_entropy to be smaller than general entropy (bigger is better)
+        gain_sort = np.argsort(gain, 1) # ascending sort, we want the largest values
+        
+        # select the nbase most informative columns in each taxon
+        # as the selected columns may not be the same for each taxon, the
+        # final vector is usually larger than nbase
+        
+        #TODO define which is best, last nbase or first nbase
+        # self.selected_base_idx = np.unique(gain_sort[:,-self.nbase:]) # store the column indexes of the selected bases
+        self.selected_base_idx = np.unique(gain_sort[:,:self.nbase])
+
+    def data_selection(self, ntax, rank, nbase):
+        """
+        Crops the data matrix to select the n most populated taxons and the m
+        most informative bases for each of them.
+
+        Parameters
+        ----------
+        ntax : int
+            Number of taxons to keep.
+        rank : str
+            Taxonomic rank to filter by.
+        nbase : int
+            Number of informative bases to keep per taxon.
+        -------
+        data_selected : pandas.DataFrame
+            Cropped data matrix, containing the individuals belonging to the
+            filtered taxons and the informative bases selected.
+        taxonomy_selected : pandas.DataFrame
+            Taxonomic codes for the selected individuals.
+
+        """
+        self.clear_selection()
+        self.set_parameters(ntax, rank, nbase)
+        self.select_taxons()
+        self.select_bases()
+        
+        data_selected = self.selected_data.loc[self.selected_accs, self.selected_base_idx]
+        taxonomy_selected = self.selected_taxonomy.loc[self.selected_accs]
+        return data_selected, taxonomy_selected
+    
+    def list_ranks(self):
+        # Display taxonomic ranks available to filter by
+        return list(self.taxonomy_tab.columns)
 
 
 #%% get best file
@@ -185,76 +209,12 @@ if __name__ == '__main__':
     
     loader = alignment_loader(alnfile, taxfile)
     handler = alignment_handler(alnfile, taxfile)
-    #%%    
-class alignment_handler2():
-    def __init__(self, alnfile, taxfile):
-        loader = alignment_loader(alnfile, taxfile)
-        self.alignment_tab = pd.DataFrame(index = loader.acc_list, data = loader.numeric_aln)
-        tax_tab = pd.read_csv(taxfile, index_col = 'ACC short')
-        self.taxonomy_tab = tax_tab.iloc[:,1:].fillna(0).astype(int)
-
-        aln_idx = set(self.alignment_tab.index)
-        tax_idx = set(tax_tab.index)
-        self.acc_in = aln_idx.intersection(tax_idx) # accessions both in alignment and taxonomy table
-
-        self.clear_selection()        
-
-    def clear_selection(self):
-        self.selected_acc = self.acc_in
-        self.selected_data = self.alignment_tab.loc[self.acc_in]
-        self.selected_taxonomy = self.taxonomy_tab.loc[self.acc_in]
-    
-    def set_parameters(self, ntax, rank, nbase):
-        self.ntax = ntax
-        self.rank = rank
-        self.nbase = nbase
-
-    def select_taxons(self):
-        tax_count = self.selected_taxonomy[self.rank].value_counts(ascending = False)
-        if 0 in tax_count.index:
-            tax_count.drop(0, inplace = True)
-        self.selected_taxons = list(tax_count.iloc[:self.ntax].index)
-        self.selected_accs = self.select_inds(self.selected_taxons)
-    
-    def select_inds(self, tax_list):
-        selected_inds = list(self.selected_taxonomy.loc[self.selected_taxonomy[self.rank].isin(tax_list)].index)
-        return selected_inds
-
-    def select_bases(self):
-        general_entropy = entropy(self.selected_data.loc[self.selected_accs].to_numpy()) # entropy of each base for the given matrix
-        per_taxon_entropy = np.zeros((self.ntax, self.selected_data.shape[1])) # entropy for each base for each of the selected taxons
-            
-        # calculate entropy within each taxon
-        for idx, taxon in enumerate(self.selected_taxons):
-            orgs = self.select_inds([taxon])
-            per_taxon_entropy[idx] = entropy(self.selected_data.loc[orgs].to_numpy())
-        
-        # get entropy differences intra/inter taxon
-        entropy_diff = per_taxon_entropy - general_entropy
-        diff_sort = np.argsort(entropy_diff, 1)
-        
-        self.selected_base_idx = np.unique(diff_sort[:,-self.nbase:]) # store the column indexes of the selected bases
-
-    def data_selection(self, ntax, rank, nbase):
-        self.clear_selection()
-        self.set_parameters(ntax, rank, nbase)
-        self.select_taxons()
-        self.select_bases()
-        
-        return self.selected_data.loc[self.selected_accs, self.selected_base_idx]
-
 #%%
-import time
-
-t0 = time.time()
-handler = alignment_handler(alnfile, taxfile)
-for i in range(100):
-    handler.select_data(20, 3, 5)
-t1 = time.time()
-print(f'handler done in {t1 - t0}')
-t0 = time.time()
-handler2 = alignment_handler2(alnfile, taxfile)
-for i in range(100):
-    data = handler2.data_selection(20, 'family', 5)
-t1 = time.time()
-print(f'handler2 done in {t1 - t0}')
+    import time
+    
+    t0 = time.time()
+    handler = alignment_handler(alnfile, taxfile)
+    for i in range(100):
+        handler.select_data(20, 3, 5)
+    t1 = time.time()
+    print(f'handler done in {t1 - t0}')

@@ -126,84 +126,85 @@ def jacknife_classify(data, matrix, k, labels):
     return classifications
 
 #%% main
-import data_preprocess as dp
-
-alnfile = 'Test_data/nem_18S_win_100_step_16/nem-18S_win_272-372_max-gap_10.fasta'
-taxfile = '/home/hernan/PROYECTOS/Graboid/Taxonomy/Taxonomies.tab'
-
-handler = dp.alignment_handler(alnfile, taxfile)
-
-M = cost_matrix()
-
-rank = 'family'
-ntax = 20
-nbase = 10
-
-# select data
-selected_data, selected_taxonomy = handler.data_selection(ntax, rank, nbase)
-
-#%%
-query = selected_data.iloc[0].to_numpy()
-query_lab = selected_taxonomy.iloc[0,3]
-references = selected_data.iloc[1:].to_numpy()
-labels = selected_taxonomy.iloc[1:, 3].to_numpy()
-k = 5
-#%%
-classifications = jacknife_classify(selected_data.to_numpy(), M, k, selected_taxonomy['family'].to_numpy())
-
-#%%mets
-classif = np.array(classifications)
-taxons = handler.selected_taxons
-n_taxons = len(taxons)
-true_labels = selected_taxonomy.iloc[:, 3].to_numpy()
-total_inds = len(true_labels)
-
-# wrong one
-confusion_mat = np.zeros((len(taxons), 4)) # TP, TN, FP, FN
-
-for idx, tax in enumerate(taxons):
-    # true pos
-    tp_idx = np.where(true_labels == tax)[0]
-    tn_idx = np.where(true_labels != tax)[0]
+if __name__ == '__main__':
+    import data_preprocess as dp
     
-    true_pos = len(np.where(classif[tp_idx] == tax)[0])
-    true_neg = len(np.where(classif[tn_idx] != tax)[0])
-    false_pos = len(np.where(classif[tn_idx] == tax)[0])
-    false_neg = len(np.where(classif[tp_idx] != tax)[0])
+    alnfile = 'Test_data/nem_18S_win_100_step_16/nem-18S_win_272-372_max-gap_10.fasta'
+    taxfile = '/home/hernan/PROYECTOS/Graboid/Taxonomy/Taxonomies.tab'
     
-    confusion_mat[idx,:] = [true_pos, true_neg, false_pos, false_neg]
-
-acc_mat = (confusion_mat[:,0] + confusion_mat[:,1]) / total_inds
-prec_mat = (confusion_mat[:,0]) / (confusion_mat[:,0] + confusion_mat[:,2])
-rec_mat = (confusion_mat[:,0]) / (confusion_mat[:,0] + confusion_mat[:,3])
-
-confusion = np.zeros((n_taxons, n_taxons))
-
-for idx0, tax0 in enumerate(taxons):
-    actual_idx = np.where(true_labels == tax0)[0]
-    predicted_values = classif[actual_idx]
-    for idx1, tax1 in enumerate(taxons):
-        n_predicted = len(np.where(predicted_values == tax1)[0])
-        confusion[idx0, idx1] = n_predicted
-total_true = confusion.sum(1)
-total_predicted = confusion.sum(0)
-
-# metrics
-accuracy = np.zeros(n_taxons)
-precision = np.zeros(n_taxons)
-recall = np.zeros(n_taxons)
-
-for idx, tax in enumerate(taxons):
-    true_pos = confusion[idx, idx]
-    true_neg = np.delete(np.delete(confusion, idx, 0), idx, 1).sum()
-    false_pos = np.delete(confusion[:,idx], idx).sum()
-    false_neg = np.delete(confusion[idx], idx).sum()
+    handler = dp.alignment_handler(alnfile, taxfile)
     
-    accuracy[idx] = (true_pos + true_neg) / total_inds
-    precision[idx] = true_pos / (true_pos + false_pos)
-    recall[idx] = true_pos / (true_pos + false_neg)
-
-f1 = 2 * (precision * recall) / (precision + recall)
+    M = cost_matrix()
+    
+    rank = 'family'
+    ntax = 20
+    nbase = 10
+    
+    # select data
+    selected_data, selected_taxonomy = handler.data_selection(ntax, rank, nbase)
+    
+    #%%
+    query = selected_data.iloc[0].to_numpy()
+    query_lab = selected_taxonomy.iloc[0,3]
+    references = selected_data.iloc[1:].to_numpy()
+    labels = selected_taxonomy.iloc[1:, 3].to_numpy()
+    k = 5
+    #%%
+    classifications = jacknife_classify(selected_data.to_numpy(), M, k, selected_taxonomy['family'].to_numpy())
+    
+    #%%mets
+    classif = np.array(classifications)
+    taxons = handler.selected_taxons
+    n_taxons = len(taxons)
+    true_labels = selected_taxonomy.iloc[:, 3].to_numpy()
+    total_inds = len(true_labels)
+    
+    # wrong one
+    confusion_mat = np.zeros((len(taxons), 4)) # TP, TN, FP, FN
+    
+    for idx, tax in enumerate(taxons):
+        # true pos
+        tp_idx = np.where(true_labels == tax)[0]
+        tn_idx = np.where(true_labels != tax)[0]
+        
+        true_pos = len(np.where(classif[tp_idx] == tax)[0])
+        true_neg = len(np.where(classif[tn_idx] != tax)[0])
+        false_pos = len(np.where(classif[tn_idx] == tax)[0])
+        false_neg = len(np.where(classif[tp_idx] != tax)[0])
+        
+        confusion_mat[idx,:] = [true_pos, true_neg, false_pos, false_neg]
+    
+    acc_mat = (confusion_mat[:,0] + confusion_mat[:,1]) / total_inds
+    prec_mat = (confusion_mat[:,0]) / (confusion_mat[:,0] + confusion_mat[:,2])
+    rec_mat = (confusion_mat[:,0]) / (confusion_mat[:,0] + confusion_mat[:,3])
+    
+    confusion = np.zeros((n_taxons, n_taxons))
+    
+    for idx0, tax0 in enumerate(taxons):
+        actual_idx = np.where(true_labels == tax0)[0]
+        predicted_values = classif[actual_idx]
+        for idx1, tax1 in enumerate(taxons):
+            n_predicted = len(np.where(predicted_values == tax1)[0])
+            confusion[idx0, idx1] = n_predicted
+    total_true = confusion.sum(1)
+    total_predicted = confusion.sum(0)
+    
+    # metrics
+    accuracy = np.zeros(n_taxons)
+    precision = np.zeros(n_taxons)
+    recall = np.zeros(n_taxons)
+    
+    for idx, tax in enumerate(taxons):
+        true_pos = confusion[idx, idx]
+        true_neg = np.delete(np.delete(confusion, idx, 0), idx, 1).sum()
+        false_pos = np.delete(confusion[:,idx], idx).sum()
+        false_neg = np.delete(confusion[idx], idx).sum()
+        
+        accuracy[idx] = (true_pos + true_neg) / total_inds
+        precision[idx] = true_pos / (true_pos + false_pos)
+        recall[idx] = true_pos / (true_pos + false_neg)
+    
+    f1 = 2 * (precision * recall) / (precision + recall)
 #%% MOVE to director
 # var_dict = {}
 

@@ -46,6 +46,12 @@ def load_names(namesfile):
     names.set_index('tax_id', inplace = True)
     return names
 
+def retrieve_names(name_tab, name_list):
+    sub_tab = name_tab.loc[name_tab[0].isin(name_list)]
+    sci_tab = sub_tab.loc[sub_tab[3] == 'scientific name']
+    sci_tab.set_index(0, inplace = True)
+    return sci_tab[1]
+
 def tax_generator(nodes, ranks, taxid):
     """
     Retrieves the taxon IDs for a specified set of ranks in an organism's taxonomy.

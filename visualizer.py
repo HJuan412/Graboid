@@ -55,6 +55,7 @@ def get_metrics(confusion):
     
     return np.array([accuracy, precision, recall, f1])
 
+#TODO: Agrupar taxones por rango superior
 def graph_confusion(classifications, labels, taxons, names_tab, figsize = (12, 12)):
     # classifications: list returned by jacknife classify
     # labels: selected_taxonomy[rank].to_numpy()

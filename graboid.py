@@ -7,13 +7,9 @@ Taxonomy classification of alignment sequences using KNN method
 """
 
 #%% modules
-from concurrent.futures import ProcessPoolExecutor
-from glob import glob
 from multiprocessing import Pool, Array, RawArray, Value
 from numba import njit
 import numpy as np
-import pandas as pd
-import time
 
 #%% functions
 # replacement cost matrix
@@ -86,7 +82,7 @@ def cost_matrix(transition = 1, transversion = 2):
                 for b2 in fasta_idx[k2]:
                     dists.append(short_dist[b1, b2])
             full_dist[idx1, idx2] = np.average(dists)
-    return np.array(full_dist, dtype = np.float32)
+    return np.array(full_dist, dtype = np.float64)
 
 @njit
 def get_dist(query, reference, matrix):
@@ -108,8 +104,30 @@ def get_k_neighs(query, references, matrix, k):
     nearest_neighs = np.argsort(distances)[:k]
     return nearest_neighs, distances
 
+@njit
+def get_sorted_neighs(query, references, matrix):
+    # returns the indexes of the neighbouring references, sorted by distances
+    # also returns distances
+    n_refs = references.shape[0]
+    distances = np.zeros(n_refs)
+    
+    for idx, ref in enumerate(references):
+        distances[idx] = get_dist(query, ref, matrix)
+    
+    dist_sort = np.argsort(distances)
+    return dist_sort, distances[dist_sort]
+
 def classify(query, references, matrix, k, labels):
     nearest_neighs, distances = get_k_neighs(query, references, matrix, k)
+
+    neigh_labels = np.unique(labels[nearest_neighs], return_counts = True)
+    winner_idx = np.argsort(neigh_labels[1])[-1]
+    classification = neigh_labels[0][winner_idx]
+    return classification
+
+def classify2(query, references, matrix, k, labels):
+    neighs, distances = get_sorted_neighs(query, references, matrix)
+    nearest_neighs = neighs[:k]
 
     neigh_labels = np.unique(labels[nearest_neighs], return_counts = True)
     winner_idx = np.argsort(neigh_labels[1])[-1]
@@ -127,6 +145,7 @@ def jacknife_classify(data, matrix, k, labels):
 
 #%% main
 if __name__ == '__main__':
+    import time
     import data_preprocess as dp
     
     alnfile = 'Test_data/nem_18S_win_100_step_16/nem-18S_win_272-372_max-gap_10.fasta'
@@ -135,98 +154,46 @@ if __name__ == '__main__':
     handler = dp.alignment_handler(alnfile, taxfile)
     
     M = cost_matrix()
-    
+#%%
+
     rank = 'family'
+    
+    ntax_range = np.arange(10, 41, 5)
+    nbase_range = np.arange(5, 21, 3)
+    times_record = []
+    
+    # for nbase in nbase_range:
+        # print(nbase)
     ntax = 20
     nbase = 10
     
     # select data
     selected_data, selected_taxonomy = handler.data_selection(ntax, rank, nbase)
     
-    #%%
-    query = selected_data.iloc[0].to_numpy()
-    query_lab = selected_taxonomy.iloc[0,3]
-    references = selected_data.iloc[1:].to_numpy()
-    labels = selected_taxonomy.iloc[1:, 3].to_numpy()
     k = 5
+    # #%
+    # t0 = time.time()
+    # classifications = jacknife_classify(selected_data.to_numpy(), M, k, selected_taxonomy['family'].to_numpy())
+    # t1 = time.time()
+    # times_record.append(t1 - t0)
+    
+    data_mat = selected_data.to_numpy()
+    tax_mat = selected_taxonomy.to_numpy()
+    query = data_mat[0]
+    query_lab = tax_mat[0]
+    ref = data_mat[1:]
+    ref_labs = tax_mat[1:]
+    
+    t0 = time.time()
+    nn, dist = get_k_neighs(query, ref, M, k)
+    t1 = time.time()
+    
+    elapsed = t1 - t0
     #%%
-    classifications = jacknife_classify(selected_data.to_numpy(), M, k, selected_taxonomy['family'].to_numpy())
-    
-    #%%mets
-    classif = np.array(classifications)
-    taxons = handler.selected_taxons
-    n_taxons = len(taxons)
-    true_labels = selected_taxonomy.iloc[:, 3].to_numpy()
-    total_inds = len(true_labels)
-    
-    # wrong one
-    confusion_mat = np.zeros((len(taxons), 4)) # TP, TN, FP, FN
-    
-    for idx, tax in enumerate(taxons):
-        # true pos
-        tp_idx = np.where(true_labels == tax)[0]
-        tn_idx = np.where(true_labels != tax)[0]
-        
-        true_pos = len(np.where(classif[tp_idx] == tax)[0])
-        true_neg = len(np.where(classif[tn_idx] != tax)[0])
-        false_pos = len(np.where(classif[tn_idx] == tax)[0])
-        false_neg = len(np.where(classif[tp_idx] != tax)[0])
-        
-        confusion_mat[idx,:] = [true_pos, true_neg, false_pos, false_neg]
-    
-    acc_mat = (confusion_mat[:,0] + confusion_mat[:,1]) / total_inds
-    prec_mat = (confusion_mat[:,0]) / (confusion_mat[:,0] + confusion_mat[:,2])
-    rec_mat = (confusion_mat[:,0]) / (confusion_mat[:,0] + confusion_mat[:,3])
-    
-    confusion = np.zeros((n_taxons, n_taxons))
-    
-    for idx0, tax0 in enumerate(taxons):
-        actual_idx = np.where(true_labels == tax0)[0]
-        predicted_values = classif[actual_idx]
-        for idx1, tax1 in enumerate(taxons):
-            n_predicted = len(np.where(predicted_values == tax1)[0])
-            confusion[idx0, idx1] = n_predicted
-    total_true = confusion.sum(1)
-    total_predicted = confusion.sum(0)
-    
-    # metrics
-    accuracy = np.zeros(n_taxons)
-    precision = np.zeros(n_taxons)
-    recall = np.zeros(n_taxons)
-    
-    for idx, tax in enumerate(taxons):
-        true_pos = confusion[idx, idx]
-        true_neg = np.delete(np.delete(confusion, idx, 0), idx, 1).sum()
-        false_pos = np.delete(confusion[:,idx], idx).sum()
-        false_neg = np.delete(confusion[idx], idx).sum()
-        
-        accuracy[idx] = (true_pos + true_neg) / total_inds
-        precision[idx] = true_pos / (true_pos + false_pos)
-        recall[idx] = true_pos / (true_pos + false_neg)
-    
-    f1 = 2 * (precision * recall) / (precision + recall)
+    import matplotlib.pyplot as plt
+    plt.plot(nbase_range, times_record)
 #%% MOVE to director
-# var_dict = {}
 
-# def init_worker(data, data_shape, M, M_shape, label_data, k):
-#     # this is executed at the start of each process, stores the data matrix and its shape in global variables
-#     var_dict['data'] = data
-#     var_dict['data_shape'] = data_shape
-#     var_dict['cost_mat'] = M
-#     var_dict['mat_shape'] = M_shape
-#     var_dict['labels'] = label_data
-#     var_dict['K'] = k
-
-# def jacknife_worker(query_idx):
-#     data = np.frombuffer(var_dict['data']).reshape(var_dict['data_shape']).astype(int)
-#     labels = np.array(var_dict['labels']).astype(int)
-#     M = np.frombuffer(var_dict['cost_mat']).reshape(var_dict['mat_shape']).astype(float)
-#     K = var_dict['K']
-    
-#     data2 = np.delete(data, query_idx, 0)
-#     query = data[query_idx]
-#     classification = classify(query, data2, M, K, labels)
-#     return query_idx, classification
 
 # #jacknife
 # if __name__ == '__main__':

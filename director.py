@@ -38,29 +38,62 @@ metrics = vis.get_metrics(confusion)
 
 vis.graph_confusion(classifications, selected_taxonomy[rank], handler.selected_taxons, names_tab)
 
-#%% paralell testing
-var_dict = {}
+#%% multithreading test
+import time
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
-def init_worker(data, M, label_data, k):
-    # this is executed at the start of each process, stores the data matrix and its shape in global variables
-    var_dict['data'] = data
-    var_dict['data_shape'] = np.array(data.shape)
-    var_dict['cost_mat'] = M.astype('float64')
-    var_dict['mat_shape'] = np.array(M.shape)
-    var_dict['labels'] = label_data
-    var_dict['K'] = np.array(k)
+# def jacknife_worker(query_idx):
+#     # this function replaces the one in the graboid library, its only argument is the query index, as it takes the reference data, labels and cost matrix from the current namespace
+#     query = data[query_idx]
+#     references = np.delete(data, query_idx, 0)
+#     labels = np.delete(tax_labels, query_idx)
+#     return graboid.classify2(query, references, M, k, labels)
 
-def jacknife_worker(query_idx):
-    data_shape = np.frombuffer(var_dict['data_shape'], dtype = int)
-    data = np.frombuffer(var_dict['data'], dtype = int).reshape(data_shape)
-    labels = np.array(var_dict['labels'], dtype = int)
-    mat_shape = np.frombuffer(var_dict['mat_shape'], dtype = int)
-    M = np.frombuffer(var_dict['cost_mat'], dtype = float).reshape(mat_shape)
-    K = np.frombuffer(var_dict['K'], dtype = int)[0]
-    
-    data2 = np.delete(data, query_idx, 0)
-    query = data[query_idx]
-    classification = graboid.classify2(query, data2, M, K, labels)
-    return query_idx, classification
-#%%
-qidx, classif = jacknife_worker(0)
+#%% serial test
+time_tab = pd.DataFrame(columns = ['ntax', 'nbase', 'Mode', 'Time'])
+for ntax in np.arange(10, 51, 10):
+    for nbase in np.arange(3, 31, 2):
+        print(f'{ntax}, {nbase}')
+        selected_data, selected_taxonomy = handler.data_selection(ntax, rank, nbase)
+        tax_labels = selected_taxonomy['family'].to_numpy()
+        data = selected_data.to_numpy()
+        
+        def jacknife_worker(query_idx):
+            # this function replaces the one in the graboid library, its only argument is the query index, as it takes the reference data, labels and cost matrix from the current namespace
+            query = data[query_idx]
+            references = np.delete(data, query_idx, 0)
+            labels = np.delete(tax_labels, query_idx)
+            return graboid.classify2(query, references, M, k, labels)
+        # serial test
+        t0 = time.time()
+        serial_classif = [jacknife_worker(i) for i in range(data.shape[0])]
+        t1 = time.time()
+        
+        elapsed = t1-t0
+        time_tab = time_tab.append({'ntax':ntax, 'nbase':nbase, 'Mode':'serial', 'Time':elapsed}, ignore_index=True)
+
+        # parallel test
+        t0 = time.time()
+        with ProcessPoolExecutor() as executor:
+            parallel_classif = [classif for classif in executor.map(jacknife_worker, range(data.shape[0]))]
+        t1 = time.time()
+        elapsed = t1 - t0
+        time_tab = time_tab.append({'ntax':ntax, 'nbase':nbase, 'Mode':'parallel', 'Time':elapsed}, ignore_index=True)
+
+#%% plot results
+import matplotlib.pyplot as plt
+
+# sort by ntax
+sort_by = 'nbase'
+x_var = 'ntax'
+n = 15
+serial = time_tab.loc[(time_tab[sort_by] == n) & (time_tab['Mode'] == 'serial'), 'Time'].to_numpy()
+parallel = time_tab.loc[(time_tab[sort_by] == n) & (time_tab['Mode'] == 'parallel'), 'Time'].to_numpy()
+X = time_tab.loc[(time_tab[sort_by] == n) & (time_tab['Mode'] == 'serial'), x_var].to_numpy()
+
+fig, ax = plt.subplots()
+ax.plot(X, serial, label = 'serial')
+ax.plot(X, parallel, label = 'parallel')
+ax.legend()
+ax.set_xlabel(x_var)
+ax.set_ylabel('time')

@@ -54,7 +54,7 @@ for taxon in taxons:
     bold_tab = pd.read_csv(bold_file, sep = '\t',encoding = 'latin-1') # latin-1 to parse BOLD files
     bold_accs = set(bold_tab['sampleid'])
     core_accs = set(tax_tab.loc[tax_tab['Marker'] == 'COI', 'Accession'])
-    bold_tab = pd.DataFrame({'Taxon':taxon, 'Marker':'COI', 'Database':'ENA', 'Accession':list(bold_accs.difference(core_accs))})
+    bold_tab = pd.DataFrame({'Taxon':taxon, 'Marker':'COI', 'Database':'BOLD', 'Accession':list(bold_accs.difference(core_accs))})
     tax_tab = pd.concat([tax_tab, bold_tab])
 
     acc_tab = pd.concat([acc_tab, tax_tab])

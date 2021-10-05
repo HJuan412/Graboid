@@ -16,10 +16,12 @@ summary_dir = '/home/hernan/PROYECTOS/Graboid/Databases/22_9_2021-11_54_51/Summa
 #%% functions
 # file managing
 def list_summ_files(summ_dir):
+    # generate list of summary files (*summ) present in the given directory
     summ_files = glob(f'{summ_dir}/*summ')
     return summ_files
 
 def build_summ_tab(summ_files):
+    # generate information table for the summary files
     # get taxon, marker, database and path information for each file
     summ_tab = pd.DataFrame(columns = ['Taxon', 'Marker', 'Database', 'File'])
     
@@ -32,18 +34,26 @@ def build_summ_tab(summ_files):
         summ_tab = summ_tab.append(row, ignore_index=True)
     return summ_tab
 
+def generate_filename(taxon, marker):
+    filename = f'acc_{taxon}_{marker}.tab'
+    return filename
+
 # data loading
 def read_BOLD_summ(summ_file):
+    # extract a list of accessions from a BOLD summary
     bold_tab = pd.read_csv(summ_file, sep = '\t', encoding = 'latin-1') # latin-1 to parse BOLD files
     accs = bold_tab['sampleid'].tolist()
     return accs
 
 def read_NCBI_summ(summ_file):
+    # extract a list of accessions from an NCBI or ENA summary
     ncbi_tab = pd.read_csv(summ_file, sep = '\t')
     accs = ncbi_tab.iloc[:,0].tolist()
     return accs
 
 def read_summ(summ_file, read_func):
+    # extract accessions (and generate accessions w/o version number) from summary file
+    # read_func specify what function will be used to read the file (read_BOLD_summ or read_NCBI_summ)
     accs = read_func(summ_file)
     
     shortaccs = get_shortaccs(accs)
@@ -52,10 +62,12 @@ def read_summ(summ_file, read_func):
 
 # data processing
 def get_shortaccs(acclist):
+    # remove version number from each accession in acclist
     shortaccs = [acc.split('.')[0] for acc in acclist]
     return shortaccs
 
 def make_acc_subtab(acc_series, dbase, tax, mark = ''):
+    # add taxon, marker and database information to the accession series
     acc_subtab = acc_series.to_frame()
     acc_subtab['Database'] = dbase
     acc_subtab['Taxon'] = tax
@@ -64,20 +76,31 @@ def make_acc_subtab(acc_series, dbase, tax, mark = ''):
     return acc_subtab
 
 def make_dbase_series(tab, dbase):
+    # generate accession series for the given dbase
+    # tab is a subtab generated from grouping the complete summary tab by taxon and marker, should contain a single entry per database
+    
+    # select the read_func to use
     if dbase == 'BOLD':
         read_func = read_BOLD_summ
     else:
         read_func = read_NCBI_summ
+    
+    # select the summary file and generate accsession series for it
     summ_file = tab.loc[tab['Database'] == dbase, 'File'].values[0]
     acc_series = read_summ(summ_file, read_func)
     return acc_series
 
 def merge_subtabs(subtabs):
+    # merge the given subtabs into one, mind repeated entries
+    # order in which subtabs are presented determines priority for repeated entries. When an entry is repeated between two subtabs, the first one to appear is kept
+    # list should start with NCBI
     acc_tab = pd.DataFrame(columns = ['Accession', 'Database', 'Taxon', 'Marker'])
     
     for subtab in subtabs:
         acc_idx = set(acc_tab.index)
         st_idx = set(subtab.index)
+        
+        # only add entries not already present in acc_tab
         diff = st_idx.difference(acc_idx)
         to_add = subtab.loc[diff]
         
@@ -85,16 +108,19 @@ def merge_subtabs(subtabs):
     return acc_tab
 
 def make_acc_tab(summ_tab, tax, mark):
+    # generate a full accession table for the given tax/mark combo
     subtabs = []
     for dbase in ['NCBI', 'BOLD', 'ENA']:
+        # generate subtab for each database (if present)
         if dbase in summ_tab['Database'].values:
             dbase_series = make_dbase_series(summ_tab, dbase)
             subtabs.append(make_acc_subtab(dbase_series, dbase, tax, mark))
     merged = merge_subtabs(subtabs)
-    # TODO SAVE acc_table
     return merged
 
-def main(summ_dir):
+def main(summ_dir, out_dir):
+    # Main function, run to generate accession list files
+    # TODO, compare with previous databases, check version changes
     summ_tab = build_summ_tab(list_summ_files(summ_dir))
     
     for tax_group in summ_tab.groupby('Taxon'):
@@ -102,67 +128,8 @@ def main(summ_dir):
         for mark_group in tax_group[1].groupby('Marker'):
             mark = mark_group[0]
             subtab = mark_group[1]
-            return make_acc_tab(subtab, tax, mark)
+            acc_tab = make_acc_tab(subtab, tax, mark)
+            outfile = generate_filename(tax, mark)
+            acc_tab.to_csv(f'{out_dir}/{outfile}')
     
 #%%
-def make_acc_tab(summ_tab):
-    acc_tab = pd.DataFrame(columns = ['Taxon', 'Marker', 'Database', 'Accession']) # will store accession numbers
-
-    taxons = summ_tab['Taxon'].unique().tolist()
-    for taxon in taxons:
-        sub_tab1 = summ_tab.loc[summ_tab['Taxon'] == taxon]
-    
-        markers = sub_tab1['Marker'].unique().tolist()
-        for marker in markers:
-            sub_tab2 = sub_tab1.loc[sub_tab1['Marker'] == marker]
-            
-            sub_acc_tab = pd.DataFrame(columns = ['Taxon', 'Marker', 'Database', 'Accession'])
-            db_accs = []
-            dbases = sub_tab2['Database'].unique().tolist()
-            for dbase in dbases:
-                file = sub_tab2.loc[sub_tab2['Database'] == dbase, 'File'].values[0]
-                # db_accs[dbase] = read_summ(file, dbase)
-                db_accs.append(read_summ(file, dbase))
-            
-            db_tab = pd.concat(db_accs, axis = 1)
-            for db in ['NCBI', 'ENA', 'BOLD']:
-                if db in db_tab.columns:
-                    col = db_tab[db].dropna()
-                    idx = set(col).difference(set(sub_acc_tab))
-            return db_tab
-
-    # for taxon in taxons:
-    #     tax_tab = pd.DataFrame(columns = ['Taxon', 'Marker', 'Database', 'Accession']) # sub table containing entries for the given taxon, will be incorporated to acc_tab 
-    #     for marker in markers:
-    #         # TODO handle missing databases
-    #         # retrieve summary files
-    #         ena_file = summ_tab.loc[(summ_tab['Taxon'] == taxon) & (summ_tab['Marker'] == marker) & (summ_tab['Database'] == 'ENA'), 'File'].values[0]
-    #         ncbi_file = summ_tab.loc[(summ_tab['Taxon'] == taxon) & (summ_tab['Marker'] == marker) & (summ_tab['Database'] == 'NCBI'), 'File'].values[0]
-    
-    #         # read ENA
-    #         ena_tab = pd.read_csv(ena_file, sep ='\t')
-    #         ena_accs = set(ena_tab['accession'])
-    #         # read NCBI
-    #         with open(ncbi_file, 'r') as handle:
-    #             acc_list = handle.read().splitlines()
-    #             ncbi_accs = set([acc.split('.')[0] for acc in acc_list])
-            
-    #         ncbi_tab = pd.DataFrame({'Taxon':taxon, 'Marker':marker, 'Database':'NCBI', 'Accession':list(ncbi_accs)})
-    #         ena_tab = pd.DataFrame({'Taxon':taxon, 'Marker':marker, 'Database':'ENA', 'Accession':list(ena_accs.difference(ncbi_accs))})
-            
-    #         tax_tab = pd.concat([tax_tab, ncbi_tab, ena_tab])
-    #     # read BOLD
-        # bold_file = summ_tab.loc[(summ_tab['Taxon'] == taxon) & (summ_tab['Database'] == 'BOLD'), 'File'].values[0]
-        # bold_tab = pd.read_csv(bold_file, sep = '\t',encoding = 'latin-1') # latin-1 to parse BOLD files
-        # bold_accs = set(bold_tab['sampleid'])
-        # core_accs = set(tax_tab.loc[tax_tab['Marker'] == 'COI', 'Accession'])
-        # bold_tab = pd.DataFrame({'Taxon':taxon, 'Marker':'COI', 'Database':'BOLD', 'Accession':list(bold_accs.difference(core_accs))})
-        # tax_tab = pd.concat([tax_tab, bold_tab])
-    
-    #     acc_tab = pd.concat([acc_tab, tax_tab])
-
-#%% save results
-out_dir = '/home/hernan/PROYECTOS/Graboid/Databases/Acc_lists'
-t = datetime.now()
-outfile = f'{out_dir}/accessions_{t.day}-{t.month}-{t.year}_{t.hour}-{t.minute}-{t.second}.csv'
-acc_tab.to_csv(outfile)

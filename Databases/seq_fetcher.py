@@ -9,11 +9,31 @@ Created on Mon Sep 20 14:21:22 2021
 #%% libraries
 from Bio import Entrez
 from datetime import datetime
+from glob import glob
+
 import numpy as np
 import pandas as pd
 import urllib3
 
 #%% functions
+# acc data handling
+def get_file_data(filename):
+    split_file = filename.split('/')[-1].split('.tab')[0].split('_')
+
+    file_tax = split_file[1]
+    file_mark = split_file[2]
+    return file_tax, file_mark, filename
+
+def build_acc_tab(acc_dir):
+    acc_files = glob(f'{acc_dir}/acc_*.tab')
+    n_files = len(acc_files)
+    acc_tab = pd.DataFrame(index = range(n_files), columns = ['Taxon', 'Marker', 'File'])
+    
+    for idx, file in enumerate(acc_files):
+        
+        acc_tab.at[idx] = get_file_data(file)
+    return acc_tab
+
 # TODO: Verbose
 def acc_slicer(acc_list, chunksize):
     # slice the list of accessions into chunks
@@ -54,7 +74,8 @@ def fetch_bold(acc_list, out_handle):
 def fetch_sequences(acc_list, dbase, outfile, chunksize):
     chunks = acc_slicer(acc_list, chunksize)
     with open(outfile, 'wb') as out_handle:
-        for chunk in chunks:
+        for idx, chunk in enumerate(chunks):
+            print(f'{dbase}. Chunk {idx + 1} of {len(acc_list) / chunksize}')
             if dbase == 'NCBI':
                 fetch_ncbi(chunk, out_handle)
             elif dbase == 'ENA':
@@ -64,23 +85,19 @@ def fetch_sequences(acc_list, dbase, outfile, chunksize):
     return
 
 #%% Main
-acc_file = '/home/hernan/PROYECTOS/Graboid/Databases/Acc_lists/accessions_20-9-2021_15-31-56.csv'
-def main(acc_file):
-    # read acc_table
-    # for tax/mark/db download file
-    acc_tab = pd.read_csv(acc_file, index_col = 0)
+acc_dir = '/home/hernan/PROYECTOS/Graboid/Databases/22_9_2021-11_54_51/Acc_lists'
+def main(acc_dir, out_dir = '.', chunksize = 500):
+    # list accsession files
+    acc_tab = build_acc_tab(acc_dir)
     
-    taxons = acc_tab['Taxon'].unique()
-    markers = acc_tab['Marker'].unique()
-    databases = acc_tab['Database'].unique()
-
-    for taxon in taxons:
-        for marker in markers:
-            for database in databases:
-                sub_tab = acc_tab.loc[(acc_tab['Taxon'] == taxon) & (acc_tab['Marker'] == marker) & (acc_tab['Database'] == database)]
-            
-                if sub_tab.shape[0] > 0:
-                    outfile = generate_filename(taxon, marker, database)
-                    fetch_sequences(sub_tab['Accession'].unique(), database, f'Seq_files/{outfile}', 500)
-    
-    return
+    for _, row in acc_tab.iterrows():
+        taxon = row['Taxon']
+        marker = row['Marker']
+        file = row['File']
+        acc_file = pd.read_csv(file, index_col = 0)
+        outfile = f'{out_dir}/{taxon}_{marker}.fasta'
+        
+        for dbase, sub_tab in acc_file.groupby('Database'):
+            acc_list = sub_tab['Accession'].tolist()
+            fetch_sequences(acc_list, dbase, outfile, chunksize)
+        return

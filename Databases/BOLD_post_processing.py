@@ -41,27 +41,35 @@ def get_alt_acc(header):
     split_header = header.split('|')
     return split_header[3]
 
+def generate_outfile(bold_file, marker):
+    tax = bold_file.split('_')[0]
+    outfile = f'{tax}_{marker}_BOLD.tmp'
+    return outfile
 #%%
-seqdict = make_BOLD_seqdict('Nematoda_COI_BOLD.tmp')
-
-mark_dict = {'18S':[], 'COI':[]}
-
-for header in seqdict.keys():
-    mark = get_mark(header)
-    if mark in mark_dict.keys():
-        mark_dict[mark].append(header)
-
-for mark, headerlist in mark_dict.items():
-    outfile = f'Nematoda_{mark}_BOLD2.tmp'
-    mark_records = []
-    for header in headerlist:
-        if has_alt_acc(header):
-            acc = get_alt_acc(header)
-        else:
-            acc = get_acc(header)
-        
-        record = SeqRecord(Seq(seqdict[header]), id = acc, name = '', description = header)
-        mark_records.append(record)
+def process_file(bold_file, markers = ['COI', '18S']):
+    seqdict = make_BOLD_seqdict(bold_file)
     
-    with open(outfile, 'w') as out_handle:
-        SeqIO.write(mark_records, out_handle, 'fasta')
+    mark_dict = {}
+    for mark in markers:
+        mark_dict[mark] = []
+    
+    for header in seqdict.keys():
+        mark = get_mark(header)
+        if mark in mark_dict.keys():
+            mark_dict[mark].append(header)
+    
+    for mark, headerlist in mark_dict.items():
+        mark_records = []
+        for header in headerlist:
+            if has_alt_acc(header):
+                acc = get_alt_acc(header)
+            else:
+                acc = get_acc(header)
+            
+            record = SeqRecord(Seq(seqdict[header]), id = acc, name = '', description = header)
+            mark_records.append(record)
+
+        outfile = generate_outfile(bold_file, mark)
+        with open(outfile, 'w') as out_handle:
+            SeqIO.write(mark_records, out_handle, 'fasta')
+    return

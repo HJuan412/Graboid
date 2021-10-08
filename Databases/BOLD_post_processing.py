@@ -45,11 +45,11 @@ def get_alt_acc(header):
 
 def generate_outfile(bold_file, marker):
     tax = bold_file.split('_')[0]
-    outfile = f'{tax}_{marker}_BOLDp.tmp' # BOLDp means it's been processed, use to differentiate from raw BOLD files
+    outfile = f'{tax}_{marker}_BOLD.tmp' # BOLDp means it's been processed, use to differentiate from raw BOLD files
     return outfile
 
 def locate_BOLD_files(seq_dir):
-    files = glob(f'{seq_dir}/*BOLD*tmp')
+    files = glob(f'{seq_dir}/*BOLDr*tmp')
     return files
 #%%
 def process_file(bold_file, markers = ['COI', '18S']):

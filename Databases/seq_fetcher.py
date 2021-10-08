@@ -130,7 +130,7 @@ def fetch(acc_dir, out_dir, chunksize = 500):
         file = row['File']
         acc_file = pd.read_csv(file, index_col = 0)
         
-        fetchers = {'BOLD':Fetcher('BOLD', fetch_bold, out_dir, chunksize),
+        fetchers = {'BOLD':Fetcher('BOLDr', fetch_bold, out_dir, chunksize), # BOLDr signifies there are the raw BOLD files and must still be processed
                     'ENA':Fetcher('ENA', fetch_ena, out_dir, chunksize),
                     'NCBI':Fetcher('NCBI', fetch_ncbi, out_dir, chunksize)}
         for dbase, sub_tab in acc_file.groupby('Database'):

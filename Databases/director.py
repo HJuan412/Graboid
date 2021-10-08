@@ -57,9 +57,7 @@ if __name__ == '__main__':
     seq_fetcher.fetch(acc_dir, seq_dir)
     # Postprocess BOLD data
     print('Processing BOLD files...')
-    bold_files = bold_pp.locate_BOLD_files(seq_dir)
-    for bold_file in bold_files:
-        bold_pp.process_file(bold_file)
+    bold_files = bold_pp.processor(seq_dir)
     # Compare and merge
     print('Comparing and merging...')
-    db_merge.select_entries(seq_dir)
+    db_merge.merger(seq_dir)

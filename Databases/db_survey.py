@@ -134,33 +134,24 @@ def survey_ncbi(taxon, marker, outfile):
         handle.write('\n'.join(search_record['IdList']))
 
 #%% main function
-# TODO: delete commented
-# summary_dir = '/home/hernan/PROYECTOS/Graboid/Databases/Summaries'
-# taxons = ['Nematoda', 'Platyhelminthes']
-# markers = ['18S', '28S', 'COI']
-
-# bold = True
-# ena = False
-# ncbi = False
-
 def survey(summ_dir, taxons, markers, bold = True, ena = True, ncbi = True):
     """
     
 
     Parameters
     ----------
-    summ_dir : TYPE
-        DESCRIPTION.
-    taxons : TYPE
-        DESCRIPTION.
-    markers : TYPE
-        DESCRIPTION.
-    bold : TYPE, optional
-        DESCRIPTION. The default is True.
-    ena : TYPE, optional
-        DESCRIPTION. The default is True.
-    ncbi : TYPE, optional
-        DESCRIPTION. The default is True.
+    summ_dir : str
+        Path to the directory in which summaries will be stored.
+    taxons : list
+        Taxons to search for.
+    markers : list
+        Markers to search for.
+    bold : bool, optional
+        Survey the BOLD database. The default is True.
+    ena : bool, optional
+        Survey the ENA database. The default is True.
+    ncbi : bool, optional
+        Survey the NCBI database. The default is True.
 
     Returns
     -------

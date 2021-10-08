@@ -75,10 +75,10 @@ def fetch_bold(acc_list, out_handle):
     fetch_api(apiurl, out_handle)
     return
 
-def fetch_sequences(acc_tab, dbase, tax, marker, chunksize):
+def fetch_sequences(acc_tab, dbase, tax, marker, chunksize, outdir):
     acc_list = acc_tab['Accession'].tolist()
     chunks = acc_slicer(acc_list, chunksize)
-    outfile = f'{tax}_{marker}_{dbase}.tmp'
+    outfile = f'{outdir}/{tax}_{marker}_{dbase}.tmp'
     with open(outfile, 'wb') as out_handle:
         for idx, chunk in enumerate(chunks):
             print(f'{dbase}. Chunk {idx + 1} of {len(acc_list) / chunksize}')
@@ -89,17 +89,8 @@ def fetch_sequences(acc_tab, dbase, tax, marker, chunksize):
             elif dbase == 'BOLD':
                 fetch_bold(chunk, out_handle)
     return
-
-def get_from_BOLD(bold_file, taxon, marker):
-    # TODO: this function will be used to separate the sequence downloaded from the BOLD database
-    return
-
-def merge_temporal_datasets(taxon, marker):
-    # generate final databases
-    return
 #%% Main
-acc_dir = '/home/hernan/PROYECTOS/Graboid/Databases/22_9_2021-11_54_51/Acc_lists'
-def main(acc_dir, chunksize = 500):
+def fetch(acc_dir, outdir, chunksize = 500):
     # list accsession files
     acc_tab = build_acc_tab(acc_dir)
     
@@ -110,8 +101,5 @@ def main(acc_dir, chunksize = 500):
         acc_file = pd.read_csv(file, index_col = 0)
         
         for dbase, sub_tab in acc_file.groupby('Database'):
-            fetch_sequences(sub_tab, dbase, taxon, marker, chunksize)
+            fetch_sequences(sub_tab, dbase, taxon, marker, chunksize, outdir)
         return
-
-#%% test
-main(acc_dir)

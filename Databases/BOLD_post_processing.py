@@ -12,6 +12,8 @@ from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
+
+from glob import glob
 #%% functions
 def make_BOLD_seqdict(bold_file):
     seqdict = {}
@@ -45,6 +47,10 @@ def generate_outfile(bold_file, marker):
     tax = bold_file.split('_')[0]
     outfile = f'{tax}_{marker}_BOLD.tmp'
     return outfile
+
+def locate_BOLD_files(seq_dir):
+    files = glob(f'{seq_dir}/*BOLD*tmp')
+    return files
 #%%
 def process_file(bold_file, markers = ['COI', '18S']):
     seqdict = make_BOLD_seqdict(bold_file)

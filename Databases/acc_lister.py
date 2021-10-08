@@ -118,7 +118,7 @@ def make_acc_tab(summ_tab, tax, mark):
     merged = merge_subtabs(subtabs)
     return merged
 
-def main(summ_dir, out_dir):
+def acc_list(summ_dir, out_dir):
     # Main function, run to generate accession list files
     # TODO, compare with previous databases, check version changes
     summ_tab = build_summ_tab(list_summ_files(summ_dir))

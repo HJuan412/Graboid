@@ -32,27 +32,29 @@ def set_entrez(email = "hernan.juan@gmail.com", apikey = "7c100b6ab050a287af30e3
 
 #%% Main
 # generate directories
-dirname = generate_dirname()
-summ_dir, seq_dir, tax_dir, acc_dir = generate_subdirs(dirname)
-
-os.mkdir(dirname)
-for sdir in [summ_dir, seq_dir, tax_dir, acc_dir]:
-    os.mkdir(sdir)
-
-taxons = ['Nematoda', 'Platyhelminthes']
-markers = ['18S', '28S', 'COI']
-bold = True
-ena = False
-ncbi = True
-# Survey databases
-db_survey.survey(summ_dir, taxons, markers, bold, ena, ncbi)    
-# Build accession lists
-acc_lister.acc_list(summ_dir, acc_dir)
-# Fetch sequences
-seq_fetcher.fetch(acc_dir, seq_dir)
-# Postprocess BOLD data
-bold_files = bold_pp.locate_BOLD_files(seq_dir)
-for bold_file in bold_files:
-    bold_pp.process_file(bold_file)
-# Compare and merge
-db_merge.select_entries(seq_dir)
+if __name__ == '__main__':
+    dirname = generate_dirname()
+    summ_dir, seq_dir, tax_dir, acc_dir = generate_subdirs(dirname)
+    
+    os.mkdir(dirname)
+    for sdir in [summ_dir, seq_dir, tax_dir, acc_dir]:
+        os.mkdir(sdir)
+    
+    set_entrez()
+    taxons = ['Nematoda', 'Platyhelminthes']
+    markers = ['18S', '28S', 'COI']
+    bold = True
+    ena = False
+    ncbi = True
+    # Survey databases
+    db_survey.survey(summ_dir, taxons, markers, bold, ena, ncbi)    
+    # Build accession lists
+    acc_lister.acc_list(summ_dir, acc_dir)
+    # Fetch sequences
+    seq_fetcher.fetch(acc_dir, seq_dir)
+    # Postprocess BOLD data
+    bold_files = bold_pp.locate_BOLD_files(seq_dir)
+    for bold_file in bold_files:
+        bold_pp.process_file(bold_file)
+    # Compare and merge
+    db_merge.select_entries(seq_dir)

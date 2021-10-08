@@ -101,5 +101,6 @@ def fetch(acc_dir, outdir, chunksize = 500):
         acc_file = pd.read_csv(file, index_col = 0)
         
         for dbase, sub_tab in acc_file.groupby('Database'):
+            print(f'Fetching {taxon} {marker} sequences from {dbase} database')
             fetch_sequences(sub_tab, dbase, taxon, marker, chunksize, outdir)
         return

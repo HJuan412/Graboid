@@ -47,14 +47,19 @@ if __name__ == '__main__':
     ena = False
     ncbi = True
     # Survey databases
+    print('Surveying databases...')
     db_survey.survey(summ_dir, taxons, markers, bold, ena, ncbi)    
     # Build accession lists
+    print('Building accession lists...')
     acc_lister.acc_list(summ_dir, acc_dir)
     # Fetch sequences
+    print('Fetching sequences...')
     seq_fetcher.fetch(acc_dir, seq_dir)
     # Postprocess BOLD data
+    print('Processing BOLD files...')
     bold_files = bold_pp.locate_BOLD_files(seq_dir)
     for bold_file in bold_files:
         bold_pp.process_file(bold_file)
     # Compare and merge
+    print('Comparing and merging...')
     db_merge.select_entries(seq_dir)

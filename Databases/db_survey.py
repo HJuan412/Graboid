@@ -161,6 +161,7 @@ def survey(summ_dir, taxons, markers, bold = True, ena = True, ncbi = True):
     for taxon in taxons:
         # BOLD search
         if bold:
+            print(f'Surveying BOLD database for {taxon}...')
             apiurl = f'http://www.boldsystems.org/index.php/API_Public/specimen?taxon={taxon}&format=tsv'
             outfile = generate_filename(taxon, '', 'BOLD')
             dl_and_save(apiurl, f'{summ_dir}/{outfile}')
@@ -169,11 +170,13 @@ def survey(summ_dir, taxons, markers, bold = True, ena = True, ncbi = True):
         for marker in markers:
             # ENA search
             if ena:
+                print(f'Surveying ENA database for {taxon} and {marker}...')
                 apiurl = f'https://www.ebi.ac.uk/ena/browser/api/tsv/textsearch?domain=embl&result=sequence&query=%22{taxon}%22%20AND%20%22{marker}%22'
                 outfile = generate_filename(taxon, marker, 'ENA')
                 dl_and_save(apiurl, f'{summ_dir}/{outfile}')
     
             # NCBI search
             if ncbi:
+                print(f'Surveying NCBI database for {taxon} and {marker}...')
                 outfile = generate_filename(taxon, marker, 'NCBI')
                 survey_ncbi(taxon, marker, f'{summ_dir}/{outfile}')

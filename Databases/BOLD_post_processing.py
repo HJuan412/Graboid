@@ -45,7 +45,7 @@ def get_alt_acc(header):
 
 def generate_outfile(bold_file, marker):
     tax = bold_file.split('_')[0]
-    outfile = f'{tax}_{marker}_BOLD.tmp'
+    outfile = f'{tax}_{marker}_BOLDp.tmp' # BOLDp means it's been processed, use to differentiate from raw BOLD files
     return outfile
 
 def locate_BOLD_files(seq_dir):
@@ -78,4 +78,11 @@ def process_file(bold_file, markers = ['COI', '18S']):
         outfile = generate_outfile(bold_file, mark)
         with open(outfile, 'w') as out_handle:
             SeqIO.write(mark_records, out_handle, 'fasta')
+    return
+
+def processor(seq_dir, markers = ['COI', '18S']):
+    bold_files = locate_BOLD_files(seq_dir)
+    
+    for file in bold_files:
+        process_file(file, markers)
     return

@@ -10,6 +10,7 @@ Created on Mon Sep 20 14:21:22 2021
 from Bio import Entrez
 from datetime import datetime
 from glob import glob
+from math import ceil
 
 import numpy as np
 import pandas as pd
@@ -38,7 +39,7 @@ def build_acc_tab(acc_dir):
         acc_tab.at[idx] = get_file_data(file)
     return acc_tab
 
-# TODO: Verbose
+# accession list handling
 def acc_slicer(acc_list, chunksize):
     # slice the list of accessions into chunks
     n_seqs = len(acc_list)
@@ -50,6 +51,7 @@ def generate_filename(tax, mark, db, timereg = True):
     filename = f'{tax}_{mark}_{db}_{t.day}-{t.month}-{t.year}_{t.hour}-{t.minute}-{t.second}.fasta'
     return filename
 
+# fetch functions
 def fetch_ncbi(acc_list, out_handle):
     seq_handle = Entrez.efetch(db = 'nucleotide', id = acc_list, rettype = 'fasta', retmode = 'text')
     out_handle.write(bytearray(seq_handle.read(), 'utf-8'))
@@ -75,32 +77,65 @@ def fetch_bold(acc_list, out_handle):
     fetch_api(apiurl, out_handle)
     return
 
-def fetch_sequences(acc_tab, dbase, tax, marker, chunksize, outdir):
-    acc_list = acc_tab['Accession'].tolist()
-    chunks = acc_slicer(acc_list, chunksize)
-    outfile = f'{outdir}/{tax}_{marker}_{dbase}.tmp'
-    with open(outfile, 'wb') as out_handle:
-        for idx, chunk in enumerate(chunks):
-            print(f'{dbase}. Chunk {idx + 1} of {len(acc_list) / chunksize}')
-            if dbase == 'NCBI':
-                fetch_ncbi(chunk, out_handle)
-            elif dbase == 'ENA':
-                fetch_ena(chunk, out_handle)
-            elif dbase == 'BOLD':
-                fetch_bold(chunk, out_handle)
-    return
-#%% Main
-def fetch(acc_dir, outdir, chunksize = 500):
-    # list accsession files
-    acc_tab = build_acc_tab(acc_dir)
+# TODO: delete (is a Fetcher method now)
+# def fetch_sequences(acc_tab, dbase, tax, marker, chunksize, outdir):
+#     acc_list = acc_tab['Accession'].tolist()
+#     chunks = acc_slicer(acc_list, chunksize)
+#     outfile = f'{outdir}/{tax}_{marker}_{dbase}.tmp'
+#     with open(outfile, 'wb') as out_handle:
+#         for idx, chunk in enumerate(chunks):
+#             print(f'{dbase}. Chunk {idx + 1} of {len(acc_list) / chunksize}')
+#             if dbase == 'NCBI':
+#                 fetch_ncbi(chunk, out_handle)
+#             elif dbase == 'ENA':
+#                 fetch_ena(chunk, out_handle)
+#             elif dbase == 'BOLD':
+#                 fetch_bold(chunk, out_handle)
+#     return
+
+#%% classes
+class Fetcher():
+    def __init__(self, dbase, fetch_func, out_dir, chunksize = 500):
+        self.dbase = dbase
+        self.fetch = fetch_func
+        self.out_dir = out_dir
+        self.chunksize = chunksize
     
-    for _, row in acc_tab.iterrows():
+    def generate_filename(self, taxon, marker = ''):
+        filename = f'{self.out_dir}/{taxon}_{marker}_{self.dbase}.tmp'
+        return filename
+    
+    def get_nchunks(self, acc_list_len):
+        nchunks = ceil(acc_list_len/self.chunksize)
+        return nchunks
+
+    def fetch(self, acc_list, taxon, marker = ''):
+        chunks = acc_slicer(acc_list, self.chunksize)
+        nchunks = self.get_nchunks(len(acc_list))
+        out_file = self.generate_filename(taxon, marker)
+        
+        with open(out_file, 'wb') as out_handle:
+            for idx, chunk in enumerate(chunks):
+                print(f'{self.dbase}. Chunk {idx + 1} of {nchunks}')
+                self.fetch(chunk, out_handle)
+        return
+#%% Main
+def fetch(acc_dir, out_dir, chunksize = 500):
+    # list accsession files
+    acc_file_tab = build_acc_tab(acc_dir)
+    
+    for _, row in acc_file_tab.iterrows():
         taxon = row['Taxon']
         marker = row['Marker']
         file = row['File']
         acc_file = pd.read_csv(file, index_col = 0)
         
+        fetchers = {'BOLD':Fetcher('BOLD', fetch_bold, out_dir, chunksize),
+                    'ENA':Fetcher('ENA', fetch_ena, out_dir, chunksize),
+                    'NCBI':Fetcher('NCBI', fetch_ncbi, out_dir, chunksize)}
         for dbase, sub_tab in acc_file.groupby('Database'):
             print(f'Fetching {taxon} {marker} sequences from {dbase} database')
-            fetch_sequences(sub_tab, dbase, taxon, marker, chunksize, outdir)
+            fetcher = fetchers[dbase]
+            acc_list = sub_tab['Accession'].tolist()
+            fetcher.fetch(acc_list, taxon, marker)
         return

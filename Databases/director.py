@@ -30,9 +30,20 @@ def set_entrez(email = "hernan.juan@gmail.com", apikey = "7c100b6ab050a287af30e3
     Entrez.email = email
     Entrez.api_key = apikey
 
+#%% Test parameters
+# taxons = ['Nematoda', 'Platyhelminthes']
+# markers = ['18S', '28S', 'COI']
+# bold = True
+# ena = False
+# ncbi = True
+taxons = ['Nematoda']
+markers = ['18S']
+bold = False
+ena = False
+ncbi = True
 #%% Main
-# generate directories
 if __name__ == '__main__':
+    # generate directories
     dirname = generate_dirname()
     summ_dir, seq_dir, tax_dir, acc_dir = generate_subdirs(dirname)
     
@@ -40,12 +51,9 @@ if __name__ == '__main__':
     for sdir in [summ_dir, seq_dir, tax_dir, acc_dir]:
         os.mkdir(sdir)
     
+    # set email and api key
     set_entrez()
-    taxons = ['Nematoda', 'Platyhelminthes']
-    markers = ['18S', '28S', 'COI']
-    bold = True
-    ena = False
-    ncbi = True
+    
     # Survey databases
     print('Surveying databases...')
     db_survey.survey(summ_dir, taxons, markers, bold, ena, ncbi)    

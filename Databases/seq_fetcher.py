@@ -77,27 +77,11 @@ def fetch_bold(acc_list, out_handle):
     fetch_api(apiurl, out_handle)
     return
 
-# TODO: delete (is a Fetcher method now)
-# def fetch_sequences(acc_tab, dbase, tax, marker, chunksize, outdir):
-#     acc_list = acc_tab['Accession'].tolist()
-#     chunks = acc_slicer(acc_list, chunksize)
-#     outfile = f'{outdir}/{tax}_{marker}_{dbase}.tmp'
-#     with open(outfile, 'wb') as out_handle:
-#         for idx, chunk in enumerate(chunks):
-#             print(f'{dbase}. Chunk {idx + 1} of {len(acc_list) / chunksize}')
-#             if dbase == 'NCBI':
-#                 fetch_ncbi(chunk, out_handle)
-#             elif dbase == 'ENA':
-#                 fetch_ena(chunk, out_handle)
-#             elif dbase == 'BOLD':
-#                 fetch_bold(chunk, out_handle)
-#     return
-
 #%% classes
 class Fetcher():
     def __init__(self, dbase, fetch_func, out_dir, chunksize = 500):
         self.dbase = dbase
-        self.fetch = fetch_func
+        self.fetch_func = fetch_func
         self.out_dir = out_dir
         self.chunksize = chunksize
     
@@ -117,10 +101,10 @@ class Fetcher():
         with open(out_file, 'wb') as out_handle:
             for idx, chunk in enumerate(chunks):
                 print(f'{self.dbase}. Chunk {idx + 1} of {nchunks}')
-                self.fetch(chunk, out_handle)
+                self.fetch_func(chunk, out_handle)
         return
 #%% Main
-def fetch(acc_dir, out_dir, chunksize = 500):
+def fetch_sequences(acc_dir, out_dir, chunksize = 500, verbose = True):
     # list accsession files
     acc_file_tab = build_acc_tab(acc_dir)
     
@@ -134,8 +118,9 @@ def fetch(acc_dir, out_dir, chunksize = 500):
                     'ENA':Fetcher('ENA', fetch_ena, out_dir, chunksize),
                     'NCBI':Fetcher('NCBI', fetch_ncbi, out_dir, chunksize)}
         for dbase, sub_tab in acc_file.groupby('Database'):
-            print(f'Fetching {taxon} {marker} sequences from {dbase} database')
+            if verbose:
+                print(f'Fetching {taxon} {marker} sequences from {dbase} database')
             fetcher = fetchers[dbase]
             acc_list = sub_tab['Accession'].tolist()
             fetcher.fetch(acc_list, taxon, marker)
-        return
+    return

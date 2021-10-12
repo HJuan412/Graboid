@@ -25,6 +25,15 @@ def generate_dirname():
 def generate_subdirs(dirname):
     return f'{dirname}/Summaries', f'{dirname}/Sequence_files', f'{dirname}/Taxonomy_files', f'{dirname}/Acc_lists'
 
+def new_directories():
+    dirname = generate_dirname()
+    summ_dir, seq_dir, tax_dir, acc_dir = generate_subdirs(dirname)
+    
+    os.mkdir(dirname)
+    for sdir in [summ_dir, seq_dir, tax_dir, acc_dir]:
+        os.mkdir(sdir)
+    return summ_dir, seq_dir, tax_dir, acc_dir
+
 #%% Entrez
 def set_entrez(email = "hernan.juan@gmail.com", apikey = "7c100b6ab050a287af30e37e893dc3d09008"):
     Entrez.email = email
@@ -36,36 +45,35 @@ def set_entrez(email = "hernan.juan@gmail.com", apikey = "7c100b6ab050a287af30e3
 # bold = True
 # ena = False
 # ncbi = True
-taxons = ['Nematoda']
-markers = ['18S']
-bold = False
+taxons = ['Nematoda', 'Platyhelminthes']
+markers = ['18S', '28S', 'COI']
+bold = True
 ena = False
-ncbi = True
+ncbi = False
 #%% Main
-if __name__ == '__main__':
+def make_database(taxons, markers, bold, ena, ncbi, dirname = None):
     # generate directories
-    dirname = generate_dirname()
-    summ_dir, seq_dir, tax_dir, acc_dir = generate_subdirs(dirname)
-    
-    os.mkdir(dirname)
-    for sdir in [summ_dir, seq_dir, tax_dir, acc_dir]:
-        os.mkdir(sdir)
+    if dirname is None:
+        summ_dir, seq_dir, tax_dir, acc_dir = new_directories()
+    else:
+        # TODO: en este caso, el directorio ya existe, qué hacer con archivos preexistentes?
+        summ_dir, seq_dir, tax_dir, acc_dir = generate_subdirs(dirname)
     
     # set email and api key
     set_entrez()
     
     # Survey databases
     print('Surveying databases...')
-    db_survey.survey(summ_dir, taxons, markers, bold, ena, ncbi)    
+    db_survey.survey(summ_dir, taxons, markers, bold, ena, ncbi)
     # Build accession lists
     print('Building accession lists...')
     acc_lister.acc_list(summ_dir, acc_dir)
-    # Fetch sequences
+    # # Fetch sequences
     print('Fetching sequences...')
-    seq_fetcher.fetch(acc_dir, seq_dir)
-    # Postprocess BOLD data
+    seq_fetcher.fetch_sequences(acc_dir, seq_dir)
+    # # Postprocess BOLD data
     print('Processing BOLD files...')
     bold_files = bold_pp.processor(seq_dir)
-    # Compare and merge
+    # # Compare and merge
     print('Comparing and merging...')
     db_merge.merger(seq_dir)

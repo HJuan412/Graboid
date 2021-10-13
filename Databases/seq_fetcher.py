@@ -103,7 +103,7 @@ class Fetcher():
     def fetch(self, acc_list, taxon, marker = ''):
         chunks = acc_slicer(acc_list, self.chunksize)
         nchunks = self.get_nchunks(len(acc_list))
-        out_file, warn_file = self.generate_filename(taxon, marker)
+        out_file, warn_file = self.generate_filenames(taxon, marker)
         
         with open(out_file, 'wb') as out_handle:
             for idx, chunk in enumerate(chunks):

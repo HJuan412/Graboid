@@ -79,16 +79,23 @@ def fetch_bold(acc_list, out_handle):
 
 #%% classes
 class Fetcher():
-    def __init__(self, dbase, fetch_func, out_dir, chunksize = 500):
+    def __init__(self, dbase, fetch_func, out_dir, warn_dir, chunksize = 500):
         self.dbase = dbase
         self.fetch_func = fetch_func
         self.out_dir = out_dir
+        self.warn_dir = warn_dir
         self.chunksize = chunksize
     
-    def generate_filename(self, taxon, marker = ''):
+    def generate_filenames(self, taxon, marker = ''):
         filename = f'{self.out_dir}/{taxon}_{marker}_{self.dbase}.tmp'
-        return filename
+        warn_filename = f'{self.warn_dir}/{taxon}_{marker}_{self.dbase}.lis'
+        return filename, warn_filename
     
+    def add_to_warn_file(warn_file, acc_list):
+        with open(warn_file, 'a') as warn_handle:
+            warn_handle.write('\n'.join(acc_list))
+        return
+
     def get_nchunks(self, acc_list_len):
         nchunks = ceil(acc_list_len/self.chunksize)
         return nchunks
@@ -96,15 +103,20 @@ class Fetcher():
     def fetch(self, acc_list, taxon, marker = ''):
         chunks = acc_slicer(acc_list, self.chunksize)
         nchunks = self.get_nchunks(len(acc_list))
-        out_file = self.generate_filename(taxon, marker)
+        out_file, warn_file = self.generate_filename(taxon, marker)
         
         with open(out_file, 'wb') as out_handle:
             for idx, chunk in enumerate(chunks):
                 print(f'{self.dbase}. Chunk {idx + 1} of {nchunks}')
-                self.fetch_func(chunk, out_handle)
+                try:
+                    self.fetch_func(chunk, out_handle)
+                except:
+                    print(f'Error downloading chunk {idx + 1}. Accessions stored in {self.warn_dir}')
+                    self.add_to_warn_file(warn_file, chunk)
+                    
         return
 #%% Main
-def fetch_sequences(acc_dir, out_dir, chunksize = 500, verbose = True):
+def fetch_sequences(acc_dir, out_dir, warn_dir, chunksize = 500, verbose = True):
     # list accsession files
     acc_file_tab = build_acc_tab(acc_dir)
     
@@ -114,9 +126,9 @@ def fetch_sequences(acc_dir, out_dir, chunksize = 500, verbose = True):
         file = row['File']
         acc_file = pd.read_csv(file, index_col = 0)
         
-        fetchers = {'BOLD':Fetcher('BOLDr', fetch_bold, out_dir, chunksize), # BOLDr signifies there are the raw BOLD files and must still be processed
-                    'ENA':Fetcher('ENA', fetch_ena, out_dir, chunksize),
-                    'NCBI':Fetcher('NCBI', fetch_ncbi, out_dir, chunksize)}
+        fetchers = {'BOLD':Fetcher('BOLDr', fetch_bold, out_dir, warn_dir, chunksize), # BOLDr signifies there are the raw BOLD files and must still be processed
+                    'ENA':Fetcher('ENA', fetch_ena, out_dir, warn_dir, chunksize),
+                    'NCBI':Fetcher('NCBI', fetch_ncbi, out_dir, warn_dir, chunksize)}
         for dbase, sub_tab in acc_file.groupby('Database'):
             if verbose:
                 print(f'Fetching {taxon} {marker} sequences from {dbase} database')

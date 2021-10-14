@@ -70,7 +70,7 @@ class Merger():
         self.ncbi_dict = {}
         self.bold_dict = {}
         self.ncbi_tab = build_infotab({}, 'NCBI')
-        self.ncbi_tab = build_infotab({}, 'BOLD')
+        self.bold_tab = build_infotab({}, 'BOLD')
         self.merged_tab = pd.DataFrame(columns = ['Version', 'Database'])
         self.out_file = f'{out_dir}/{taxon}_{marker}'
     

@@ -124,7 +124,7 @@ def merger(seq_dir):
     
     for tax, sub_tab0 in filetab.groupby('Taxon'):
         for mark, sub_tab1 in sub_tab0.groupby('Marker'):
-            merge_agent = Merger()
+            merge_agent = Merger(tax, mark, seq_dir)
             for _, row in sub_tab1.iterrows():
                 dbase = row['Database']
                 file = row['File']                

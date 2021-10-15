@@ -70,7 +70,7 @@ class Merger():
         self.ncbi_dict = {}
         self.bold_dict = {}
         self.ncbi_tab = build_infotab({}, 'NCBI')
-        self.ncbi_tab = build_infotab({}, 'BOLD')
+        self.bold_tab = build_infotab({}, 'BOLD')
         self.merged_tab = pd.DataFrame(columns = ['Version', 'Database'])
         self.out_file = f'{out_dir}/{taxon}_{marker}'
     
@@ -124,7 +124,7 @@ def merger(seq_dir):
     
     for tax, sub_tab0 in filetab.groupby('Taxon'):
         for mark, sub_tab1 in sub_tab0.groupby('Marker'):
-            merge_agent = Merger()
+            merge_agent = Merger(tax, mark, seq_dir)
             for _, row in sub_tab1.iterrows():
                 dbase = row['Database']
                 file = row['File']                

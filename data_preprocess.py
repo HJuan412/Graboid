@@ -9,7 +9,9 @@ Director
 
 #%% libraries
 from Bio import AlignIO
+from glob import glob
 import numpy as np
+import os
 import pandas as pd
 import toolkit as tools
 import string
@@ -186,6 +188,41 @@ class alignment_handler():
         # Display taxonomic ranks available to filter by
         return list(self.taxonomy_tab.columns)
 
+#%% build matrixes
+in_dir = '13_10_2021-20_15_58'
+
+def generate_matrix_filename(file):
+    file_short = file.split('/')[-1].split('.fasta')[0]
+    out_file = file_short + '.mat'
+    return out_file
+
+def get_nseqs(file):
+    split_file = file.split('(')[-1].split(')')[0].split('_')[-1]
+    nseqs = int(split_file[1:])
+    return nseqs
+
+def build_matrixes(in_dir, taxons = ['Nematoda', 'Platyhelminthes'], markers = ['18S', '28S', 'COI']):
+    window_dir = f'Dataset/{in_dir}/Windows'
+    out_dir = f'Dataset/{in_dir}/Matrixes'
+    os.mkdir(out_dir)
+
+    for tax in taxons:
+        tax_dir = f'{out_dir}/{tax}'
+        os.mkdir(tax_dir)
+        for mark in markers:
+            mark_dir = f'{tax_dir}/{mark}'
+            os.mkdir(mark_dir)
+
+            sub_dir = f'{window_dir}/{tax}/{mark}'
+            window_files = glob(f'{sub_dir}/*fasta')
+            
+            for wfile in window_files:
+                nseqs = get_nseqs(wfile)
+                if nseqs > 0:
+                    ld = alignment_loader(wfile)
+                    df = pd.DataFrame(ld.numeric_aln, index = ld.acc_list)
+                    out_file = generate_matrix_filename(wfile)
+                    df.to_csv(f'{mark_dir}/{out_file}')
 
 #%% get best file
 # TODO remove this shit

@@ -16,6 +16,7 @@ from glob import glob
 # TODO implement numba
 from numba import njit
 import numpy as np
+import os
 import pandas as pd
 import toolkit as tools
 
@@ -29,17 +30,13 @@ def load_ref(file):
 def load_report(report_file):
     report_tab = pd.read_csv(report_file, sep = '\t', header = None)
     report_tab.rename(columns = {0:'qseqid',
-                                 1:'sseqid',
-                                 2:'pident',
-                                 3:'length',
-                                 4:'mismatch',
-                                 5:'gapopen',
-                                 6:'qstart',
-                                 7:'qend',
-                                 8:'sstart',
-                                 9:'send',
-                                 10:'evalue',
-                                 11:'bitscore'}, inplace = True)
+                                 1:'pident',
+                                 2:'length',
+                                 3:'qstart',
+                                 4:'qend',
+                                 5:'sstart',
+                                 6:'send',
+                                 7:'evalue'}, inplace = True)
     return report_tab
 
 def match_in_window(match, w_start, w_end):
@@ -164,7 +161,6 @@ def align_match(seq, cropped, gaps):
     """
     #TODO: handle superpositions
     alig = ''
-    # gaps = get_gaps(cropped)[0]
     sum_gaps = sum(np.where(gaps > 0, gaps, 0))
 
     q_coords = cropped[:,[2,3]]
@@ -208,6 +204,37 @@ def make_matchdict(report):
         matchdict[qid] = match_matrix
     return matchdict
 
+def process(in_dir, taxons = ['Nematoda', 'Platyhelminthes'], markers = ['18S', '28S', 'COI'], width = 100, step = 15):
+    sequence_dir = f'Databases/{in_dir}/Sequence_files'
+    report_dir = f'Dataset/{in_dir}/BLAST_reports'
+    
+    out_dir = f'Dataset/{in_dir}/Windows'
+    os.mkdir(out_dir)
+    for tax in taxons:
+        tax_dir = f'{out_dir}/{tax}'
+        os.mkdir(tax_dir)
+        for mark in markers:
+            print(f'Processing {tax} {mark}')
+            mark_dir = f'{tax_dir}/{mark}'
+            os.mkdir(mark_dir)
+            
+            seq_file = f'{sequence_dir}/{tax}_{mark}.fasta'
+            rep_file = f'{report_dir}/{tax}_{mark}.tab'
+            wn = Windower(rep_file, seq_file)
+            reflen = wn.get_max_match()
+            
+            windows = np.arange(0, reflen + 1 - width, step)
+            
+            for idx, w in enumerate(windows):
+                print(f'Window {idx} of {len(windows)}')
+                start = w
+                end = w + width
+                wn.update_window(start, end)
+                wn.make_alignment()
+                wn.aln_report()
+                wn.store_alignment(f'{mark_dir}/{tax}_{mark}')
+            
+            
 #%% classes
 class Windower():
     def __init__(self, report_file, seqfile):
@@ -237,21 +264,37 @@ class Windower():
             if end >= self.w_start:
                 self.__w_end = end
     
+    def get_max_match(self):
+        # use this to calculate the length of the reference sequence
+        max_match = 0
+        
+        for match in self.matches.values():
+            match_max = match[:,1].max()
+            if match_max > max_match:
+                max_match = match_max
+        
+        return max_match
+
     def update_window(self, start, end):
-        self.w_start = start
-        self.w_end = end
-    
+        # Redefine window boundaries
+        # make sure bothe values are over 0 and start < end
+        if 0 <= start < end:
+            self.w_start = int(start)
+            self.w_end = int(end)
+
     def make_alignment(self):
+        # Generate alignment on the current window
         self.aln_dict = {}
         for seqid, match in self.matches.items():
             seq = self.seqs[seqid]
-            in_window = match_in_window(match, self.w_start, self.w_end)
+            in_window = match_in_window(match, self.w_start, self.w_end) # get all sequence matches overlapping with the window
             
             if len(in_window) == 0:
+                # sequence doesn't overlap with window
                 continue
-            cropped = crop_match(in_window, self.w_start, self.w_end)
-            gaps = get_gaps(cropped)
-            self.aln_dict[seqid] = align_match(seq, cropped, gaps[0])
+            cropped = crop_match(in_window, self.w_start, self.w_end) # crop non-overlapping segments
+            gaps = get_gaps(cropped) # calculate gaps
+            self.aln_dict[seqid] = align_match(seq, cropped, gaps[0]) # generate alignment
     
     def aln_report(self):
         total_accs = list(self.aln_dict.keys())
@@ -277,7 +320,7 @@ class Windower():
             records.append(SeqRecord(Seq(seq), id = acc, name='', description = ''))
 
         alignment = msa(records)
-        filename = f'{prefix}_win_{self.w_start}-{self.w_end}_max-gap_{max_gap}.fasta'
+        filename = f'{prefix}_({self.w_start}-{self.w_end}_n{len(records)}).fasta'
         with open(filename, 'w') as handle:
             AlignIO.write(alignment, handle, 'fasta')
         return

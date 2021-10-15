@@ -16,6 +16,7 @@ from Bio.SeqRecord import SeqRecord
 from glob import glob
 #%% functions
 def make_BOLD_seqdict(bold_file):
+    # TODO: remove gaps from sequence
     seqdict = {}
     with open(bold_file, 'r') as handle:
         for title, seq in sfp(handle):

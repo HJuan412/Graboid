@@ -52,13 +52,18 @@ class Surveyor():
     def __init__(self, out_dir, dbase, active = False, verbose = False):
         self.out_dir = out_dir
         self.dbase = dbase
-        self.active = active
+        self.__active = active
         self.verbose = verbose
     
+    def status(self):
+        if self.__active:
+            return 'Activated'
+        else:
+            return 'Deactivated'
     def activate(self):
-        self.active = True
+        self.__active = True
     def deactivate(self):
-        self.active = False
+        self.__active = False
     
     def generate_filename(self, taxon, marker = ''):
         filename = f'{self.out_dir}/{taxon}_{marker}_{self.dbase}.summ'
@@ -101,7 +106,7 @@ class Surveyor():
             print(msg)
 
     def survey(self, taxon, marker = None):
-        if self.active:
+        if self.__active:
             self.anounce(taxon, marker)
             out_file = self.generate_filename(taxon, marker)
             apiurl = self.get_url(taxon, marker)

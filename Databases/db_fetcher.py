@@ -23,16 +23,14 @@ def set_entrez(email = "hernan.juan@gmail.com", apikey = "7c100b6ab050a287af30e3
     Entrez.api_key = apikey
 # acc data handling
 def get_file_data(filename):
-    split_file = filename.split('/')[-1].split('.tab')[0].split('_')
+    split_file = filename.split('/')[-1].split('.acc')[0].split('_')
 
-    file_tax = split_file[1]
-    file_mark = split_file[2]
-    return file_tax, file_mark, filename
+    return split_file + [filename]
 
 def build_acc_tab(acc_dir):
-    acc_files = glob(f'{acc_dir}/acc_*.tab')
+    acc_files = glob(f'{acc_dir}/*.acc')
     n_files = len(acc_files)
-    acc_tab = pd.DataFrame(index = range(n_files), columns = ['Taxon', 'Marker', 'File'])
+    acc_tab = pd.DataFrame(index = range(n_files), columns = ['Taxon', 'Marker', 'Database', 'File'])
     
     for idx, file in enumerate(acc_files):
         
@@ -99,8 +97,13 @@ class Fetcher():
     def get_nchunks(self, acc_list_len):
         nchunks = ceil(acc_list_len/self.chunksize)
         return nchunks
+    
+    def get_marked_accs(self, accfile):
+        marked = accfile.loc[accfile['Entry'] >= 1, 'Accession'].tolist()
+        return marked
 
-    def fetch(self, acc_list, taxon, marker = ''):
+    def fetch(self, acc_tab, taxon, marker = ''):
+        acc_list = self.get_marked_accs(acc_tab)
         chunks = acc_slicer(acc_list, self.chunksize)
         nchunks = self.get_nchunks(len(acc_list))
         out_file, warn_file = self.generate_filenames(taxon, marker)
@@ -120,19 +123,20 @@ def fetch_sequences(acc_dir, out_dir, warn_dir, chunksize = 500, verbose = True)
     # list accsession files
     acc_file_tab = build_acc_tab(acc_dir)
     
+    fetchers = {'BOLD':Fetcher('BOLDr', fetch_bold, out_dir, warn_dir, chunksize), # BOLDr signifies there are the raw BOLD files and must still be processed
+                'ENA':Fetcher('ENA', fetch_ena, out_dir, warn_dir, chunksize),
+                'NCBI':Fetcher('NCBI', fetch_ncbi, out_dir, warn_dir, chunksize)}
+
     for _, row in acc_file_tab.iterrows():
         taxon = row['Taxon']
         marker = row['Marker']
+        dbase = row['Database']
         file = row['File']
         acc_file = pd.read_csv(file, index_col = 0)
         
-        fetchers = {'BOLD':Fetcher('BOLDr', fetch_bold, out_dir, warn_dir, chunksize), # BOLDr signifies there are the raw BOLD files and must still be processed
-                    'ENA':Fetcher('ENA', fetch_ena, out_dir, warn_dir, chunksize),
-                    'NCBI':Fetcher('NCBI', fetch_ncbi, out_dir, warn_dir, chunksize)}
-        for dbase, sub_tab in acc_file.groupby('Database'):
-            if verbose:
-                print(f'Fetching {taxon} {marker} sequences from {dbase} database')
-            fetcher = fetchers[dbase]
-            acc_list = sub_tab['Accession'].tolist()
-            fetcher.fetch(acc_list, taxon, marker)
+        if verbose:
+            print(f'Fetching {taxon} {marker} sequences from {dbase} database')
+
+        fetcher = fetchers[dbase]
+        fetcher.fetch(acc_file, taxon, marker)
     return

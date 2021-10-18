@@ -170,7 +170,10 @@ class Lister():
             mixed_df.at[(mixed_df['old'] > 0) & (mixed_df['old'] != mixed_df['Version']), 'Entry'] = 2 # new version
             mixed_df.at[mixed_df['Version'] == 0] = -1 # missing entry
             self.out_tab = mixed_df[['Accession', 'Version', 'Entry']]
-    
+
+    def clip_redundant(self, acclist):
+        self.out_tab = self.out_tab.at[self.out_tab.index.isin(acclist), 'Entry'] = 0
+
     def store_tab(self, out_dir):
         out_file = self.generate_filename(out_dir)
         self.out_tab.to_csv(out_file)

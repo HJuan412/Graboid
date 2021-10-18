@@ -59,6 +59,10 @@ class Surveyor():
         self.active = True
     def deactivate(self):
         self.active = False
+    
+    def generate_filename(self, taxon, marker = ''):
+        filename = f'{self.out_dir}/{taxon}_{marker}_{self.dbase}.summ'
+        return filename
 
     def dl_and_save(self, apiurl, out_file):
         """
@@ -110,23 +114,12 @@ class BOLD_surveyor(Surveyor):
         apiurl = f'http://www.boldsystems.org/index.php/API_Public/specimen?taxon={taxon}&format=tsv'
         return apiurl
 
-    def generate_filename(self, taxon, marker = None):
-        filename = f'{self.out_dir}/{taxon}__BOLD.summ'
-        return filename
-
 class ENA_surveyor(Surveyor):
     def get_url(self, taxon, marker):
         apiurl = f'https://www.ebi.ac.uk/ena/browser/api/tsv/textsearch?domain=embl&result=sequence&query=%22{taxon}%22%20AND%20%22{marker}%22'
         return apiurl
 
-    def generate_filename(self, taxon, marker = None):
-        filename = f'{self.out_dir}/{taxon}_{marker}_BOLD.summ'
-        return filename
-
 class NCBI_surveyor(Surveyor):
-    def generate_filename(self, taxon, marker):
-        filename = f'{self.out_dir}/{taxon}_{marker}_NCBI.summ'
-        return filename
     
     def survey(self, taxon, marker):
         if self.active:

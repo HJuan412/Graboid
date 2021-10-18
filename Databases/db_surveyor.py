@@ -37,23 +37,23 @@ def survey(summ_dir, taxons, markers, bold = True, ena = True, ncbi = True, verb
 
     """
     
-    bold_survey = BOLD_surveyor(summ_dir, bold)
-    ena_survey = ENA_surveyor(summ_dir, ena)
-    ncbi_survey = NCBI_surveyor(summ_dir, ncbi)
+    bold_survey = BOLD_surveyor(summ_dir, 'BOLD', bold, verbose)
+    ena_survey = ENA_surveyor(summ_dir, 'ENA', ena, verbose)
+    ncbi_survey = NCBI_surveyor(summ_dir, 'NCBI', ncbi, verbose)
 
     for taxon in taxons:
         bold_survey.survey(taxon)
         for marker in markers:
-            if verbose:
-                print(f'Surveying for {taxon}, {marker}')
             ena_survey.survey(taxon, marker)
             ncbi_survey.survey(taxon, marker)
 
 #%% classes
 class Surveyor():
-    def __init__(self, out_dir, active = False):
+    def __init__(self, out_dir, dbase, active = False, verbose = False):
         self.out_dir = out_dir
+        self.dbase = dbase
         self.active = active
+        self.verbose = verbose
     
     def activate(self):
         self.active = True
@@ -88,9 +88,17 @@ class Surveyor():
         # close connection
         r.release_conn()
         return
+    
+    def anounce(self, taxon, marker = None):
+        msg = f'Surveying {self.dbase} for {taxon}'
+        if not marker is None:
+            msg += f'{marker}'
+        if self.verbose:
+            print(msg)
 
     def survey(self, taxon, marker = None):
         if self.active:
+            self.anounce(taxon, marker)
             out_file = self.generate_filename(taxon, marker)
             apiurl = self.get_url(taxon, marker)
             self.dl_and_save(apiurl, out_file)
@@ -122,6 +130,7 @@ class NCBI_surveyor(Surveyor):
     
     def survey(self, taxon, marker):
         if self.active:
+            self.anounce(taxon, marker)
             out_file = self.generate_filename(taxon, marker)
             search = Entrez.esearch(db='nucleotide', term = f'{taxon}[Organism] AND {marker}[all fields]', idtype = 'acc', retmax="100000")
             search_record = Entrez.read(search)

@@ -160,15 +160,16 @@ class Lister():
 
     def compare_tab(self, old_dir):
         if self.get_old_tab(old_dir):
+            long_accs = self.acc_subtab['Accession']
             self_vers = self.acc_subtab['Version']
             old_vers = self.old_subtab['Version']
-            mixed_df = pd.DataFrame[{'new':self_vers, 'old':old_vers}].fillna(0)
+            mixed_df = pd.DataFrame[{'Accession':long_accs, 'Version':self_vers, 'old':old_vers}].fillna(0)
             mixed_df['Entry'] = 0 # do nothing
             # new entries
             mixed_df.at[mixed_df['old'] == 0, 'Entry'] = 1 # new entry
-            mixed_df.at[(mixed_df['old'] > 0) & (mixed_df['old'] != mixed_df['new']), 'Entry'] = 2 # new version
-            mixed_df.at[mixed_df['new'] == 0] = -1 # missing entry
-            self.out_tab = mixed_df
+            mixed_df.at[(mixed_df['old'] > 0) & (mixed_df['old'] != mixed_df['Version']), 'Entry'] = 2 # new version
+            mixed_df.at[mixed_df['Version'] == 0] = -1 # missing entry
+            self.out_tab = mixed_df[['Accession', 'Version', 'Entry']]
     
     def store_tab(self, out_dir):
         out_file = self.generate_filename(out_dir)

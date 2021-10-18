@@ -152,7 +152,7 @@ class Lister():
         return filename
     
     def get_old_tab(self, old_dir):
-        old_file_path = f'{old_dir}/{self.taxon}_{self.marker}_{self.dbase}.acc'
+        old_file_path = self.generate_filename(old_dir)
         if os.path.isfile(old_file_path):
             self.old_subtab = pd.read_csv(old_file_path)
             return True

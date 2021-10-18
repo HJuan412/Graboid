@@ -106,13 +106,13 @@ class Surveyor():
         return
 
 class BOLD_surveyor(Surveyor):
-    def generate_filename(self, taxon, marker = None):
-        filename = f'{self.out_dir}/{taxon}__BOLD.summ'
-        return filename
-    
     def get_url(self, taxon, marker = None):
         apiurl = f'http://www.boldsystems.org/index.php/API_Public/specimen?taxon={taxon}&format=tsv'
         return apiurl
+
+    def generate_filename(self, taxon, marker = None):
+        filename = f'{self.out_dir}/{taxon}__BOLD.summ'
+        return filename
 
 class ENA_surveyor(Surveyor):
     def get_url(self, taxon, marker):

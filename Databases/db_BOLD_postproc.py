@@ -15,77 +15,103 @@ from Bio.SeqRecord import SeqRecord
 
 from glob import glob
 #%% functions
-def make_BOLD_seqdict(bold_file):
-    # TODO: remove gaps from sequence
+def build_BOLD_seqdict(bold_file):
+    # builds a {header:seq} dictionary from the given file
     seqdict = {}
     with open(bold_file, 'r') as handle:
         for title, seq in sfp(handle):
             seqdict[title] = seq
     return seqdict
 
+def build_mark_dict(markers):
+    # builds a {marker:[]} dictionary, will store the headers for each marker
+    mark_dict = {}
+    for mark in markers:
+        mark_dict[mark] = []
+    return mark_dict
+
 def get_mark(header):
+    # get the sequence's marker from its header (third field in header)
     split_header = header.split('|')
     mark = split_header[2]
     mark = mark.split('-')[0]
     return mark
 
 def has_alt_acc(header):
+    # check if the sequence has an alternate accession (fourth field in header)
     split_header = header.split('|')
     if len(split_header) > 3:
         return True
     return False
 
 def get_acc(header):
+    # get the sequence accession and fix version number
     split_header = header.split('|')
     acc = split_header[0].replace('-', '.')
     return acc
 
 def get_alt_acc(header):
+    # get the alternative accession from the header (fourth field)
     split_header = header.split('|')
     return split_header[3]
 
-def generate_outfile(bold_file, marker):
-    split_file = bold_file.split('/')
-    out_dir = '/'.join(split_file[:-1])
-    tax = split_file[-1].split('_')[0]
-    outfile = f'{out_dir}/{tax}_{marker}_BOLD.tmp' # BOLDp means it's been processed, use to differentiate from raw BOLD files
-    return outfile
+def get_record_acc(header):
+    if has_alt_acc(header):
+        acc = get_alt_acc(header)
+    else:
+        acc = get_acc(header)
+    return acc
 
 def locate_BOLD_files(seq_dir):
     files = glob(f'{seq_dir}/*BOLDr*tmp')
     return files
-#%%
-def process_file(bold_file, markers = ['COI', '18S']):
-    seqdict = make_BOLD_seqdict(bold_file)
+
+#%% classes
+class Processor():
+    def __init__(self, bold_file, markers = ['COI', '18S']):
+        self.bold_file = bold_file
+        self.seqs = build_BOLD_seqdict(bold_file)
+        self.markers = markers
+        self.mark_dict = build_mark_dict(markers)
+        self.split_seqs()
     
-    mark_dict = {}
-    for mark in markers:
-        mark_dict[mark] = []
+    def split_seqs(self):
+        # distribute sequence headers by marker
+        for header in self.seqs.keys():
+            mark = get_mark(header)
+            if mark in self.markers:
+                self.mark_dict[mark].append(header)
     
-    for header in seqdict.keys():
-        mark = get_mark(header)
-        if mark in mark_dict.keys():
-            mark_dict[mark].append(header)
+    def generate_filename(self, marker):
+        # generate filename for the processed file
+        split_file = self.bold_file.split('/')
+        out_dir = '/'.join(split_file[:-1])
+        tax = split_file[-1].split('_')[0]
+        outfile = f'{out_dir}/{tax}_{marker}_BOLD.tmp' # BOLD means it's been processed, use to differentiate from raw BOLD files (marked as BOLDr)
+        return outfile
     
-    for mark, headerlist in mark_dict.items():
-        mark_records = []
+    def get_mark_records(self, headerlist):
+        # get all sequences belonging to a given marker (also removes gaps)
+        records = []
         for header in headerlist:
-            if has_alt_acc(header):
-                acc = get_alt_acc(header)
-            else:
-                acc = get_acc(header)
-            
-            record = SeqRecord(Seq(seqdict[header]), id = acc, name = '', description = header)
-            mark_records.append(record)
-
-        outfile = generate_outfile(bold_file, mark)
-        with open(outfile, 'w') as out_handle:
-            SeqIO.write(mark_records, out_handle, 'fasta')
-    return
-
-def processor(seq_dir, markers = ['COI', '18S']):
+            acc = get_record_acc(header)
+            seq = self.seqs[header].replace('-', '')
+            record = SeqRecord(Seq(seq), id = acc, name = '', description = header)
+            records.append(record)
+        return records
+    
+    def process(self):
+        # generate processed files for all markers
+        for mark, headerlist in self.mark_dict.items():
+            mark_records = self.get_mark_records(headerlist)
+            mark_outfile = self.generate_filename(mark)
+            with open(mark_outfile, 'w') as out_handle:
+                SeqIO.write(mark_records, out_handle, 'fasta')
+#%% main
+def process_files(seq_dir, markers = ['COI', '18S']):
     bold_files = locate_BOLD_files(seq_dir)
     
     for file in bold_files:
-        process_file(file, markers)
+        proc = Processor(file, markers)
+        proc.process()
     return

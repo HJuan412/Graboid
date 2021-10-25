@@ -19,14 +19,8 @@ gb_file = '/home/hernan/PROYECTOS/Graboid/Taxonomy/Test2/nucl_gb.accession2taxid
 wgs_file = '/home/hernan/PROYECTOS/Graboid/Taxonomy/Test2/nucl_wgs.accession2taxid'
 
 #%% functions
-def get_acclist(file, tmp_dir):
-    tab = pd.read_csv(file)
-    acclist = tab.iloc[:,0].tolist()
-    out_path = f'{tmp_dir}/{file.split("/")[-1]}.tmp'
-    with open(out_path, 'w') as handle:
-        handle.write('\n'.join(acclist))
-
 def grep_acc2taxid(acc_list, file, out_file):
+    # Locate relevant entries in the acc2taxid file, extract them to out_file
     grep_cline = ['grep', '-w', '-f', acc_list, file]
     with open(out_file, 'a') as out_handle:
         process = subprocess.Popen(grep_cline, stdout = out_handle)
@@ -42,6 +36,7 @@ class Cropper():
         self.out_file = f'{out_dir}/{tax}_{mark}_acc2taxid.tsv'
 
     def make_acclist(self, acc_file):
+        # Generate a temporal accession list to use in grep
         tab = pd.read_csv(acc_file)
         acclist = tab.iloc[:,0].tolist()
         self.acc_list = f'{self.out_dir}/{acc_file.split("/")[-1]}.tmp'
@@ -50,14 +45,17 @@ class Cropper():
         return
     
     def clear_acclist(self):
+        # remove acclist
         if os.path.isfile(self.acc_list):
             os.remove(self.acc_list)
     
     def clear_outfile(self):
+        # remove out_file
         if os.path.isfile(self.out_file):
             os.remove(self.out_file)
 
     def check_acc2taxid_files(self):
+        # check presence of acc2taxid files
         gb = f'{self.out_dir}/nucl_gb.accession2taxid'
         wgs = f'{self.out_dir}/nucl_wgs.accession2taxid'
         if os.path.isfile(gb):
@@ -70,6 +68,7 @@ class Cropper():
             self.wgs = None
     
     def crop(self):
+        # delete out_file (if present) generate new one with present acc2taxid files
         self.clear_outfile()
         if not self.gb is None:
             grep_acc2taxid(self.acc_list, self.gb, self.out_file)

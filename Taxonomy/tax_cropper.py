@@ -4,19 +4,15 @@
 Created on Fri Oct 22 14:38:24 2021
 
 @author: hernan
-Perform reciprocal grep between accession2taxid files and Acc_lists
+Perform grep between accession2taxid files and Acc_lists
 """
 
 #%% libraries
+from glob import glob
 from tax_NCBI_fetcher import check_outdir
 import os
 import pandas as pd
 import subprocess
-
-#%% variables
-acc_dir = '/home/hernan/PROYECTOS/Graboid/Databases/13_10_2021-20_15_58/Acc_lists'
-gb_file = '/home/hernan/PROYECTOS/Graboid/Taxonomy/Test2/nucl_gb.accession2taxid'
-wgs_file = '/home/hernan/PROYECTOS/Graboid/Taxonomy/Test2/nucl_wgs.accession2taxid'
 
 #%% functions
 def grep_acc2taxid(acc_list, file, out_file):
@@ -26,24 +22,46 @@ def grep_acc2taxid(acc_list, file, out_file):
         process = subprocess.Popen(grep_cline, stdout = out_handle)
         process.wait()
         print('Done!')
+
+def crop_dir(out_dir, acc_dir, taxons = ['Nematoda', 'Platyhelminthes'], markers = ['18S', '28S', 'COI']):
+    # Crop the files present in the given directory
+    for tax in taxons:
+        print(f'Processing {tax}')
+        for mark in markers:
+            print(f'Processing {mark}')
+            acc_file = f'{acc_dir}/{tax}_{mark}_NCBI.acc'
+            crp = Cropper(out_dir, acc_file, tax, mark)
+            crp.crop()
+    return
+
+
 #%% classes
 class Cropper():
-    def __init__(self, out_dir, acc_file, tax, mark):
+    def __init__(self, out_dir, acc_dir):
         self.out_dir = out_dir
         check_outdir(out_dir)
-        self.make_acclist(acc_file)
+        self.merge_accs(acc_dir, out_dir)
         self.check_acc2taxid_files()
-        self.out_file = f'{out_dir}/{tax}_{mark}_acc2taxid.tsv'
-
-    def make_acclist(self, acc_file):
-        # Generate a temporal accession list to use in grep
-        tab = pd.read_csv(acc_file)
-        acclist = tab.iloc[:,0].tolist()
-        self.acc_list = f'{self.out_dir}/{acc_file.split("/")[-1]}.tmp'
-        with open(self.acc_list, 'w') as out_handle:
-            out_handle.write('\n'.join(acclist))
-        return
+        self.out_file = f'{out_dir}/acc2taxid_cropped.tsv'
     
+    def merge_accs(self, acc_dir, out_dir):
+        # merge all the acc_list files into a single list to reduce redundant searches
+        self.acc_files = glob(f'{acc_dir}/*NCBI.acc') # list acc_list files to split records later
+        self.acc_list = out_file = f'{out_dir}/accs.tmp' # merged accessions file
+        accs = set()
+        for acc_file in self.acc_files:
+            acc_tab = pd.read_csv(acc_file)
+            acclist = set(acc_tab.iloc[:,0].tolist())
+            accs = accs.union(acclist)
+        with open(out_file, 'a') as handle:
+            handle.write('\n'.join(accs))
+    
+    def generate_filename(self, acc_file):
+        # Generate out file for a taxon-marker cropped file
+        file = acc_file.split('/')[-1][:-8]
+        filename = f'{self.out_dir}/{file}acc2taxid.tsv'
+        return filename
+
     def clear_acclist(self):
         # remove acclist
         if os.path.isfile(self.acc_list):
@@ -74,4 +92,12 @@ class Cropper():
             grep_acc2taxid(self.acc_list, self.gb, self.out_file)
         if not self.wgs is None:
             grep_acc2taxid(self.acc_list, self.wgs, self.out_file)
-            
+    
+    def split(self):
+        # from the cropped file distribute matches of each taxon/marker pair
+        cropped_tab = pd.read_csv(self.out_file, sep = '\t', index_col = 0, header = None)
+        for acc_file in self.acc_files:
+            acclist = pd.read_csv(acc_file).iloc[:,0].tolist()
+            acc2taxid_tab = cropped_tab.loc[acclist,:]
+            out_file = self.generate_filename(acc_file)
+            acc2taxid_tab.to_csv(out_file, sep = '\t')

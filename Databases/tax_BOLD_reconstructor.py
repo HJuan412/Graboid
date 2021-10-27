@@ -7,13 +7,15 @@ Created on Tue Oct 12 12:20:26 2021
 """
 #%% lib
 import pandas as pd
+import tax_reconstructor as trec
+
 #%% variables
 ranks = ['species', 'genus', 'family', 'order', 'class', 'phylum']
 #%% functions
-def build_node_tab(tab, ranks, last_known_parent = 0):
+def build_node_tab(tab, ranks, last_known_parent = 1):
     # ranks must be DESCENDING
     # recursively connects nodes, generates table with index taxID and columns [parent_tax_ID and rank]
-    nodes = pd.DataFrame(columns = ['parent_tax_ID', 'rank'], dtype = int)
+    nodes = pd.DataFrame(columns = ['parent tax_id', 'rank'], dtype = int)
     rk = ranks[0]
     colname = f'{rk}_taxID'
     for tax in list(tab.loc[tab[colname].notna(), colname].unique()):
@@ -29,17 +31,19 @@ def build_node_tab(tab, ranks, last_known_parent = 0):
         nodes = pd.concat([nodes, nannodes], axis = 0)
     
     nodes.set_index(nodes.index.astype(int), inplace = True)
-    nodes['parent_tax_ID'] = nodes['parent_tax_ID'].astype(int)
+    nodes['parent tax_id'] = nodes['parent tax_id'].astype(int)
     return nodes
 
 #%% classes
 class Reconstructor():
-    def __init__(self, out_dir, in_file, ranks = ['species', 'genus', 'family', 'order', 'class', 'phylum']):
-        self.out_dir = out_dir
+    def __init__(self, in_file, ranks = ['species', 'genus', 'family', 'order', 'class', 'phylum']):
         self.ranks = ranks
         self.load_data(in_file)
         self.build_name_tab()
         self.node_tab = build_node_tab(self.tax_tab, ranks[::-1])
+        self.build_acc2tax_tab()
+        self.ttab = trec.build_taxtab(self.acc2tax.values, self.node_tab, ranks[::-1])
+        self.build_taxonomy()
 
     def load_data(self, file):
         # open bold tab and extract the relevant columns
@@ -82,4 +86,10 @@ class Reconstructor():
             unid_recs = subtab.loc[subtab.isna()].index
             if len(unid_recs) == 0:
                 break
-        self.acc2taxID = acc2taxID.astype(int)
+        self.acc2tax = acc2taxID.astype(int)
+
+    def build_taxonomy(self):
+        idlist = self.acc2tax.values.tolist()
+        taxonomy_df = self.ttab.loc[idlist,:]
+        taxonomy_df.set_index(self.acc2tax.index, inplace = True)
+        self.taxonomy_df = taxonomy_df

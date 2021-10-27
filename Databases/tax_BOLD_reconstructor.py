@@ -36,8 +36,9 @@ def build_node_tab(tab, ranks, last_known_parent = 1):
 
 #%% classes
 class Reconstructor():
-    def __init__(self, in_file, ranks = ['species', 'genus', 'family', 'order', 'class', 'phylum']):
+    def __init__(self, out_dir, in_file, ranks = ['species', 'genus', 'family', 'order', 'class', 'phylum']):
         self.ranks = ranks
+        self.generate_outprefix(out_dir, in_file)
         self.load_data(in_file)
         self.build_name_tab()
         self.node_tab = build_node_tab(self.tax_tab, ranks[::-1])
@@ -93,3 +94,7 @@ class Reconstructor():
         taxonomy_df = self.ttab.loc[idlist,:]
         taxonomy_df.set_index(self.acc2tax.index, inplace = True)
         self.taxonomy_df = taxonomy_df
+    
+    def generate_outprefix(self, out_dir, in_file):
+        file_tax = in_file.split('/')[-1].split('_')[0]
+        self.out_prefix = f'{out_dir}/{file_tax}'

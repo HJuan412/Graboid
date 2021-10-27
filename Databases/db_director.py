@@ -68,6 +68,7 @@ def make_database(taxons, markers, bold, ena, ncbi, dirname = None):
     # Build accession lists
     print('Building accession lists...')
     acc_lister.acc_list(summ_dir, acc_dir)
+    # Reconstruct taxonomies
     # # Fetch sequences
     print('Fetching sequences...')
     seq_fetcher.fetch_sequences(acc_dir, seq_dir, warn_dir)

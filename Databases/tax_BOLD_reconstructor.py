@@ -10,85 +10,76 @@ import pandas as pd
 #%% variables
 ranks = ['species', 'genus', 'family', 'order', 'class', 'phylum']
 #%% functions
-# input handling
-def load_data(file, level):
-    bold_tab = pd.read_csv(file, sep = '\t', encoding = 'latin-1', index_col = 1) # latin-1 to parse BOLD files
+def build_node_tab(tab, ranks, last_known_parent = 0):
+    # ranks must be DESCENDING
+    # recursively connects nodes, generates table with index taxID and columns [parent_tax_ID and rank]
+    nodes = pd.DataFrame(columns = ['parent_tax_ID', 'rank'], dtype = int)
+    rk = ranks[0]
+    colname = f'{rk}_taxID'
+    for tax in list(tab.loc[tab[colname].notna(), colname].unique()):
+        nodes.at[tax] = [last_known_parent, rk]
     
-    tax_tab = bold_tab[['phylum_taxID',
-           'phylum_name', 'class_taxID', 'class_name', 'order_taxID', 'order_name',
-           'family_taxID', 'family_name', 'subfamily_taxID', 'subfamily_name',
-           'genus_taxID', 'genus_name', 'species_taxID', 'species_name',
-           'subspecies_taxID', 'subspecies_name']]
-    
-    filtered_tab = tax_tab.loc[tax_tab[f'{ranks[level]}_name'].notna()]
-    
-    return filtered_tab
-
-# table foundations
-def get_names_nodes(filtered_tab):
-    names_dict = {'tax_ID':[], 'tax_name':[]}
-    nodes_dict = {'tax_ID':[], 'parent_tax_ID':[], 'rank':[]}
-    for idx, lev in enumerate(ranks):
-        name_col = f'{lev}_name'
-        id_col = f'{lev}_taxID'
-        parent_level = idx + 1
+    if len(ranks) > 1:
+        for parent, subtab in tab.groupby(colname):
+            subnodes = build_node_tab(subtab, ranks[1:], parent)
+            nodes = pd.concat([nodes, subnodes], axis = 0)
         
-        for tax, subtab in filtered_tab.groupby(name_col):
-            taxid = subtab[id_col].values[0]
-            names_dict['tax_ID'].append(taxid)
-            names_dict['tax_name'].append(tax)
+        nantab = tab.loc[tab[colname].isna()]
+        nannodes = build_node_tab(nantab, ranks[1:], last_known_parent)
+        nodes = pd.concat([nodes, nannodes], axis = 0)
     
-            if parent_level < len(ranks):
-                parent_rank = ranks[parent_level]
-                parent_id_col = f'{parent_rank}_taxID'
-                parent_taxid = subtab[parent_id_col].values[0]
-                
-                nodes_dict['tax_ID'].append(taxid)
-                nodes_dict['parent_tax_ID'].append(parent_taxid)
-                nodes_dict['rank'].append(lev)
-    return names_dict, nodes_dict
+    nodes.set_index(nodes.index.astype(int), inplace = True)
+    nodes['parent_tax_ID'] = nodes['parent_tax_ID'].astype(int)
+    return nodes
 
-def build_names_tab(names_dict):
-    names_tab = pd.DataFrame.from_dict(names_dict)
-    names_tab['tax_ID'] = names_tab['tax_ID'].astype(int)
-    names_tab.set_index('tax_ID', inplace = True)
-    return names_tab
+#%% classes
+class Reconstructor():
+    def __init__(self, out_dir, in_file, ranks = ['species', 'genus', 'family', 'order', 'class', 'phylum']):
+        self.out_dir = out_dir
+        self.ranks = ranks
+        self.load_data(in_file)
+        self.build_name_tab()
+        self.node_tab = build_node_tab(self.tax_tab, ranks[::-1])
 
-def build_nodes_tab(nodes_dict):
-    nodes_tab = pd.DataFrame.from_dict(nodes_dict)
-    nodes_tab['tax_ID'] = nodes_tab['tax_ID'].astype(int)
-    nodes_tab['parent_tax_ID'] = nodes_tab['parent_tax_ID'].astype(int)
-    nodes_tab.set_index('tax_ID', inplace = True)
-    return nodes_tab
-
-def build_acc2taxid_tab(filtered_tab, last_level):
-    acc2taxID = pd.Series(index = filtered_tab.index, name = 'TaxID', dtype = int)
-
-    subtab = filtered_tab.copy()
-    for l in range(last_level + 1):
-        level = ranks[l]
-        name_col = f'{level}_name'
-        id_col = f'{level}_taxID'
+    def load_data(self, file):
+        # open bold tab and extract the relevant columns
+        bold_tab = pd.read_csv(file, sep = '\t', encoding = 'latin-1', index_col = 1, low_memory = False) # latin-1 to parse BOLD files
         
-        sub_subtab = subtab.loc[subtab[name_col].notna()]
-        taxids = sub_subtab[id_col].astype(int)
-        acc2taxID.update(taxids)
-        subtab.drop(sub_subtab.index, inplace = True)
+        self.tax_tab = bold_tab[['phylum_taxID', 'phylum_name',
+                                      'class_taxID', 'class_name',
+                                      'order_taxID', 'order_name',
+                                      'family_taxID', 'family_name',
+                                      'subfamily_taxID', 'subfamily_name',
+                                      'genus_taxID', 'genus_name',
+                                      'species_taxID', 'species_name',
+                                      'subspecies_taxID', 'subspecies_name']]
     
-    return acc2taxID
-
-# director
-def process_file(file, level : int, to_file = False, out_file = None):
-    filtered_tab = load_data(file, level)
-    names_dict, nodes_dict = get_names_nodes(filtered_tab)
-    names_tab = build_names_tab(names_dict)
-    nodes_tab = build_nodes_tab(nodes_dict)
-    acc2taxid = build_acc2taxid_tab(filtered_tab, level)
+    def build_name_tab(self):
+        # build a taxID:Name table
+        names = pd.Series(name='tax_name', dtype = str)
+        for rk in self.ranks:
+            idxcol = f'{rk}_taxID'
+            namecol = f'{rk}_name'
+            
+            rows = self.tax_tab.loc[self.tax_tab[idxcol].notna()].index.tolist()
+            taxids = self.tax_tab.loc[rows, idxcol].values.astype(int).tolist()
+            taxnames = self.tax_tab.loc[rows, namecol].values.tolist()
+            
+            for tid, tnm in zip(taxids, taxnames):
+                names.at[tid] = tnm
+        self.name_tab = names
     
-    if to_file:
-        if out_file is None:
-            out_file = file.split('_')[0]
-        
-        names_tab.to_csv(f'{out_file}/names.csv')
-        nodes_tab.to_csv(f'{out_file}/nodes.csv')
-        acc2taxid.to_csv(f'{out_file}/acc2taxid.csv')
+    def build_acc2tax_tab(self):
+        # generate an acc:taxID table
+        acc2taxID = pd.Series(name = 'TaxID', dtype = int)
+            
+        unid_recs = self.tax_tab.index
+        for rnk in self.ranks:
+            rank_col = f'{rnk}_taxID'
+            subtab = self.tax_tab.loc[unid_recs, rank_col]
+            identified_recs = subtab.loc[subtab.notna()]
+            acc2taxID = pd.concat([acc2taxID, identified_recs])
+            unid_recs = subtab.loc[subtab.isna()].index
+            if len(unid_recs) == 0:
+                break
+        self.acc2taxID = acc2taxID.astype(int)

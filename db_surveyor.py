@@ -10,7 +10,7 @@ Created on Fri Oct 29 14:12:47 2021
 from Bio import Entrez
 import pandas as pd
 import urllib3
-
+#%% functions
 #%% classes
 # survey tools
 class SurveyTool():

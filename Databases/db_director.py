@@ -10,12 +10,15 @@ Director for database creation and updating
 #%% libraries
 from Bio import Entrez
 from datetime import datetime
-import db_survey
-import acc_lister
-import seq_fetcher
-import BOLD_post_processing as bold_pp
-import db_merge
 import os
+
+import db_surveyor as surv
+import db_lister as lstr
+import db_fetcher as ftch
+import db_BOLD_postproc as boldpp
+import db_merger as mrgr
+
+import tax_director as taxdir
 #%% Manage directories
 def generate_dirname():
     t = datetime.now()
@@ -64,17 +67,19 @@ def make_database(taxons, markers, bold, ena, ncbi, dirname = None):
     
     # Survey databases
     print('Surveying databases...')
-    db_survey.survey(summ_dir, taxons, markers, bold, ena, ncbi)
+    surv.survey(summ_dir, taxons, markers, bold, ena, ncbi)
     # Build accession lists
     print('Building accession lists...')
-    acc_lister.acc_list(summ_dir, acc_dir)
+    lstr.acc_list(summ_dir, acc_dir)
     # Reconstruct taxonomies
+    taxdir.TaxDirector(tax_dir, summ_dir, acc_dir)
+    taxdir.tax_reconstruct()
     # # Fetch sequences
     print('Fetching sequences...')
-    seq_fetcher.fetch_sequences(acc_dir, seq_dir, warn_dir)
+    ftch.fetch_sequences(acc_dir, seq_dir, warn_dir)
     # # Postprocess BOLD data
     print('Processing BOLD files...')
-    bold_files = bold_pp.processor(seq_dir)
+    boldpp.processor(seq_dir)
     # # Compare and merge
     print('Comparing and merging...')
-    db_merge.merger(seq_dir)
+    mrgr.merger(seq_dir)

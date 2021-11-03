@@ -8,17 +8,16 @@ Director for database creation and updating
 """
 
 #%% libraries
-from Bio import Entrez
 from datetime import datetime
 import os
 
 import db_surveyor as surv
 import db_lister as lstr
 import db_fetcher as ftch
-import db_BOLD_postproc as boldpp
+import db_BOLD_postproc as bdpp
 import db_merger as mrgr
 
-import tax_director as taxdir
+import tax_director as txdr
 #%% Manage directories
 def generate_dirname():
     t = datetime.now()
@@ -37,22 +36,27 @@ def new_directories():
         os.mkdir(sdir)
     return summ_dir, seq_dir, tax_dir, acc_dir, warn_dir
 
-#%% Entrez
-def set_entrez(email = "hernan.juan@gmail.com", apikey = "7c100b6ab050a287af30e37e893dc3d09008"):
-    Entrez.email = email
-    Entrez.api_key = apikey
+def get_surv_tools(bold = True, ena = False, ncbi = True):
+    t1 = []
+    t2 = []
+    if bold:
+        t1.append(surv.SurveyBOLD)
+    if ena:
+        t2.append(surv.SurveyENA)
+    if ncbi:
+        t2.append(surv.SurveyNCBI)
+    
+    return t1, t2
 
 #%% Test parameters
-# taxons = ['Nematoda', 'Platyhelminthes']
-# markers = ['18S', '28S', 'COI']
-# bold = True
-# ena = False
-# ncbi = True
 taxons = ['Nematoda', 'Platyhelminthes']
 markers = ['18S', '28S', 'COI']
 bold = True
 ena = False
 ncbi = False
+
+old_accs = None # for lister
+chunk_size = 500 # for fetcher
 #%% Main
 def make_database(taxons, markers, bold, ena, ncbi, dirname = None):
     # generate directories
@@ -62,24 +66,36 @@ def make_database(taxons, markers, bold, ena, ncbi, dirname = None):
         # TODO: en este caso, el directorio ya existe, qué hacer con archivos preexistentes?
         summ_dir, seq_dir, tax_dir, acc_dir, warn_dir = generate_subdirs(dirname)
     
+    # TODO: handle old directory
     # set email and api key
-    set_entrez()
+    ftch.set_entrez()
+    
+    # select survey tools
+    t1, t2 = get_surv_tools(bold, ena, ncbi)
+
+    # instance classes
+    surveyor = surv.Surveyor(taxons, markers, t1, t2, summ_dir, warn_dir)
+    lister = lstr.Lister(summ_dir, acc_dir, warn_dir, old_accs)
+    fetcher = ftch.Fetcher(acc_dir, seq_dir, warn_dir)
+    bold_postprocessor = bdpp.BOLDPostProcessor(seq_dir, seq_dir, warn_dir)
+    merger = mrgr.Merger(seq_dir, seq_dir, warn_dir, db_order = ['NCBI', 'BOLD', 'ENA'])
+    
     
     # Survey databases
     print('Surveying databases...')
-    surv.survey(summ_dir, taxons, markers, bold, ena, ncbi)
+    surveyor.survey()
     # Build accession lists
     print('Building accession lists...')
-    lstr.acc_list(summ_dir, acc_dir)
+    lister.build_lists()
     # Reconstruct taxonomies
-    taxdir.TaxDirector(tax_dir, summ_dir, acc_dir)
-    taxdir.tax_reconstruct()
+    txdr.TaxDirector(tax_dir, summ_dir, acc_dir)
+    txdr.tax_reconstruct()
     # # Fetch sequences
     print('Fetching sequences...')
-    ftch.fetch_sequences(acc_dir, seq_dir, warn_dir)
+    fetcher.fetch(chunk_size)
     # # Postprocess BOLD data
     print('Processing BOLD files...')
-    boldpp.processor(seq_dir)
+    bold_postprocessor.process(markers)
     # # Compare and merge
     print('Comparing and merging...')
-    mrgr.merger(seq_dir)
+    merger.merge()

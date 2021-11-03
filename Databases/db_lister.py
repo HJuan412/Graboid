@@ -29,10 +29,6 @@ def build_summ_tab(summ_dir):
         summ_tab = summ_tab.append(row, ignore_index=True)
     return summ_tab
 
-def generate_filename(taxon, marker): # delete
-    filename = f'acc_{taxon}_{marker}.tab'
-    return filename
-
 # data loading
 def read_BOLD_summ(summ_file):
     # extract a list of accessions from a BOLD summary
@@ -46,120 +42,50 @@ def read_NCBI_summ(summ_file):
     accs = ncbi_tab.iloc[:,0].tolist()
     return accs
 
-def read_summ(summ_file, read_func): # delete
-    # extract accessions (and generate accessions w/o version number) from summary file
-    # read_func specify what function will be used to read the file (read_BOLD_summ or read_NCBI_summ)
-    accs = read_func(summ_file)
-    
-    shortaccs = get_shortaccs(accs)
-    acc_series = pd.Series(accs, index = shortaccs, name = 'Accession')
-    return acc_series
-
-# data processing
-def get_shortaccs(acclist): # delete
-    # remove version number from each accession in acclist
-    shortaccs = [acc.split('.')[0] for acc in acclist]
-    return shortaccs
-
-def make_acc_subtab(acc_series, dbase, tax, mark = ''): # delete
-    # add taxon, marker and database information to the accession series
-    acc_subtab = acc_series.to_frame()
-    acc_subtab['Database'] = dbase
-    acc_subtab['Taxon'] = tax
-    acc_subtab['Marker'] = mark
-    
-    return acc_subtab
-
-def make_dbase_series(tab, dbase): # delete
-    # generate accession series for the given dbase
-    # tab is a subtab generated from grouping the complete summary tab by taxon and marker, should contain a single entry per database
-    
-    # select the read_func to use
-    if dbase == 'BOLD':
-        read_func = read_BOLD_summ
-    else:
-        read_func = read_NCBI_summ
-    
-    # select the summary file and generate accsession series for it
-    summ_file = tab.loc[tab['Database'] == dbase, 'File'].values[0]
-    acc_series = read_summ(summ_file, read_func)
-    return acc_series
-
-def merge_subtabs(subtabs): # delete
-    # merge the given subtabs into one, mind repeated entries
-    # order in which subtabs are presented determines priority for repeated entries. When an entry is repeated between two subtabs, the first one to appear is kept
-    # list should start with NCBI
-    acc_tab = pd.DataFrame(columns = ['Accession', 'Database', 'Taxon', 'Marker'])
-    
-    for subtab in subtabs:
-        acc_idx = set(acc_tab.index)
-        st_idx = set(subtab.index)
-        
-        # only add entries not already present in acc_tab
-        diff = st_idx.difference(acc_idx)
-        to_add = subtab.loc[diff]
-        
-        acc_tab = acc_tab.append(to_add)
-    return acc_tab
-
-def make_acc_tab(summ_tab, tax, mark): # delete
-    # generate a full accession table for the given tax/mark combo
-    subtabs = []
-    for dbase in ['NCBI', 'BOLD', 'ENA']:
-        # generate subtab for each database (if present)
-        if dbase in summ_tab['Database'].values:
-            dbase_series = make_dbase_series(summ_tab, dbase)
-            subtabs.append(make_acc_subtab(dbase_series, dbase, tax, mark))
-    merged = merge_subtabs(subtabs)
-    return merged
-
-def acc_list(summ_dir, out_dir): # delete
-    # Main function, run to generate accession list files
-    # TODO, compare with previous databases, check version changes
-    summ_tab = build_summ_tab(summ_dir)
-    
-    for tax, tax_group in summ_tab.groupby('Taxon'):
-        for mark, mark_group in tax_group.groupby('Marker'):
-            acc_tab = make_acc_tab(mark_group, tax, mark)
-            out_file = generate_filename(tax, mark)
-            acc_tab.to_csv(f'{out_dir}/{out_file}')
-
 #%% classes
-class Lister():
-    def __init__(self, taxon, marker, dbase, summ_file, read_func):
+class SummProcessor():
+    def __init__(self, taxon, marker, database, in_file, out_dir, old_dir = None):
         self.taxon = taxon
         self.marker = marker
-        self.dbase = dbase
-        self.accs = read_func(summ_file)
-        self.out_tab = pd.DataFrame()
+        self.database = database
+        self.out_dir = out_dir
+        self.get_old_subtab(taxon, marker, database, old_dir)
+        self.set_readfunc(database)
+        self.accs = self.readfunc(in_file)
     
+    def set_readfunc(self, dbase):
+        # database determines how the file is read
+        if dbase == 'BOLD':
+            self.readfunc = read_BOLD_summ
+        elif dbase == 'NCBI':
+            self.readfunc = read_NCBI_summ
+    
+    def get_old_subtab(self, tax, mark, dbase, old_dir):
+        # locate previous acc list for this tax - mark - dbase trio
+        old_file_path = f'{old_dir}/{tax}_{mark}_{dbase}.acc'
+        self.old_subtab = None
+        if old_dir is not None:
+            if os.path.isfile(old_file_path):
+                self.old_subtab = pd.read_csv(old_file_path)
+                
     def get_shortaccs_ver(self):
+        # split the accession code from the version number, return both
         splitaccs = [acc.split('.') for acc in self.accs]
-        shortaccs = [acc[0] for acc in splitaccs]
         vers = [acc[-1] for acc in splitaccs]
+        shortaccs = [acc.split(f'.{ver}')[0] for acc, ver in zip(self.accs, vers)]
         return shortaccs, vers
-
-    def make_acc_subtab(self):
+    
+    def build_acc_subtab(self):
         shortaccs, vers = self.get_shortaccs_ver()
         acc_subtab = pd.DataFrame({'Accession': self.accs, 'Version':vers}, index = shortaccs)
-        acc_subtab['Entry'] = 1
+        acc_subtab['Entry'] = 1 # this code tells the next step how to handle this entry
 
         self.acc_subtab = acc_subtab
         self.out_tab = acc_subtab.copy()
     
-    def generate_filename(self, out_dir):
-        filename = f'{out_dir}/{self.taxon}_{self.marker}_{self.dbase}.acc'
-        return filename
-    
-    def get_old_tab(self, old_dir):
-        old_file_path = self.generate_filename(old_dir)
-        if os.path.isfile(old_file_path):
-            self.old_subtab = pd.read_csv(old_file_path)
-            return True
-        return False
-
-    def compare_tab(self, old_dir):
-        if self.get_old_tab(old_dir):
+    def compare_tab(self):
+        # compare acc_subtab to old_subtab (if present)
+        if self.old_subtab is not None:
             long_accs = self.acc_subtab['Accession']
             self_vers = self.acc_subtab['Version']
             old_vers = self.old_subtab['Version']
@@ -170,23 +96,46 @@ class Lister():
             mixed_df.at[(mixed_df['old'] > 0) & (mixed_df['old'] != mixed_df['Version']), 'Entry'] = 2 # new version
             mixed_df.at[mixed_df['Version'] == 0] = -1 # missing entry
             self.out_tab = mixed_df[['Accession', 'Version', 'Entry']]
-
+    
     def clip_redundant(self, acclist):
+        # clip records present in another list
         self.out_tab = self.out_tab.at[self.out_tab.index.isin(acclist), 'Entry'] = 0
+        
+    def store_tab(self):
+        filename = f'{self.out_dir}/{self.taxon}_{self.marker}_{self.database}.acc'
+        self.out_tab.to_csv(filename)
+    
+    def process(self, acclist):
+        self.build_acc_subtab()
+        self.compare_tab()
+        # self.clip_redundant(acclist)
+        self.store_tab()
+        return set(self.out_tab.loc[self.out_tab['Entry'] == 1].index)
+    
+class Lister():
+    def __init__(self, in_dir, out_dir, warn_dir, old_dir = None):
+        self.in_dir = in_dir
+        self.out_dir = out_dir
+        self.warn_dir = warn_dir
+        self.summ_tab = build_summ_tab(in_dir) # get data and preprocess
+        self.old_dir = old_dir
+        self.accs = set()
 
-    def store_tab(self, out_dir):
-        out_file = self.generate_filename(out_dir)
-        self.out_tab.to_csv(out_file)
+    def check_summaries(self):
+        # make sure summ_tab is not empty
+        if len(self.summ_tab) == 0:
+            with open(f'{self.warn_dir}/lister.warn', 'w') as warn_handle:
+                warn_handle.write('No summary files found in directory {self.in_dir}')
+            return False
+        return True
 
-def main(summ_dir, list_dir, old_dir = None):
-    summ_tab = build_summ_tab(summ_dir)
-
-    for idx, row in summ_tab.iterrows():
-        tax, mark, dbase, file = row['Taxon'], row['Marker'], row['Database'], row['File']
-        read_func = read_NCBI_summ
-        if dbase == 'BOLD':
-            read_func = read_BOLD_summ
-        lst = Lister(tax, mark, dbase, file, read_func)
-        lst.make_acc_subtab()
-        lst.compare_tab(old_dir)
-        lst.store_tab(list_dir)
+    def build_lists(self):
+        if self.check_summaries:
+            for idx, row in self.summ_tab.iterrows():
+                tax = row['Taxon']
+                mark = row['Marker']
+                dbase = row['Database']
+                file = row['File']
+                summproc = SummProcessor(tax, mark, dbase, file, self.out_dir, self.old_dir)
+                new_accs = summproc.process(self.accs)
+                self.accs = self.accs.union(new_accs)

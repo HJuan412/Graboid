@@ -85,9 +85,9 @@ class DbFetcher():
         self.marker = marker
         self.database = database
         self.set_fetchfunc(database)
-        self.generate_filenames()
         self.out_dir = out_dir
         self.warn_dir = warn_dir
+        self.generate_filenames()
     
     def set_fetchfunc(self, database):
         if database == 'BOLD':
@@ -112,7 +112,7 @@ class DbFetcher():
         
         with open(self.out_file, 'wb') as out_handle: # change mode to 'ab' so an interrupted download can be completed using a Fetcher instance with (warn_dir passed as out_dir)
             for idx, chunk in enumerate(chunks):
-                print(f'{self.database}. Chunk {idx + 1} of {nchunks}')
+                print(f'{self.database}, {self.taxon} {self.marker}. Chunk {idx + 1} of {nchunks}')
                 try:
                     self.fetch_func(chunk, out_handle)
                 except:
@@ -123,6 +123,7 @@ class Fetcher():
     # TODO: fetch sequences stored in warn_dir
     def __init__(self, in_dir, out_dir, warn_dir):
         self.acc_tab = build_acc_tab(in_dir)
+        self.in_dir = in_dir
         self.out_dir = out_dir
         self.warn_dir = warn_dir
     

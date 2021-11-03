@@ -107,11 +107,23 @@ class Processor():
             mark_outfile = self.generate_filename(mark)
             with open(mark_outfile, 'w') as out_handle:
                 SeqIO.write(mark_records, out_handle, 'fasta')
-#%% main
-def process_files(seq_dir, markers = ['COI', '18S']):
-    bold_files = locate_BOLD_files(seq_dir)
+
+class BOLDPostProcessor():
+    def __init__(self, in_dir, out_dir, warn_dir):
+        self.bold_files = locate_BOLD_files(in_dir)
+        self.in_dir
+        self.out_dir = out_dir
+        self.warn_dir = warn_dir
     
-    for file in bold_files:
-        proc = Processor(file, markers)
-        proc.process()
-    return
+    def check_bold_files(self):
+        if len(self.bold_files) == 0:
+            with open(f'{self.warn_dir}/BOLD_postprocessing.warn', 'w') as warn_handle:
+                warn_handle.write('No BOLD sequence files found in directory {self.in_dir}')
+            return False
+        return True
+    
+    def process(self, markers = ['COI', '18S']):
+        if self.check_bold_files():
+            for file in self.bold_files:
+                proc = Processor(file, markers)
+                proc.process()

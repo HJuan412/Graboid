@@ -12,6 +12,7 @@ from Bio import AlignIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio.Align import MultipleSeqAlignment as msa
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
@@ -62,288 +63,174 @@ def build_matchdict(report):
     for idx_1, qid in enumerate(qid_array):
         if qid != curr_qid:
             coords = coord_array[idx_0:idx_1, :]
-            match_dict[curr_qid] = coords
+            # match_dict[curr_qid] = coords
+            match_dict[curr_qid] = Match(curr_qid, coords)
             
             idx_0 = idx_1
             curr_qid = qid
     return match_dict
 
 
-#%% WB
+#%% classes
 class Match():
-    def __init__(self, seqid, coords, start, end):
+    def __init__(self, seqid, coords):
         self.seqid = seqid
-        self.coords = self.crop(coords, start, end)
+        self.coords = coords
+        self.orient = np.ones(len(self.coords), dtype = int)
         self.flip()
-        self.start = start
-        self.end = end
-        self.len = end - start
-    
-    def crop(self, coords, start, end):
-        # Clips coordinates to include only the portions of the alignments that overlap with the window.
-        cropped = coords.copy() # cropped match
-        
-        to_crop_left = np.where(cropped[:,0] < start)
-        to_crop_right = np.where(cropped[:,1] > end)
-        
-        # # crop left
-        # for i in to_crop_left:
-        #     diff = start - cropped[i, 0]
-        #     cropped[i, [0, 2]] += diff
-        # # crop right
-        # for j in to_crop_right:
-        #     diff = end - cropped[i, 1]
-        #     cropped[j, [1, 3]] += diff
-        
-        for to_crop, idx, position in zip([to_crop_left, to_crop_right], [0, 1], [start, end]):
-            for i in to_crop:
-                diff = position - cropped[i, idx]
-                cropped[i, idx] += diff
-                cropped[i, idx + 2] += diff
-
-        return cropped
     
     def flip(self):
-        # flips matches in reverse sense, tracks sense of each match
-        self.orient = np.ones(len(self.coords), dtype = int)
+        # flips matches in reverse sense, tracks sense of each match in self.orient
         to_flip = np.where(self.coords[:,0]>self.coords[:,1])[0]
         self.orient[to_flip] = -1
         for i in to_flip:
             row = self.coords[i]
             row[0], row[1] = row[1], row[0]
-            # row[2], row[3] = row[3], row[2]
             self.coords[i] = row
-    
-    def build_alignment(self, seq, gap_char = '-'):
+
+    def build_alignment(self, seq, aln_len, gap_char = '-'):
         # Uses the cropped and flipped coordinates to build the window alignment
-        alig = [gap_char] * self.len
+        # seq is the sequence for the Matche's coordinates
+        # aln_len is the length of the alignment
+        # gap_char is the character used to designate gaps
+        # returns alignment as a string
+        alig = [gap_char] * aln_len
         for co, ori in zip(self.coords, self.orient):
-            a_start = co[0] - self.start
-            a_end = co[1] - self.start
+            a_start = co[0]
+            a_end = co[1]
             b_start = co[2]
             b_end = co[3]
             alig[a_start:a_end] = seq[b_start:b_end][::ori] # ori is used to flip the query match
         return ''.join(alig)
-        
-        
+
 class Window():
-    def __init__(self, start, end, matches, seqs):
+    def __init__(self, aln_dict, start, end, gap_thresh = 0.2):
         self.start = start
         self.end = end
-        self.get_in_window(matches)
-        self.build_alignment(seqs)
+        self.length = end-start
+        self.build_window(aln_dict, gap_thresh)
     
-    def get_in_window(self, matches):
-        # extracts all the matches overlapping with the window (excludes fragments that don't overlap)
-        self.matches = {}
+    def build_window(self, aln_dict, gap_thresh = 0.1):
+        # Extracts the corresponding bases from each sequence in the alignment
+        # only includes them in the window if they are below the specified gap threshold
+        max_gaps = self.length * gap_thresh
+        self.window_dict = {} # will store the extractes subsequences
         
-        for seqid, match in matches.items():
-            matches_in = np.where((match[:,0] < self.end) & (match[:,1] > self.start))
-            miw = match[matches_in]
-            if len(miw) > 0:
-                self.matches[seqid] = Match(seqid, miw, self.start, self.end)
+        for k,v in aln_dict.items():
+            seq = v[self.start:self.end] # subsequence
+            # filter by number of gaps
+            if seq.count('-') < max_gaps:
+                self.window_dict[k] = seq
 
-    def build_alignment(self, seqs):
-        self.aln_dict = {}
-        
-        for seqid, match in self.matches.items():
-            seq = seqs[seqid]
-            # alig, sum_gaps = match.build_alignment(seq)
-            # self.aln_dict[seqid] = alig, sum_gaps
-            alig= match.build_alignment(seq)
-            self.aln_dict[seqid] = alig
-    
+        self.n = len(self.window_dict) # count the number of sequences in the window
+
     def store_alignment(self, prefix = 'alignment'):
+        # save the window to file
+        if self.n == 0:
+            return
         records = []
-        for acc, seq in self.aln_dict.items():            
+        for acc, seq in self.window_dict.items():            
             records.append(SeqRecord(Seq(seq), id = acc, name='', description = ''))
 
         alignment = msa(records)
-        filename = f'{prefix}_({self.start}-{self.end}_n{len(records)}).fasta'
+        filename = f'{prefix}_{self.start + 1}-{self.end}_n{self.n}.fasta' # filename gives window boundaries and amount of seqs
         with open(filename, 'w') as handle:
             AlignIO.write(alignment, handle, 'fasta')
         return
 
-# TODO what if I build a giant alignment array and extract windows from there?
 class WindowBuilder():
-    def __init__(self, in_file, seq_file):
+    def __init__(self, in_file, seq_file, out_dir):
         self.report = load_report(in_file)
         self.matches = build_matchdict(self.report)
         self.seqs = tools.make_seqdict(seq_file)
         self.get_match_bounds()
+        self.build_alignment()
+        self.get_aln_coverage()
+        self.out_dir = out_dir
     
     def get_match_bounds(self):
-        self.lower = self.report['sstart'].min() - 1
+        self.lower = self.report['sstart'].min() - 1 # should always be 0
         self.upper = self.report['send'].max() - 1
-    
-    def build_window(self, start, end):
-        if self.lower <= start < end <= self.upper:
-            return Window(start, end, self.matches, self.seqs)
+        
+    def build_alignment(self):
+        # align all sequences using the blast coordinates
+        self.aln_dict = {}
+        
+        for seqid, match in self.matches.items():
+            seq = self.seqs[seqid]
+            alig = match.build_alignment(seq, self.upper)
+            self.aln_dict[seqid] = alig
+
+    def get_aln_coverage(self):
+        # count coverage for each base in the alignment
+        coverage = np.zeros(self.upper, int)
+        for seq in self.aln_dict.values():
+            for i in range(self.upper):
+                if seq[i] != '-':
+                    coverage[i] += 1
+        self.coverage = coverage
+
+    def build_window(self, start, end, gap_thresh = 0.1, prefix = 'alignment', store = True):
+        # create a window at the specified boundaries (start, end)
+        if 0 <= start < end <= self.upper:
+            # only proceed if given boundaries are valid
+            window = Window(self.aln_dict, start, end, gap_thresh)
+            if store:
+                # save window to file
+                window.store_alignment(f'{self.out_dir}/{prefix}')
+            return window
         else:
             print(f'Invalid.\tWindow bounds: start = {start}, end = {end}\n\tMust be within match bounds: lower = {self.lower}, upper = {self.upper}')
             return
-#%%
-wb = WindowBuilder('Dataset/test2/Nematoda_18S.tab', 'Databases/13_10_2021-20_15_58/Sequence_files/Nematoda_18S.fasta')
-
-width = 100
-step = 15
-out_dir = 'Dataset/test2'
-windows = np.arange(wb.lower, wb.upper + 1 - width, step)
-
-aln_window = wb.build_window(wb.lower, wb.upper)
-
-#%%
-accs = list(aln_window.aln_dict.keys())
-aln_len = len(aln_window.aln_dict[accs[0]])
-
-cov = np.zeros(aln_len, int)
-for i in range(aln_len):
-    for seq in aln_window.aln_dict.values():
-        if seq[i] != '-':
-            cov[i] += 1
-#%%
-def make_window(aln_dict, start, end, gap_thresh = 0.2):
-    length = end-start
-    max_gaps = length * gap_thresh
-    window_dict = {}
     
-    for k,v in aln_dict.items():
-        seq = v[start:end]
-        if seq.count('-') < max_gaps:
-            window_dict[k] = seq
-    
-    return window_dict
-
-#%%
-import matplotlib.pyplot as plt
-#%%
-x = np.arange(len(windows))
-y = []
-
-thresh = 0.01
-for wstart in windows:
-    wd = make_window(aln_window.aln_dict, wstart, wstart + width, thresh)
-    y.append(len(wd))
-
-plt.plot(x, y)
-#%%
-def process(in_dir, taxons = ['Nematoda', 'Platyhelminthes'], markers = ['18S', '28S', 'COI'], width = 100, step = 15):
-    sequence_dir = f'Databases/{in_dir}/Sequence_files'
-    report_dir = f'Dataset/{in_dir}/BLAST_reports'
-    
-    out_dir = f'Dataset/{in_dir}/Windows'
-    os.mkdir(out_dir)
-    for tax in taxons:
-        tax_dir = f'{out_dir}/{tax}'
-        os.mkdir(tax_dir)
-        for mark in markers:
-            print(f'Processing {tax} {mark}')
-            mark_dir = f'{tax_dir}/{mark}'
-            os.mkdir(mark_dir)
-            
-            seq_file = f'{sequence_dir}/{tax}_{mark}.fasta'
-            rep_file = f'{report_dir}/{tax}_{mark}.tab'
-            wn = Windower(rep_file, seq_file)
-            reflen = wn.get_max_match()
-            
-            windows = np.arange(0, reflen + 1 - width, step)
-            
-            for idx, w in enumerate(windows):
-                print(f'Window {idx} of {len(windows)}')
-                start = w
-                end = w + width
-                wn.update_window(start, end)
-                wn.make_alignment()
-                wn.aln_report()
-                wn.store_alignment(f'{mark_dir}/{tax}_{mark}')
-            
-            
-#%% classes
-class Windower():
-    def __init__(self, report_file, seqfile):
-        report = load_report(report_file)
-        self.matches = build_matchdict(report)
-        self.seqs = tools.make_seqdict(seqfile)
-        self.__w_start = 0
-        self.__w_end = 0
-    
-    @property
-    def w_start(self):
-        return self.__w_start
-    
-    @w_start.setter
-    def w_start(self, start):
-        if type(start) is int:
-            if start >= 0:
-                self.__w_start = start
-    
-    @property
-    def w_end(self):
-        return self.__w_end
-    
-    @w_end.setter
-    def w_end(self, end):
-        if type(end) is int:
-            if end >= self.w_start:
-                self.__w_end = end
-    
-    def get_max_match(self):
-        # use this to calculate the length of the reference sequence
-        max_match = 0
+    def build_all(self, width, step, gap_thresh = 0.1, store = True):
+        # create multiple windows along the length of the alignment
+        last_win = self.upper - width # position of the last possible window
+        windows = np.arange(0, last_win, step) # start position for all the windows
+        # add a tail window if the last bases are missing
+        if windows[-1] < last_win:
+            windows = np.concatenate((windows, [last_win]))
         
-        for match in self.matches.values():
-            match_max = match[:,1].max()
-            if match_max > max_match:
-                max_match = match_max
-        
-        return max_match
+        # register used variables
+        self.width = width
+        self.step = step
+        self.windows = windows
+        self.window_coverage = np.zeros(len(windows), int) # store the n of each generated window
 
-    def update_window(self, start, end):
-        # Redefine window boundaries
-        # make sure bothe values are over 0 and start < end
-        if 0 <= start < end:
-            self.w_start = int(start)
-            self.w_end = int(end)
+        for idx, start in enumerate(windows):
+            end = start + width
+            window = self.build_window(start, end, gap_thresh, f'{idx}_aln', store)
+            self.window_coverage[idx] = window.n
 
-    def make_alignment(self):
-        # Generate alignment on the current window
-        self.aln_dict = {}
-        for seqid, match in self.matches.items():
-            seq = self.seqs[seqid]
-            in_window = match_in_window(match, self.w_start, self.w_end) # get all sequence matches overlapping with the window
-            
-            if len(in_window) == 0:
-                # sequence doesn't overlap with window
-                continue
-            cropped = crop_match(in_window, self.w_start, self.w_end) # crop non-overlapping segments
-            gaps = get_gaps(cropped) # calculate gaps
-            self.aln_dict[seqid] = align_match(seq, cropped, gaps[0]) # generate alignment
-    
-    def aln_report(self):
-        total_accs = list(self.aln_dict.keys())
-        window_len = self.w_end - self.w_start
+    def plot_coverage(self, start = 0, end = np.inf):
+        # plot the alignment coverage (per base and per window)
+        # start and end allow to view a specified portion of the alignment
+        # TODO: adjust bar width according to window step
+        start = max(self.lower, start)
+        end = min(self.upper, end)
+        view = end - start
+        ticklen = int(view/10)
+        xticks = np.arange(0, view + 1, ticklen)
+        xlabs = np.arange(start, end+1, ticklen)
 
-        aln_df = pd.DataFrame(index = range(len(total_accs)), columns = ['acc', 'seqlen', 'gaplen', 'seq'])
+        # generate plot information
+        # per base coverage data
+        cov = self.coverage[start:end]
+        x = np.arange(len(cov))
+        # per window coverage data
+        w_cov_idx = np.where(np.logical_and(self.windows >= start, self.windows <= end))
+        w_x = self.windows[w_cov_idx] - start + 5
+        w_y = self.window_coverage[w_cov_idx]
 
-        for idx, acc in enumerate(total_accs):
-            seq, gaps = self.aln_dict[acc]
-            seqlen = len(seq)
-            aln_df.at[idx] = [acc, seqlen, gaps, seq]
-        
-        self.normal = aln_df.loc[aln_df['seqlen'] == window_len]
-        self.anormal = aln_df.loc[aln_df['seqlen'] != window_len]
-    
-    def store_alignment(self, prefix = 'alignment', max_gap = 30):
-        filtered = self.normal.loc[self.normal['gaplen'] <= max_gap]
-        records = []
-        for idx, row in filtered.iterrows():
-            acc = row['acc']
-            seq = row['seq']
-            
-            records.append(SeqRecord(Seq(seq), id = acc, name='', description = ''))
+        # plot
+        fig, ax = plt.subplots(figsize = (12,7))
+        ax.margins(x=0)
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xlabs)
+        ax.set_xlabel('Position')
+        ax.set_ylabel('Coverage')
+        ax.set_title(f'Coverage\nWindow width: {self.width}\nWindow step: {self.step}')
 
-        alignment = msa(records)
-        filename = f'{prefix}_({self.w_start}-{self.w_end}_n{len(records)}).fasta'
-        with open(filename, 'w') as handle:
-            AlignIO.write(alignment, handle, 'fasta')
-        return
+        ax.plot(x, cov, color = 'r', label = 'Per base coverage')
+        ax.bar(w_x, w_y, width = 10, label = 'Per window coverage')
+        ax.legend()

@@ -192,6 +192,16 @@ windows = np.arange(wb.lower, wb.upper + 1 - width, step)
 
 aln_window = wb.build_window(wb.lower, wb.upper)
 
+#%%
+accs = list(aln_window.aln_dict.keys())
+aln_len = len(aln_window.aln_dict[accs[0]])
+
+cov = np.zeros(aln_len, int)
+for i in range(aln_len):
+    for seq in aln_window.aln_dict.values():
+        if seq[i] != '-':
+            cov[i] += 1
+#%%
 def make_window(aln_dict, start, end, gap_thresh = 0.2):
     length = end-start
     max_gaps = length * gap_thresh

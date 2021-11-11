@@ -12,6 +12,8 @@ from Bio import AlignIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio.Align import MultipleSeqAlignment as msa
+from ds_blast import build_seq_tab
+from glob import glob
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -19,6 +21,24 @@ import pandas as pd
 import toolkit as tools
 
 #%% functions
+def build_repseq_tab(blast_dir, seq_dir):
+    seq_tab = build_seq_tab(seq_dir)
+    seq_tab['Tab'] = 'seq'
+
+    rep_tab = pd.DataFrame(columns = ['Taxon', 'Marker', 'File'])
+    blast_reps = glob(f'{blast_dir}/*tab')
+    for idx, blast_rep in enumerate(blast_reps):
+        split_file = blast_rep.split('/')[-1].split('.tab')[0].split('_')
+        taxon = split_file[0]
+        marker = split_file[1]
+        rep_tab.at[idx] = [taxon, marker, blast_rep]
+    
+    rep_tab['Tab'] = 'rep'
+    
+    repseq_tab = pd.concat((rep_tab, seq_tab))
+    
+    return repseq_tab
+
 def load_report(report_file):
     """
     Load the ungapped BLAST report as a pandas.DataFrame
@@ -198,6 +218,7 @@ class WindowBuilder():
         self.window_coverage = np.zeros(len(windows), int) # store the n of each generated window
 
         for idx, start in enumerate(windows):
+            print(f'Building window {idx + 1} of {len(windows)}') # TODO generate report of built windows (maybe)
             end = start + width
             window = self.build_window(start, end, gap_thresh, f'{idx}_aln', store)
             self.window_coverage[idx] = window.n
@@ -234,3 +255,59 @@ class WindowBuilder():
         ax.plot(x, cov, color = 'r', label = 'Per base coverage')
         ax.bar(w_x, w_y, width = 10, label = 'Per window coverage')
         ax.legend()
+        return ax
+
+class WindowDirector():
+    def __init__(self, blast_dir, seq_dir, out_dir, warn_dir):
+        self.blast_dir = blast_dir
+        self.seq_dir = seq_dir
+        self.repseq_tab = build_repseq_tab(blast_dir, seq_dir)
+        self.out_dir = out_dir
+        self.make_subdirs()
+        self.warn_dir = warn_dir
+        self.plot_dict = {}
+    
+    def make_subdirs(self):
+        taxons = self.repseq_tab['Taxon'].unique()
+        markers = self.repseq_tab['Marker'].unique()
+        self.subdirs = []
+        for tax in taxons:
+            tax_dir = f'{self.out_dir}/{tax}' 
+            if not os.path.isdir(tax_dir):
+                os.mkdir(tax_dir)
+            for mark in markers:
+                mark_dir = f'{self.out_dir}/{tax}/{mark}'
+                self.subdirs.append(mark_dir)
+                if not os.path.isdir(mark_dir):
+                    os.mkdir(mark_dir)
+
+    def check_tabs(self):
+        # make sure seq_tab is not empty
+        warns = False
+        with open(f'{self.warn_dir}/windows.warn', 'w') as warn_handle:
+            for taxon, subtab0 in self.repseq_tab.groupby('Taxon'):
+                for marker, subtab1 in subtab0.groupby('Marker'):
+                    vals = subtab1['Tab'].value_counts()
+                    if vals['rep'] == 0:
+                        warns = True
+                        warn_handle.write('No blast report for {taxon} - {marker} found in directory {self.blast_dir}')
+                    if vals['seq'] == 0:
+                        warns = True
+                        warn_handle.write('No sequence file for {taxon} - {marker} found in directory {self.seq_dir}')
+            if warns:
+                return False
+        return True
+    
+    def direct(self, width, step, gap_thresh = 0.1, store = True):
+        if self.check_tabs():
+            for taxon, subtab0 in self.repseq_tab.groupby('Taxon'):
+                for marker, subtab1 in subtab0.groupby('Marker'):
+                    print(f'Building windows for {taxon}, {marker}')
+                    rep_file = subtab1.loc[subtab1['Tab'] == 'rep', 'File'].values[0]
+                    seq_file = subtab1.loc[subtab1['Tab'] == 'seq', 'File'].values[0]
+                    
+                    out_dir = f'{self.out_dir}/{taxon}/{marker}'
+                    wb = WindowBuilder(rep_file, seq_file, out_dir)
+                    wb.build_all(width, step, gap_thresh, store)
+                    
+                    self.plot_dict[(taxon, marker)] = wb.plot_coverage()

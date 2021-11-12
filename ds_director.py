@@ -8,39 +8,56 @@ This script directs Dataset construction
 """
 #%% libraries
 import ds_blast as blst
-import ds_window as wndw
+import ds_windows as wndw
 import ds_matrix as mtrx
 import os
 #%% functions
-def generate_subdirs(dirname):
-    return f'{dirname}/BLAST_reports', f'{dirname}/Windows', f'{dirname}/Matrixes', f'{dirname}/Warnings'
-
-def new_directories(dirname):
-    blst_dir, wndw_dir, mtrx_dir, warn_dir = generate_subdirs(dirname)
-    
-    os.mkdir(dirname)
-    for sdir in [blst_dir, wndw_dir, mtrx_dir, warn_dir]:
-        os.mkdir(sdir)
-    return blst_dir, wndw_dir, mtrx_dir, warn_dir
-
+def generate_dirnames(dirname):
+    return [f'{dirname}/BLAST_reports', f'{dirname}/Windows', f'{dirname}/Matrices', f'{dirname}/Warnings']
 #%%
-dirname = 'Datasets/13_10_2021-20_15_58'
-blst_dir, wndw_dir, mtrx_dir, warn_dir = new_directories(dirname)
+ds_dir = 'Dataset/13_10_2021-20_15_58'
+db_dir = 'Databases/13_10_2021-20_15_58/Sequence_files'
 seq_dir = 'Databases/13_10_2021-20_15_58/Sequence_files'
 ref_dir = 'Reference_data/Reference_genes'
 
-# generate ungapped BLAST alignments
-blaster = blst.Blaster(seq_dir, blst_dir, ref_dir, warn_dir)
-blaster.blast()
+#%%
+class Director():
+    def __init__(self, ds_dir, db_dir, seq_dir, ref_dir, width = 100, step = 15, gap_thresh = 0.1):
+        self.ds_dir = ds_dir
+        self.db_dir = db_dir
+        self.seq_dir = seq_dir
+        self.ref_dir = ref_dir
+        self.generate_subdirs()
+        self.create_dirs()
+        self.width = width
+        self.step = step
+        self.gap_thresh = 0.1
+    
+    def generate_subdirs(self):
+        subdirs = generate_dirnames(self.ds_dir)
+        self.blst_dir, self.wndw_dir, self.mtrx_dir, self.warn_dir = subdirs
+    
+    def create_dirs(self):
+        for d in [self.ds_dir, self.blst_dir, self.wndw_dir, self.mtrx_dir, self.warn_dir]:
+            if not os.path.isdir(d):
+                os.mkdir(d)
+    
+    def direct_blast(self):
+        self.blaster = blst.Blaster(in_dir = self.seq_dir, out_dir = self.blst_dir, ref_dir = self.ref_dir, warn_dir = self.warn_dir)
+        self.blaster.blast()
+    
+    def direct_windows(self):
+        self.window_director = wndw.WindowDirector(blast_dir = self.blst_dir, seq_dir = self.seq_dir, out_dir = self.wndw_dir, warn_dir = self.warn_dir)
+        self.window_director.direct(self.width, self.step, self.gap_thresh)
 
-# generate windows
-width = 100
-step = 15
-gap_thresh = 0.1
+    def direct_matrices(self):
+        self.matrix_director = mtrx.MatrixDirector(wndw_dirs = self.window_director.subdirs, out_dir = self.mtrx_dir, warn_dir = self.warn_dir)
+        self.matrix_director.direct()
 
-window_director = wndw.WindowDirector(blst_dir, seq_dir, wndw_dir, warn_dir)
-window_director.direct(width, step, gap_thresh)
-
-# generate matrixes
-matrix_director = mtrx.MatrixDirector(window_director.subdirs, mtrx_dir, warn_dir)
-matrix_director.direct()
+    def direct(self):
+        print('Generating BLAST alignments')
+        self.direct_blast()
+        print('Generating sequence windows')
+        self.direct_windows()
+        print('Building matrixes')
+        self.direct_matrices()

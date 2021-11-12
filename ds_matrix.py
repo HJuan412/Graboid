@@ -27,12 +27,13 @@ def get_case(string_vals):
             return 1 # align is uppercase
 
 def build_dirtab(dirlist):
-    dir_tab = pd.DataFrame(columns=['Taxon', 'Marker', 'Win dir', 'Mat dir'])
+    dir_tab = pd.DataFrame(columns=['Taxon', 'Marker', 'Win dir'])
     for idx, subdir in enumerate(dirlist):
         split_dir = subdir.split('/')
         tax = split_dir[-2]
         mark = split_dir[-1]
         dir_tab.at[idx] = [tax, mark, subdir]
+    dir_tab['Mat dir'] = ''
     return dir_tab
 #%%
 class MatrixBuilder():
@@ -102,7 +103,9 @@ class MatrixDirector():
         for idx, row in self.dir_tab.iterrows():
             win_dir = row['Win dir']
             files = glob(f'{win_dir}/*fasta')
+            tax = row['Taxon']
+            mark = row['Marker']
             for file in files:
                 filename = file.split('/')[-1].split('.fasta')[0]
                 mat_builder = MatrixBuilder(file)
-                mat_builder.save(f'{self.out_dir}/{filename}.mat')
+                mat_builder.save(f'{self.out_dir}/{tax}/{mark}/{filename}.mat')

@@ -159,6 +159,7 @@ class Window():
         return
 
 class WindowBuilder():
+    # Handles window construction for a single alignment
     def __init__(self, in_file, seq_file, out_dir):
         self.report = load_report(in_file)
         self.matches = build_matchdict(self.report)
@@ -204,7 +205,7 @@ class WindowBuilder():
             return
     
     def build_all(self, width, step, gap_thresh = 0.1, store = True):
-        # create multiple windows along the length of the alignment
+        # create multiple windows along the entire length of the alignment
         last_win = self.upper - width # position of the last possible window
         windows = np.arange(0, last_win, step) # start position for all the windows
         # add a tail window if the last bases are missing
@@ -258,6 +259,7 @@ class WindowBuilder():
         return ax
 
 class WindowDirector():
+    # Handles window construction for multiple alignments
     def __init__(self, blast_dir, seq_dir, out_dir, warn_dir):
         self.blast_dir = blast_dir
         self.seq_dir = seq_dir

@@ -224,40 +224,6 @@ class WindowBuilder():
             window = self.build_window(start, end, gap_thresh, f'{idx}_aln', store)
             self.window_coverage[idx] = window.n
 
-    def plot_coverage(self, start = 0, end = np.inf):
-        # plot the alignment coverage (per base and per window)
-        # start and end allow to view a specified portion of the alignment
-        # TODO: adjust bar width according to window step
-        start = max(self.lower, start)
-        end = min(self.upper, end)
-        view = end - start
-        ticklen = int(view/10)
-        xticks = np.arange(0, view + 1, ticklen)
-        xlabs = np.arange(start, end+1, ticklen)
-
-        # generate plot information
-        # per base coverage data
-        cov = self.coverage[start:end]
-        x = np.arange(len(cov))
-        # per window coverage data
-        w_cov_idx = np.where(np.logical_and(self.windows >= start, self.windows <= end))
-        w_x = self.windows[w_cov_idx] - start + 5
-        w_y = self.window_coverage[w_cov_idx]
-
-        # plot
-        fig, ax = plt.subplots(figsize = (12,7))
-        ax.margins(x=0)
-        ax.set_xticks(xticks)
-        ax.set_xticklabels(xlabs)
-        ax.set_xlabel('Position')
-        ax.set_ylabel('Coverage')
-        ax.set_title(f'Coverage\nWindow width: {self.width}\nWindow step: {self.step}')
-
-        ax.plot(x, cov, color = 'r', label = 'Per base coverage')
-        ax.bar(w_x, w_y, width = 10, label = 'Per window coverage')
-        ax.legend()
-        return ax
-
 class WindowDirector():
     # Handles window construction for multiple alignments
     def __init__(self, blast_dir, seq_dir, out_dir, warn_dir):
@@ -267,11 +233,13 @@ class WindowDirector():
         self.out_dir = out_dir
         self.make_subdirs()
         self.warn_dir = warn_dir
-        self.plot_dict = {}
+        self.coverages = {}
     
     def make_subdirs(self):
         taxons = self.repseq_tab['Taxon'].unique()
         markers = self.repseq_tab['Marker'].unique()
+        self.taxons = taxons
+        self.markers = markers
         self.subdirs = []
         for tax in taxons:
             tax_dir = f'{self.out_dir}/{tax}' 
@@ -301,6 +269,8 @@ class WindowDirector():
         return True
     
     def direct(self, width, step, gap_thresh = 0.1, store = True):
+        self.width = width
+        self.step = step
         if self.check_tabs():
             for taxon, subtab0 in self.repseq_tab.groupby('Taxon'):
                 for marker, subtab1 in subtab0.groupby('Marker'):
@@ -312,4 +282,47 @@ class WindowDirector():
                     wb = WindowBuilder(rep_file, seq_file, out_dir)
                     wb.build_all(width, step, gap_thresh, store)
                     
-                    self.plot_dict[(taxon, marker)] = wb.plot_coverage()
+                    self.coverages[(taxon, marker)] = (wb.coverage, wb.windows, wb.window_coverage, wb.lower, wb.upper)
+    
+    def plot_coverage(self, taxon, marker, start = 0, end = np.inf):
+        # plot the alignment coverage (per base and per window)
+        # start and end allow to view a specified portion of the alignment
+        # TODO: adjust bar width according to window step
+        
+        # get coverage data for the taxon - marker pair
+        base_coverage, windows, window_coverage, lower, upper = self.coverages[(taxon, marker)]
+
+        start = max(lower, start)
+        end = min(upper, end)
+        view = end - start
+        ticklen = int(view/10)
+        xticks = np.arange(0, view + 1, ticklen)
+        xlabs = np.arange(start, end+1, ticklen)
+
+        # generate plot information
+        # per base coverage data
+        cov = base_coverage[start:end]
+        x = np.arange(len(cov))
+        # per window coverage data
+        w_cov_idx = np.where(np.logical_and(windows >= start, windows <= end))
+        w_x = windows[w_cov_idx] - start + 5
+        w_y = window_coverage[w_cov_idx]
+
+        # plot
+        fig, ax = plt.subplots(figsize = (12,7))
+        ax.margins(x=0)
+        ax.set_xticks(xticks)
+        ax.set_xticklabels(xlabs)
+        ax.set_xlabel('Position')
+        ax.set_ylabel('Coverage')
+        ax.set_title(f'{taxon}, {marker}\nCoverage\nWindow width: {self.width}\nWindow step: {self.step}')
+
+        ax.plot(x, cov, color = 'r', label = 'Per base coverage')
+        ax.bar(w_x, w_y, width = 10, label = 'Per window coverage')
+        ax.legend()
+        return ax
+    
+    def plot_all(self):
+        for tax in self.taxons:
+            for mark in self.markers:
+                self.plot_coverage(tax, mark)

@@ -111,7 +111,7 @@ class Processor():
 class BOLDPostProcessor():
     def __init__(self, in_dir, out_dir, warn_dir):
         self.bold_files = locate_BOLD_files(in_dir)
-        self.in_dir
+        self.in_dir = in_dir
         self.out_dir = out_dir
         self.warn_dir = warn_dir
     

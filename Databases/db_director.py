@@ -59,7 +59,7 @@ old_accs = None # for lister
 chunk_size = 500 # for fetcher
 #%% Main
 class Director():
-    def __init__(self, db_dir = None, bold = True, ena = False, ncbi = True, email = 'hernan.juan@gmail.com', apikey = '7c100b6ab050a287af30e37e893dc3d09008'):
+    def __init__(self, taxons, markers, db_dir = None, bold = True, ena = False, ncbi = True, email = 'hernan.juan@gmail.com', apikey = '7c100b6ab050a287af30e37e893dc3d09008'):
         self.db_dir = db_dir
         self.set_directories()
         self.create_dirs()
@@ -67,7 +67,7 @@ class Director():
         self.ena = ena
         self.ncbi = ncbi
         self.t1, self.t2 = get_surv_tools(bold, ena, ncbi)
-        self.set_workers()
+        self.set_workers(taxons, markers)
         ftch.set_entrez(email, apikey)
 
     def set_directories(self):

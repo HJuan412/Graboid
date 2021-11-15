@@ -28,20 +28,19 @@ class Cropper():
     def __init__(self, out_dir, acc_dir):
         self.out_dir = out_dir
         check_outdir(out_dir)
-        self.merge_accs(acc_dir, out_dir)
         self.check_acc2taxid_files()
         self.out_file = f'{out_dir}/acc2taxid_cropped.tsv'
     
     def merge_accs(self, acc_dir, out_dir):
         # merge all the acc_list files into a single list to reduce redundant searches
         self.acc_files = glob(f'{acc_dir}/*NCBI.acc') # list acc_list files to split records later
-        self.acc_list = out_file = f'{out_dir}/accs.tmp' # merged accessions file
+        self.acc_list = f'{out_dir}/accs.tmp' # merged accessions file
         accs = set()
         for acc_file in self.acc_files:
             acc_tab = pd.read_csv(acc_file)
             acclist = set(acc_tab.iloc[:,0].tolist())
             accs = accs.union(acclist)
-        with open(out_file, 'a') as handle:
+        with open(self.acc_list, 'a') as handle:
             handle.write('\n'.join(accs))
     
     def generate_filename(self, acc_file):

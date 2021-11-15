@@ -85,7 +85,8 @@ class Cropper():
         # from the cropped file distribute matches of each taxon/marker pair
         cropped_tab = pd.read_csv(self.out_file, sep = '\t', index_col = 0, header = None)
         for acc_file in self.acc_files:
-            acclist = pd.read_csv(acc_file).iloc[:,0].tolist()
-            acc2taxid_tab = cropped_tab.loc[acclist,:]
+            accset = set(pd.read_csv(acc_file).iloc[:,0])
+            accset = accset.intersection(cropped_tab.index)
+            acc2taxid_tab = cropped_tab.loc[accset,:]
             out_file = self.generate_filename(acc_file)
             acc2taxid_tab.to_csv(out_file, sep = '\t')

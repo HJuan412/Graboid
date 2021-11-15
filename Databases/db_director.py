@@ -100,6 +100,7 @@ class Director():
         self.taxer.tax_reconstruct()
     
     def direct_fetching(self, chunk_size):
+        self.fetcher.set_acc_tab()
         self.fetcher.fetch(chunk_size)
     
     def direct_bold_pp(self, markers):

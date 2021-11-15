@@ -122,11 +122,13 @@ class DbFetcher():
 class Fetcher():
     # TODO: fetch sequences stored in warn_dir
     def __init__(self, in_dir, out_dir, warn_dir):
-        self.acc_tab = build_acc_tab(in_dir)
         self.in_dir = in_dir
+        self.set_acc_tab()
         self.out_dir = out_dir
         self.warn_dir = warn_dir
     
+    def set_acc_tab(self):
+        self.acc_tab = build_acc_tab(self.in_dir)
     def check_acclists(self):
         # make sure acc_tab is not empty
         if len(self.acc_tab) == 0:

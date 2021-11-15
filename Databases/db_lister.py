@@ -117,9 +117,13 @@ class Lister():
         self.in_dir = in_dir
         self.out_dir = out_dir
         self.warn_dir = warn_dir
-        self.summ_tab = build_summ_tab(in_dir) # get data and preprocess
+        self.set_summ_tab()
         self.old_dir = old_dir
         self.accs = set()
+    
+    def set_summ_tab(self):
+        # get data and preprocess
+        self.summ_tab = build_summ_tab(self.in_dir)
 
     def check_summaries(self):
         # make sure summ_tab is not empty

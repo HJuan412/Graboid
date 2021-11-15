@@ -82,7 +82,7 @@ class Director():
     
     def set_workers(self, taxons, markers):
         self.surveyor = surv.Surveyor(taxons, markers, self.t1, self.t2, self.summ_dir, self.warn_dir)
-        self.lister = lstr.Lister(self.summ_dir, self.acc_dir, self.warn_dir, old_accs)
+        self.lister = lstr.Lister(self.summ_dir, self.acc_dir, self.warn_dir, old_accs) # TODO: setting up lister before summary construction makes it start with an empty summ_tab. Build it anew in the direct_listing() method
         self.taxer = txdr.TaxDirector(self.tax_dir, self.summ_dir, self.acc_dir)
         self.fetcher = ftch.Fetcher(self.acc_dir, self.seq_dir, self.warn_dir)
         self.bold_postprocessor = bdpp.BOLDPostProcessor(self.seq_dir, self.seq_dir, self.warn_dir)
@@ -92,6 +92,8 @@ class Director():
         self.surveyor.survey()
     
     def direct_listing(self):
+        # this method should be run after direct_survey()
+        self.lister.set_summ_tab()
         self.lister.build_lists()
     
     def direct_tax_reconstruction(self):

@@ -23,18 +23,6 @@ def grep_acc2taxid(acc_list, file, out_file):
         process.wait()
         print('Done!')
 
-def crop_dir(out_dir, acc_dir, taxons = ['Nematoda', 'Platyhelminthes'], markers = ['18S', '28S', 'COI']):
-    # Crop the files present in the given directory
-    for tax in taxons:
-        print(f'Processing {tax}')
-        for mark in markers:
-            print(f'Processing {mark}')
-            acc_file = f'{acc_dir}/{tax}_{mark}_NCBI.acc'
-            crp = Cropper(out_dir, acc_file, tax, mark)
-            crp.crop()
-    return
-
-
 #%% classes
 class Cropper():
     def __init__(self, out_dir, acc_dir):

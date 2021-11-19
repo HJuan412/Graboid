@@ -67,6 +67,8 @@ class Director():
         self.ena = ena
         self.ncbi = ncbi
         self.t1, self.t2 = get_surv_tools(bold, ena, ncbi)
+        self.taxons = taxons
+        self.markers = markers
         self.set_workers(taxons, markers)
         ftch.set_entrez(email, apikey)
 
@@ -103,8 +105,9 @@ class Director():
         self.fetcher.set_acc_tab()
         self.fetcher.fetch(chunk_size)
     
-    def direct_bold_pp(self, markers):
-        self.bold_postprocessor.process(markers)
+    def direct_bold_pp(self):
+        self.bold_postprocessor.set_bold_tab()
+        self.bold_postprocessor.process(self.markers)
     
     def direct_merging(self):
         self.merger.merge()

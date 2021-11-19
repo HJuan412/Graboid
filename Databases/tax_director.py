@@ -63,6 +63,8 @@ class TaxDirector():
         print('Reconstructing BOLD taxonomies...')
         self.direct_BOLD_reconstruction()
 
+    # TODO: implement cleanup
+    # TODO: remove this method
     def tax_reconstruct(self):
         # NCBI
         # fetch

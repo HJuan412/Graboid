@@ -55,12 +55,39 @@ def build_seqdict(seqfile):
             seqdict[acc_short] = (acc, header, seq)
     return seqdict
 
+def get_verlist(acc_list):
+    # some accs don't have a version number, get_verlist handles those cases
+    ver_list = []
+    for acc in acc_list:
+        split_acc = acc.split('.')
+        ver = 1
+        if len(split_acc) > 1:
+            ver = int(split_acc[-1])
+        ver_list.append(ver)
+    
+    return ver_list
+
+def get_todrop(acclist):
+    to_drop = []
+    for acc in acclist:
+        if '<' in acc or '/' in acc or '=' in acc:
+            to_drop.append(acc)
+    return to_drop
+
+def filter_tab(tab):
+    # BOLD downloads some weird lines, this function deletes them
+    to_drop = get_todrop(tab.index.tolist())
+    
+    tab = tab.drop(index = to_drop, inplace = True)
+
 def build_infotab(seqdict, dbase):
     # build a dataframe with columns [Accession, Version, Database] from the given seqdict
     tab = pd.DataFrame.from_dict(seqdict, orient='index', columns = ['Accession', '1', '2']) # columns 1 & 2 are the header and seq elements in the seqdict, will be discarded
+    filter_tab(tab)
 
     acc_list = tab['Accession'].tolist()
-    ver_list = [int(acc.split('.')[-1]) for acc in acc_list]
+    # ver_list = [int(acc.split('.')[-1]) for acc in acc_list] # TODO delete me!
+    ver_list = get_verlist(acc_list)
 
     info_tab = pd.DataFrame(index = tab.index, columns = ['Accession', 'Version', 'Database'])
     info_tab['Database'] = dbase
@@ -73,10 +100,10 @@ class MergeTool():
     def __init__(self, taxon, marker, filetab, out_dir, db_order = ['NCBI', 'BOLD', 'ENA']):
         self.dicts_dict = build_ddict(db_order)
         self.tabs_dict = build_tdict(db_order)
+        self.db_order = db_order
         self.read_files(filetab)
         self.merged_tab = pd.DataFrame(columns = ['Version', 'Database'])
         self.out_prefix = f'{out_dir}/{taxon}_{marker}'
-        self.db_order = db_order
     
     def add_seqdict(self, seqfile, dbase):
         # build a seqdict from the given seqfile, if dbase is not known, add it at lowest priority
@@ -113,6 +140,10 @@ class MergeTool():
             db_dict = self.dicts_dict[dbase]
             db_tab = self.tabs_dict[dbase]
             db_accs = set(db_dict.keys()).difference(discard_accs) # incorporate all entries not already present
+            # remove corrupt accessions
+            to_drop = get_todrop(db_accs)
+            db_accs = db_accs.difference(set(to_drop))
+            #
             db_subtab = db_tab.loc[db_accs]
             self.merged_tab = pd.concat([self.merged_tab, db_subtab])
         return
@@ -182,5 +213,5 @@ class Merger():
         if self.check_seq_tab():
             for tax, sub_tab0 in self.seq_tab.groupby('Taxon'):
                 for mark, sub_tab1 in sub_tab0.groupby('Marker'):
-                    merge_agent = MergeTool(tax, mark, sub_tab1, self.seq_dir, self.db_order)
+                    merge_agent = MergeTool(tax, mark, sub_tab1, self.out_dir, self.db_order)
                     merge_agent.process()

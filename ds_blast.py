@@ -48,6 +48,7 @@ class Blaster():
         self.seq_tab = build_seq_tab(in_dir)
         self.out_dir = out_dir
         self.ref_dict = build_ref_dict(ref_dir)
+        self.warn_dir = warn_dir
     
     def check_seq_files(self):
         if len(self.seq_tab) == 0:

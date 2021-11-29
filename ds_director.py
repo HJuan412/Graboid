@@ -15,9 +15,9 @@ import os
 def generate_dirnames(dirname):
     return [f'{dirname}/BLAST_reports', f'{dirname}/Windows', f'{dirname}/Matrices', f'{dirname}/Warnings']
 #%%
-ds_dir = 'Dataset/13_10_2021-20_15_58'
-db_dir = 'Databases/13_10_2021-20_15_58/Sequence_files'
-seq_dir = 'Databases/13_10_2021-20_15_58/Sequence_files'
+ds_dir = 'Dataset/12_11_2021-23_15_53'
+db_dir = 'Databases/12_11_2021-23_15_53/Sequence_files'
+seq_dir = 'Databases/12_11_2021-23_15_53/Sequence_files'
 ref_dir = 'Reference_data/Reference_genes'
 
 #%%

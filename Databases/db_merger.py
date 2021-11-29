@@ -70,7 +70,7 @@ def get_verlist(acc_list):
 def get_todrop(acclist):
     to_drop = []
     for acc in acclist:
-        if '<' in acc or '/' in acc or '=' in acc:
+        if '<' in acc or '/' in acc or '=' in acc: # one slipped by, find commin criteria for fucked downloads
             to_drop.append(acc)
     return to_drop
 

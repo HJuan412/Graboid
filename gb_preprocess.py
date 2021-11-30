@@ -92,7 +92,8 @@ class PreProcessor():
     def __init__(self, mat_path, tax_path):
         self.aln = AlignmentLoader(mat_path, tax_path)
         self.matrix = self.aln.matrix
-        self.accs = self.aln.accs
+        self.nseqs = len(self.matrix)
+        self.accs = np.array(self.aln.accs)
         self.set_tax_codes()
         self.get_global_entropy()
         self.get_gain_per_col()
@@ -115,3 +116,37 @@ class PreProcessor():
         p_idx = sorted_gains[:p]
         self.selected = self.matrix[:, p_idx]
         self.p_idx = p_idx
+    
+    def get_jk_datasets(self):
+        # jacknife train dataset is all but one of the instances, the remaining one is taken 
+        for i in range(self.nseqs):
+            train_idx = np.arange(self.nseqs)
+            train_idx = np.delete(train_idx, i)
+            test_idx = i
+            train_ds = (self.accs[train_idx], self.tax_codes[train_idx], self.matrix[train_idx][:, self.p_idx])
+            test_ds = (self.accs[test_idx], self.tax_codes[test_idx], self.matrix[test_idx, self.p_idx])
+            yield train_ds, test_ds
+    
+    def build_folds(self, k):
+        # generate folds, stratifying taxons
+        folds = [np.array([]) for i in range(k)]
+        uniq_taxes = np.unique(self.tax_codes)
+        for tax in uniq_taxes:
+            tax_idx = np.where(self.tax_codes == tax)[0]
+            np.random.shuffle(tax_idx)
+            tax_folds = np.array_split(tax_idx, k)
+            for idx, tf in enumerate(tax_folds):
+                folds[idx] = np.concatenate((folds[idx], tf))
+        return folds
+    
+    def get_kf_datasets(self, k):
+        folds = self.build_folds(k)
+        for idx, f in enumerate(folds):
+            test_idx = f.astype(int)
+            self.test_idx = test_idx
+            train_idx = np.array(folds, dtype = object)
+            train_idx = np.delete(train_idx, idx)
+            train_idx = np.concatenate(train_idx).astype(int)
+            train_ds = (self.accs[train_idx], self.tax_codes[train_idx], self.matrix[train_idx][:, self.p_idx])
+            test_ds = (self.accs[test_idx], self.tax_codes[test_idx], self.matrix[test_idx][:, self.p_idx])
+            yield train_ds, test_ds

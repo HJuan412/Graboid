@@ -14,9 +14,9 @@ import pandas as pd
 
 #%% classes
 class Classifier():
-    def __init__(self, data, transition = 1, transversion = 2):
-        self.matrix = data.selected
-        self.tax_codes = data.tax_codes
+    def __init__(self, matrix, tax_codes, transition = 1, transversion = 2):
+        self.matrix = matrix
+        self.tax_codes = tax_codes
         self.cost_matrix = cost_matrix(transition, transversion)
         self.query = None
         self.dists = None

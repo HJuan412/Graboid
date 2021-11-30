@@ -11,11 +11,7 @@ from gb_cost_matrix import cost_matrix
 import gb_preprocess as pp
 import numpy as np
 import pandas as pd
-#%% variables
-mat_dir = 'Dataset/12_11_2021-23_15_53/Matrices/Nematoda/18S'
-tax_tab = 'Databases/12_11_2021-23_15_53/Taxonomy_files/Nematoda_18S_tax.tsv'
-acc2tax_tab = 'Databases/13_10_2021-20_15_58/Taxonomy_files/Nematoda_18S_acc2taxid.tsv'
-#%% functions
+
 #%% classes
 class Classifier():
     def __init__(self, data, transition = 1, transversion = 2):
@@ -63,7 +59,7 @@ class Classifier():
             elif mode == 'cost':
                 self.dist_by_cost()
     
-    def classify(self, k):
+    def vote_classify(self, k):
         self.K = k
         self.classif = pd.DataFrame(columns = ['Code', 'NN'])
         for idx, q_dist in enumerate(self.dists):
@@ -87,18 +83,6 @@ class Classifier():
             
             for idx in k_idx:
                 weight = q_dist[idx]
-
-#%%
-mat_browser = pp.MatrixLoader(mat_dir)
-mat_path = mat_browser.get_matrix_path(17)
-preproc = pp.PreProcessor(mat_path, tax_tab)
-preproc.select_columns(20)
-
-classifier = Classifier(preproc)
-q = classifier.matrix[:10]
-classifier.set_query(q)
-classifier.get_dists('cost')
-classifier.classify(10)
 
 #%% paired distance
 # @njit
@@ -134,3 +118,20 @@ def get_pd(matrix):
             clusters[idx0] = cluster
             clustered = clustered.union(cluster)
     return dist_mat, clusters
+
+#%% main loop -DELETE
+if __name__ == '__main__':
+    mat_dir = 'Dataset/12_11_2021-23_15_53/Matrices/Nematoda/18S'
+    tax_tab = 'Databases/12_11_2021-23_15_53/Taxonomy_files/Nematoda_18S_tax.tsv'
+    acc2tax_tab = 'Databases/13_10_2021-20_15_58/Taxonomy_files/Nematoda_18S_acc2taxid.tsv'
+    
+    mat_browser = pp.MatrixLoader(mat_dir)
+    mat_path = mat_browser.get_matrix_path(17)
+    preproc = pp.PreProcessor(mat_path, tax_tab)
+    preproc.select_columns(20)
+    
+    classifier = Classifier(preproc)
+    q = classifier.matrix[:10]
+    classifier.set_query(q)
+    classifier.get_dists('cost')
+    classifier.classify(10)

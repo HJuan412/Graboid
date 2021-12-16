@@ -48,16 +48,20 @@ class Reconstructor():
 
     def load_data(self, file):
         # open bold tab and extract the relevant columns
-        bold_tab = pd.read_csv(file, sep = '\t', encoding = 'latin-1', index_col = 1, low_memory = False) # latin-1 to parse BOLD files
-        
+        bold_tab = pd.read_csv(file, sep = '\t', encoding = 'latin-1', index_col = 0, low_memory = False) # latin-1 to parse BOLD files
+        # Fix: index_col in read_csv uses column 0 instead of 1
+        bold_index = bold_tab.index.tolist()
+        bold_split = {b:b.split('-')[0] for b in bold_index} # remove the version from each acc and rename the table index
+        bold_tab.rename(index = bold_split, inplace = True)
+
         self.tax_tab = bold_tab[['phylum_taxID', 'phylum_name',
-                                      'class_taxID', 'class_name',
-                                      'order_taxID', 'order_name',
-                                      'family_taxID', 'family_name',
-                                      'subfamily_taxID', 'subfamily_name',
-                                      'genus_taxID', 'genus_name',
-                                      'species_taxID', 'species_name',
-                                      'subspecies_taxID', 'subspecies_name']]
+                              'class_taxID', 'class_name',
+                              'order_taxID', 'order_name',
+                              'family_taxID', 'family_name',
+                              'subfamily_taxID', 'subfamily_name',
+                              'genus_taxID', 'genus_name',
+                              'species_taxID', 'species_name',
+                              'subspecies_taxID', 'subspecies_name']]
     
     def build_name_tab(self):
         # build a taxID:Name table

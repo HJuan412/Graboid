@@ -63,7 +63,7 @@ def get_record_acc(header):
     return acc
 
 def locate_BOLD_files(seq_dir):
-    files = glob(f'{seq_dir}/*BOLDr*tmp')
+    files = glob(f'{seq_dir}/*BOLD*tmp')
     return files
 
 #%% classes
@@ -107,11 +107,26 @@ class Processor():
             mark_outfile = self.generate_filename(mark)
             with open(mark_outfile, 'w') as out_handle:
                 SeqIO.write(mark_records, out_handle, 'fasta')
-#%% main
-def process_files(seq_dir, markers = ['COI', '18S']):
-    bold_files = locate_BOLD_files(seq_dir)
+
+class BOLDPostProcessor():
+    def __init__(self, in_dir, out_dir, warn_dir):
+        self.in_dir = in_dir
+        self.out_dir = out_dir
+        self.warn_dir = warn_dir
+        self.set_bold_tab()
     
-    for file in bold_files:
-        proc = Processor(file, markers)
-        proc.process()
-    return
+    def set_bold_tab(self):
+        self.bold_files = locate_BOLD_files(self.in_dir)
+        
+    def check_bold_files(self):
+        if len(self.bold_files) == 0:
+            with open(f'{self.warn_dir}/BOLD_postprocessing.warn', 'w') as warn_handle:
+                warn_handle.write('No BOLD sequence files found in directory {self.in_dir}')
+            return False
+        return True
+    
+    def process(self, markers = ['COI', '18S']):
+        if self.check_bold_files():
+            for file in self.bold_files:
+                proc = Processor(file, markers)
+                proc.process()

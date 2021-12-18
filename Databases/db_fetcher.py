@@ -18,6 +18,7 @@ import urllib3
 
 #%% functions
 # Entrez
+# TODO: remove mail and apikey
 def set_entrez(email = "hernan.juan@gmail.com", apikey = "7c100b6ab050a287af30e37e893dc3d09008"):
     Entrez.email = email
     Entrez.api_key = apikey
@@ -76,67 +77,72 @@ def fetch_bold(acc_list, out_handle):
     return
 
 #%% classes
-class Fetcher():
-    def __init__(self, dbase, fetch_func, out_dir, warn_dir, chunksize = 500):
-        self.dbase = dbase
-        self.fetch_func = fetch_func
+class DbFetcher():
+    def __init__(self, in_file, taxon, marker, database, out_dir, warn_dir):
+        self.acc_tab = pd.read_csv(in_file, index_col = 0)
+        self.marked_accs = self.acc_tab.loc[self.acc_tab['Entry'] >= 1, 'Accession'].tolist() # get entries with Entry code 1 or 2
+        self.taxon = taxon
+        self.marker = marker
+        self.database = database
+        self.set_fetchfunc(database)
         self.out_dir = out_dir
         self.warn_dir = warn_dir
-        self.chunksize = chunksize
+        self.generate_filenames()
     
-    def generate_filenames(self, taxon, marker = ''):
-        filename = f'{self.out_dir}/{taxon}_{marker}_{self.dbase}.tmp'
-        warn_filename = f'{self.warn_dir}/{taxon}_{marker}_{self.dbase}.lis'
-        return filename, warn_filename
+    def set_fetchfunc(self, database):
+        if database == 'BOLD':
+            self.fetch_func = fetch_bold
+        elif database == 'ENA':
+            self.fetch_func = fetch_ena
+        elif database == 'NCBI':
+            self.fetch_func = fetch_ncbi
     
-    def add_to_warn_file(warn_file, acc_list):
-        with open(warn_file, 'a') as warn_handle:
+    def generate_filenames(self):
+        self.out_file = f'{self.out_dir}/{self.taxon}_{self.marker}_{self.database}.tmp'
+        self.warn_file = f'{self.warn_dir}/{self.taxon}_{self.marker}_{self.database}.lis'
+    
+    def add_to_warn_file(self, acc_list):
+        with open(self.warn_file, 'a') as warn_handle:
             warn_handle.write('\n'.join(acc_list))
         return
 
-    def get_nchunks(self, acc_list_len):
-        nchunks = ceil(acc_list_len/self.chunksize)
-        return nchunks
-    
-    def get_marked_accs(self, accfile):
-        marked = accfile.loc[accfile['Entry'] >= 1, 'Accession'].tolist()
-        return marked
-
-    def fetch(self, acc_tab, taxon, marker = ''):
-        acc_list = self.get_marked_accs(acc_tab)
-        chunks = acc_slicer(acc_list, self.chunksize)
-        nchunks = self.get_nchunks(len(acc_list))
-        out_file, warn_file = self.generate_filenames(taxon, marker)
+    def fetch(self, chunk_size):
+        chunks = acc_slicer(self.marked_accs, chunk_size)
+        nchunks = ceil(len(self.marked_accs)/chunk_size)
         
-        with open(out_file, 'wb') as out_handle:
+        with open(self.out_file, 'wb') as out_handle: # change mode to 'ab' so an interrupted download can be completed using a Fetcher instance with (warn_dir passed as out_dir)
             for idx, chunk in enumerate(chunks):
-                print(f'{self.dbase}. Chunk {idx + 1} of {nchunks}')
+                print(f'{self.database}, {self.taxon} {self.marker}. Chunk {idx + 1} of {nchunks}')
                 try:
                     self.fetch_func(chunk, out_handle)
                 except:
                     print(f'Error downloading chunk {idx + 1}. Accessions stored in {self.warn_dir}')
-                    self.add_to_warn_file(warn_file, chunk)
-                    
-        return
-#%% Main
-def fetch_sequences(acc_dir, out_dir, warn_dir, chunksize = 500, verbose = True):
-    # list accsession files
-    acc_file_tab = build_acc_tab(acc_dir)
+                    self.add_to_warn_file( chunk)
+
+class Fetcher():
+    # TODO: fetch sequences stored in warn_dir
+    def __init__(self, in_dir, out_dir, warn_dir):
+        self.in_dir = in_dir
+        self.set_acc_tab()
+        self.out_dir = out_dir
+        self.warn_dir = warn_dir
     
-    fetchers = {'BOLD':Fetcher('BOLDr', fetch_bold, out_dir, warn_dir, chunksize), # BOLDr signifies there are the raw BOLD files and must still be processed
-                'ENA':Fetcher('ENA', fetch_ena, out_dir, warn_dir, chunksize),
-                'NCBI':Fetcher('NCBI', fetch_ncbi, out_dir, warn_dir, chunksize)}
-
-    for _, row in acc_file_tab.iterrows():
-        taxon = row['Taxon']
-        marker = row['Marker']
-        dbase = row['Database']
-        file = row['File']
-        acc_file = pd.read_csv(file, index_col = 0)
-        
-        if verbose:
-            print(f'Fetching {taxon} {marker} sequences from {dbase} database')
-
-        fetcher = fetchers[dbase]
-        fetcher.fetch(acc_file, taxon, marker)
-    return
+    def set_acc_tab(self):
+        self.acc_tab = build_acc_tab(self.in_dir)
+    def check_acclists(self):
+        # make sure acc_tab is not empty
+        if len(self.acc_tab) == 0:
+            with open(f'{self.warn_dir}/fetcher.warn', 'w') as warn_handle:
+                warn_handle.write('No accession list files found in directory {self.in_dir}')
+            return False
+        return True
+    
+    def fetch(self, chunk_size):
+        if self.check_acclists():
+            for idx, row in self.acc_tab.iterrows():
+                taxon = row['Taxon']
+                marker = row['Marker']
+                dbase = row['Database']
+                file = row['File']
+                dbfetch = DbFetcher(file, taxon, marker, dbase, self.out_dir, self.warn_dir)
+                dbfetch.fetch(chunk_size)

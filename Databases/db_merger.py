@@ -55,12 +55,39 @@ def build_seqdict(seqfile):
             seqdict[acc_short] = (acc, header, seq)
     return seqdict
 
+def get_verlist(acc_list):
+    # some accs don't have a version number, get_verlist handles those cases
+    ver_list = []
+    for acc in acc_list:
+        split_acc = acc.split('.')
+        ver = 1
+        if len(split_acc) > 1:
+            ver = int(split_acc[-1])
+        ver_list.append(ver)
+    
+    return ver_list
+
+def get_todrop(acclist):
+    to_drop = []
+    for acc in acclist:
+        if '<' in acc or '/' in acc or '=' in acc: # one slipped by, find commin criteria for fucked downloads
+            to_drop.append(acc)
+    return to_drop
+
+def filter_tab(tab):
+    # BOLD downloads some weird lines, this function deletes them
+    to_drop = get_todrop(tab.index.tolist())
+    
+    tab = tab.drop(index = to_drop, inplace = True)
+
 def build_infotab(seqdict, dbase):
     # build a dataframe with columns [Accession, Version, Database] from the given seqdict
     tab = pd.DataFrame.from_dict(seqdict, orient='index', columns = ['Accession', '1', '2']) # columns 1 & 2 are the header and seq elements in the seqdict, will be discarded
+    filter_tab(tab)
 
     acc_list = tab['Accession'].tolist()
-    ver_list = [int(acc.split('.')[-1]) for acc in acc_list]
+    # ver_list = [int(acc.split('.')[-1]) for acc in acc_list] # TODO delete me!
+    ver_list = get_verlist(acc_list)
 
     info_tab = pd.DataFrame(index = tab.index, columns = ['Accession', 'Version', 'Database'])
     info_tab['Database'] = dbase
@@ -69,67 +96,14 @@ def build_infotab(seqdict, dbase):
     return info_tab
 
 #%% classes
-class Merger():
-    def __init__(self, taxon, marker, out_dir):
-        self.ncbi_dict = {}
-        self.bold_dict = {}
-        self.ncbi_tab = build_infotab({}, 'NCBI')
-        self.bold_tab = build_infotab({}, 'BOLD')
-        self.merged_tab = pd.DataFrame(columns = ['Version', 'Database'])
-        self.out_file = f'{out_dir}/{taxon}_{marker}'
-    
-    def add_seqdict(self, seqfile, dbase):
-        if dbase == 'NCBI':
-            self.ncbi_dict = build_seqdict(seqfile)
-            self.ncbi_tab = build_infotab(self.ncbi_dict, dbase)
-        if dbase == 'BOLD':
-            self.bold_dict = build_seqdict(seqfile)
-            self.bold_tab = build_infotab(self.bold_dict, dbase)
-        return
-    
-    def clear_seqdict(self, dbase):
-        if dbase == 'NCBI':
-            self.ncbi_dict = {}
-            self.ncbi_tab = build_infotab({}, dbase)
-        if dbase == 'BOLD':
-            self.bold_dict = {}
-            self.bold_tab = build_infotab({}, dbase)
-        
-        self.merged_tab = self.merged_tab.iloc[0:0]
-        return
-
-    def merge_infotabs(self):
-        bold_accs = set(self.bold_dict.keys()).difference(self.ncbi_dict.keys())
-        bold_subtab = self.bold_tab.loc[bold_accs]
-        self.merged_tab = pd.concat([self.ncbi_tab, bold_subtab])
-        return
-    
-    def save_merged_tab(self):
-        out_file = self.out_file + '_info.tab'
-        self.merged_tab.to_csv(out_file)
-
-    def merge_seqfiles(self):
-        ncbi_accs = self.merged_tab.loc[self.merged_tab['Database'] == 'NCBI'].index
-        bold_accs = self.merged_tab.loc[self.merged_tab['Database'] == 'BOLD'].index
-        
-        records = []
-        for db_accs, db_dict in zip([ncbi_accs, bold_accs], [self.ncbi_dict, self.bold_dict]):
-            for db_acc in db_accs:
-                acc, header, seq = db_dict[db_acc]
-                record = SeqRecord(Seq(seq), header, description = '')
-                records.append(record)
-        
-        out_file = self.out_file + '.fasta'
-        with open(out_file, 'w') as out_handle:
-            SeqIO.write(records, out_handle, 'fasta')
-#%%
-class Merger2():
-    def __init__(self, taxon, marker, out_dir, db_order = ['NCBI', 'BOLD', 'ENA']):
+class MergeTool():
+    def __init__(self, taxon, marker, filetab, out_dir, db_order = ['NCBI', 'BOLD', 'ENA']):
         self.dicts_dict = build_ddict(db_order)
         self.tabs_dict = build_tdict(db_order)
+        self.db_order = db_order
+        self.read_files(filetab)
         self.merged_tab = pd.DataFrame(columns = ['Version', 'Database'])
         self.out_prefix = f'{out_dir}/{taxon}_{marker}'
-        self.db_order = db_order
     
     def add_seqdict(self, seqfile, dbase):
         # build a seqdict from the given seqfile, if dbase is not known, add it at lowest priority
@@ -142,6 +116,13 @@ class Merger2():
         self.dicts_dict[dbase] = seqdict
         self.tabs_dict[dbase] = build_infotab(seqdict, dbase)
         return
+    
+    def read_files(self, filetab):
+        # read and call add_seqdict for each file in the given table (use at construction)
+        for _, row in filetab.iterrows():
+            dbase = row['Database']
+            file = row['File']                
+            self.add_seqdict(file, dbase)
     
     def clear_seqdict(self, dbase):
         # remove a seqdict, clear the merged_table
@@ -159,6 +140,10 @@ class Merger2():
             db_dict = self.dicts_dict[dbase]
             db_tab = self.tabs_dict[dbase]
             db_accs = set(db_dict.keys()).difference(discard_accs) # incorporate all entries not already present
+            # remove corrupt accessions
+            to_drop = get_todrop(db_accs)
+            db_accs = db_accs.difference(set(to_drop))
+            #
             db_subtab = db_tab.loc[db_accs]
             self.merged_tab = pd.concat([self.merged_tab, db_subtab])
         return
@@ -181,19 +166,52 @@ class Merger2():
         out_file = self.out_prefix + '.fasta'
         with open(out_file, 'w') as out_handle:
             SeqIO.write(records, out_handle, 'fasta')
-#%%
-def merger(seq_dir, db_order = ['NCBI', 'BOLD', 'ENA']):
-    filetab = build_filetab(seq_dir)
     
-    for tax, sub_tab0 in filetab.groupby('Taxon'):
-        for mark, sub_tab1 in sub_tab0.groupby('Marker'):
-            merge_agent = Merger2(tax, mark, seq_dir, db_order)
-            for _, row in sub_tab1.iterrows():
-                dbase = row['Database']
-                file = row['File']                
-                merge_agent.add_seqdict(file, dbase)
-            
-            merge_agent.merge_infotabs()
-            merge_agent.save_merged_tab()
-            merge_agent.merge_seqfiles()    
-    return
+    def process(self):
+        # direct processing of the taxon - marker duo
+        self.merge_infotabs()
+        self.save_merged_tab()
+        self.merge_seqfiles()
+
+class Merger():
+    def __init__(self, in_dir, out_dir, warn_dir, db_order = ['NCBI', 'BOLD', 'ENA']):
+        """
+        Constructor of the merger class.
+
+        Parameters
+        ----------
+        in_dir : str
+            Directory containing the temporal sequence files.
+        out_dir : str
+            Directory containing the output files.
+        warn_dir : str
+            Directory containing the warning files.
+        db_order : list, optional
+            Establish the priority for considering repeated sequences.
+            The default is ['NCBI', 'BOLD', 'ENA'].
+
+        Returns
+        -------
+        None.
+
+        """
+        self.in_dir = in_dir
+        self.out_dir = out_dir
+        self.warn_dir = warn_dir
+        self.db_order = db_order
+        self.seq_tab = build_filetab(in_dir)
+    
+    def check_seq_tab(self):
+        # make sure seq_tab is not empty
+        if len(self.seq_tab) == 0:
+            with open(f'{self.warn_dir}/merger.warn', 'w') as warn_handle:
+                warn_handle.write('No sequence files found in directory {self.in_dir}')
+            return False
+        return True
+    
+    def merge(self):
+        if self.check_seq_tab():
+            for tax, sub_tab0 in self.seq_tab.groupby('Taxon'):
+                for mark, sub_tab1 in sub_tab0.groupby('Marker'):
+                    merge_agent = MergeTool(tax, mark, sub_tab1, self.out_dir, self.db_order)
+                    merge_agent.process()

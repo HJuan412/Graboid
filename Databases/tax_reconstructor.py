@@ -132,14 +132,6 @@ def build_taxtab(taxids, nodes, ranks):
     taxtab.fillna(0, inplace = True)
     return taxtab.astype(int)
 
-def reconstruct_all(in_dir, ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']):
-    acc2tax_files = glob(f'{in_dir}/*acc2taxid.tsv')
-    for acc2tax in acc2tax_files:
-        print(f'Processing {acc2tax}')
-        rec = Reconstructor(in_dir, acc2tax, ranks)
-        rec.build_taxonomy()
-        rec.save()
-    return
 #%% classes
 class Reconstructor():
     def __init__(self, in_dir, acc2tax, ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']):
@@ -168,3 +160,25 @@ class Reconstructor():
         out_tab.index.name = 'Accession'
         
         out_tab.to_csv(self.out_file, sep = '\t')
+
+class ReconstructionDirector():
+    def __init__(self, in_dir, ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']):
+        self.in_dir = in_dir
+        self.locate_acc2tax()
+        self.ranks = ranks
+
+    def locate_acc2tax(self):
+        self.acc2tax_files = glob(f'{self.in_dir}/*acc2taxid.tsv')
+    
+    def reconstruct_one(self, file):
+        # use this method to reconstruct a single acc2tax file (must specify)
+        rec = Reconstructor(self.in_dir, file, self.ranks)
+        rec.build_taxonomy()
+        rec.save()
+    
+    def reconstruct(self):
+        for acc2tax in self.acc2tax_files:
+            print(f'Processing {acc2tax}')
+            rec = Reconstructor(self.in_dir, acc2tax, self.ranks)
+            rec.build_taxonomy()
+            rec.save()

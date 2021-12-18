@@ -28,15 +28,8 @@ def load_ref(file):
     return ref
 
 def load_report(report_file):
-    report_tab = pd.read_csv(report_file, sep = '\t', header = None)
-    report_tab.rename(columns = {0:'qseqid',
-                                 1:'pident',
-                                 2:'length',
-                                 3:'qstart',
-                                 4:'qend',
-                                 5:'sstart',
-                                 6:'send',
-                                 7:'evalue'}, inplace = True)
+    report_tab = pd.read_csv(report_file, sep = '\t', header = None, names = ['qseqid', 'pident', 'length', 'qstart', 'qend', 'sstart', 'send', 'evalue'])
+    report_tab.sort_values(['qseqid', 'sstart'], inplace = True)
     return report_tab
 
 def match_in_window(match, w_start, w_end):
@@ -175,8 +168,8 @@ def align_match(seq, cropped, gaps):
         alig += seq[seg_start:seg_end]
     return alig, sum_gaps
 
-# second version of match dict, returns a dict of coordinate matrixes (sstart, send, qstart, qend) for each match ordered by sstart
-def make_matchdict(report):
+def build_matchdict(report):
+    # version 5, 1100 times faster than the original
     """
     Generate a dictionary with the coordinates array of all matches in the blast report
 
@@ -191,19 +184,23 @@ def make_matchdict(report):
         Dictionary of the form query_id:coord_array.
 
     """
-    qid_array = report['qseqid'].to_numpy(dtype=str)
+    match_dict = {}
+    qid_array = report['qseqid'].tolist() + [''] # tail makes sure last id is included
     coord_array = report[['sstart', 'send', 'qstart', 'qend']].to_numpy(dtype = int)
-
-    matchdict = {}
-    uniq_qids = np.unique(qid_array)
     
-    for qid in uniq_qids:
-        idx = np.where(qid_array == qid)
-        match_matrix = coord_array[idx]
-        match_matrix = match_matrix[match_matrix[:,0].argsort()]
-        matchdict[qid] = match_matrix
-    return matchdict
+    curr_qid = qid_array[0]
+    idx_0 = 0
+    
+    for idx_1, qid in enumerate(qid_array):
+        if qid != curr_qid:
+            coords = coord_array[idx_0:idx_1, :]
+            match_dict[curr_qid] = coords
+            
+            idx_0 = idx_1
+            curr_qid = qid
+    return match_dict
 
+#%%
 def process(in_dir, taxons = ['Nematoda', 'Platyhelminthes'], markers = ['18S', '28S', 'COI'], width = 100, step = 15):
     sequence_dir = f'Databases/{in_dir}/Sequence_files'
     report_dir = f'Dataset/{in_dir}/BLAST_reports'
@@ -239,7 +236,7 @@ def process(in_dir, taxons = ['Nematoda', 'Platyhelminthes'], markers = ['18S', 
 class Windower():
     def __init__(self, report_file, seqfile):
         report = load_report(report_file)
-        self.matches = make_matchdict(report)
+        self.matches = build_matchdict(report)
         self.seqs = tools.make_seqdict(seqfile)
         self.__w_start = 0
         self.__w_end = 0

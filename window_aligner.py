@@ -39,7 +39,7 @@ def match_in_window(match, w_start, w_end):
     Parameters
     ----------
     match : numpy.array
-        Coordinate matrix of matches to the reference seuqnce (sstart, ssend, qstart, qend).
+        Coordinate matrix of matches to the reference sequence (sstart, ssend, qstart, qend).
     w_start : int
         Start position for the window.
     w_end : int
@@ -200,6 +200,115 @@ def build_matchdict(report):
             curr_qid = qid
     return match_dict
 
+
+#%% WB
+class Match():
+    def __init__(self, seqid, coords, start, end):
+        self.seqid = seqid
+        self.pad_start = 0
+        self.pad_end = 0
+        self.crop(coords, start, end)
+        self.start = start
+        self.end = end
+        self.get_gaps()
+    
+    def crop(self, coords, start, end):
+        start_crop = start - coords[0,0] # if + crop, if - pad
+        end_crop = end - coords[-1, 1] # if - crop, if + pad
+        
+        cropped = coords.copy() # cropped match
+    
+        if start_crop >= 0:
+            # get starting point in query
+            q_start = cropped[0, 2] + start_crop
+            # adjust starting coords
+            # every place in column 0 to the LEFT of w_start is adjusted to w_start
+            # every_place in column 2 to the LEFT of q_start is adjusted to q_start
+            cropped[:, 0] = np.where(cropped[:,0] < start, start, cropped[:,0])
+            cropped[:, 2] = np.where(cropped[:,2] < q_start, q_start, cropped[:,2])
+        else:
+            # add padding at the beginning of the match
+            self.pad_start = coords[0, [0, 2]] + start_crop
+    
+        if end_crop <= 0:
+            # get ending point in query
+            q_end = cropped[-1, 3] + end_crop
+            # adjust ending coords
+            cropped[:, 1] = np.where(cropped[:,1] > end, end, cropped[:,1])
+            cropped[:, 3] = np.where(cropped[:,3] > q_end, q_end, cropped[:,3])
+        else:
+            # add padding at the beginning of the match
+            self.pad_end = coords[-1, [1, 3]] + end_crop
+        
+        self.coords = cropped
+    
+    def get_gaps(self):
+        nsegs = self.coords.shape[0]
+        self.gaps = np.zeros((1,2), dtype = int)
+        if len(nsegs) > 1:
+            gaps = np.zeros((nsegs, 2), dtype = int) # this array will hold the gaps in the subject and query cols
+            # first row in the array always 0, this allows to iterate it along the coord array (same dimentions)
+        
+            for i in range(1, nsegs):
+                gaps[i, 0] = self.coords[i, 0] - self.coords[i-1, 1]
+                gaps[i, 1] = self.coords[i, 2] - self.coords[i-1, 3]
+            
+            gaps = gaps.T
+            self.gaps = gaps
+    
+    def build_alignment(self, seq, gap_char = '-'):
+        alig = ''
+        sum_gaps = self.gaps[:,1].sum()
+        
+        alig += gap_char * self.pad_start
+        for gp, coo in zip(self.gaps[:,1], self.coords[:,2:]):
+            alig += gap_char * gp
+            alig += seq[coo[0]:coo[1] + 1]
+        alig += gap_char * self.pad_end
+        
+        return alig, sum_gaps
+        
+        
+class Window():
+    def __init__(self, start, end, matches, seqs):
+        self.w_start = start
+        self.w_end = end
+        self.get_in_window(matches)
+        self.build_alignment(seqs)
+    
+    def get_in_window(self, matches):
+        # extracts all the matches overlapping with the window (excludes fragments that don't overlap)
+        self.matches = {}
+        
+        for seqid, match in matches:
+            matches_in = np.where((match[:,0] < self.w_end) & (match[:,1] > self.w_start))
+            miw = match[matches_in]
+            if len(miw) > 0:
+                self.matches[seqid] = Match(seqid, miw, self.w_start, self.w_end)
+
+    def build_alignment(self, seqs):
+        #TODO: handle superpositions
+        self.aln_dict = {}
+        
+        for seqid, match in self.matches.items():
+            seq = seqs[seqid]
+            alig, sum_gaps = match.build_alignment(seq)
+            self.aln_dict[seqid] = alig, sum_gaps
+
+class WindowBuilder():
+    def __init__(self, in_file, seq_file):
+        self.report = load_report(in_file)
+        self.matches = build_matchdict(self.report)
+        self.seqs = tools.make_seqdict(seq_file)
+        self.get_match_bounds()
+    
+    def get_match_bounds(self):
+        self.lower = self.report['sstart'].min()
+        self.upper = self.report['send'].max()
+    
+    def build_window(self, start, end):
+        return Window(start, end, self.matches, self.seqs)
+        
 #%%
 def process(in_dir, taxons = ['Nematoda', 'Platyhelminthes'], markers = ['18S', '28S', 'COI'], width = 100, step = 15):
     sequence_dir = f'Databases/{in_dir}/Sequence_files'

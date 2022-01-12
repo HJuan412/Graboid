@@ -44,22 +44,27 @@ def get_uniq_seqs(matrix, row_idx = None, col_idx = 0):
 #%% classes
 class WindowCollapser():
     def __init__(self, tax_file, rank = 'family'):
+        # tax_file should be a file located in the Taxonomy_files dir in a downloaded database, name should be <taxon>_<marker>_tax.tsv
         self.tax_file = tax_file
         self.rank = rank
         self.mloader = mtk.MatrixLoader()
         
         self.set_matrix()
-        self.collapsed = pd.DataFrame()
-        self.mixed_taxes = {}
+        self.collapsed = pd.DataFrame() # contains the report of collapsed sequences
+        self.mixed_taxes = {} # contains the members of mixed_taxes
+
     def set_matrix(self, mat_file = None):
-        # load the data matrix to be used
+        # load the data matrix to be used, if mat_file is None clears existing matrix
         self.mat_file = mat_file
         self.mloader.clear()
         self.mloader.load(mat_file)
         # MatrixLoader object contains matrix, accession list, n, start and end
         self.__set_tax()
+        self.collapsed = pd.DataFrame()
+        self.mixed_taxes = {}
     
     def collapse(self):
+        # collapse the loaded matrix and generate the collapsed and mixed_taxes reports
         if not self.mat_file is None:
             self.__collapse_windows()
             self.__get_repeated_seqs()

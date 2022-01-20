@@ -15,24 +15,27 @@ import pandas as pd
 
 #%% dist calculators
 class DistCalculator(ABC):
+    # template class for distance calculators
     def __init__(self, data, query, cost_matrix = None):
-        self.data = data
-        self.query = query
-        self.cost_matrix = cost_matrix
-        self.dists = np.zeros((self.query.shape[0], self.data.shape[0]))
+        self.data = data # numpy array with reference data. Values rendered as numbers
+        self.query = query # numpy array with query sequences. Shape should be (n queries, sequence length)
+        self.cost_matrix = cost_matrix # numpy array with susbstitution costs
+        self.dists = np.zeros((self.query.shape[0], self.data.shape[0])) # distance between query sequences to every data instance
 
     @abstractmethod
     def get_dist(self):
         pass
 
 class DistByID(DistCalculator):
+    # distances between queries and reference sequences counted as the sum of positions with differing values
     def get_dist(self):
-        
         for idx, q in enumerate(self.query):
             q_dist = (1-(q == self.data)).sum(axis = 1)
             self.dists[idx,:] = q_dist
 
 class DistByCost(DistCalculator):
+    # distances value for each position is taken from the cost matrix
+    # TODO: cost matrix with diagonal values 0 and all remaining 1 gives distance value equal to distance by identity
     def get_dist(self):
         for idx0, query in enumerate(self.query):
             for idx1, ref in enumerate(self.data):
@@ -43,17 +46,19 @@ class DistByCost(DistCalculator):
 
 #%% voters
 class Voter(ABC):
+    # template class for voters
     def __init__(self, K, distances, data_classes):
-        self.K = K
-        self.distances = distances
-        self.data_classes = data_classes
-        self.classif = False
+        self.K = K # number of neighbours to take into account
+        self.distances = distances # numpy array. DistCalculator.dists attribute
+        self.data_classes = data_classes # pandas series. 'tax' column of a collapsed dataset
+        self.classif = False # classification table
 
     @abstractmethod
     def classify(self):
         pass
 
 class MajorityVote(Voter):
+    # each of the nearest neighbours casts a single vote. Query is assigned to the taxon with the most votes
     def classify(self):
         self.classif = pd.DataFrame(columns = ['Code', 'NN'])
         for idx, q_dist in enumerate(self.distances):
@@ -61,23 +66,26 @@ class MajorityVote(Voter):
             k_idx = sorted_dists[:self.K]
             k_taxes = self.data_classes[k_idx]
     
-            taxes, counts = np.unique(k_taxes, return_counts = True)
-            most_abundant = np.argsort(counts)[-1]
-            self.classif.at[idx,:] = [taxes[most_abundant], counts[most_abundant]]
+            tax_counts = k_taxes.value_counts()
+            max_count = tax_counts.max()
+            most_abundant = tax_counts.loc[tax_counts == max_count].index.tolist()
+            self.classif.at[idx,:] = [np.array(most_abundant, dtype="object"), max_count]
 
 class WeightedVote(Voter):
+    # each of the neighbours casts a vote weighted by a function of its distance to the query
+    # TODO: define distance weight function
     def classify(self):
         self.classif = pd.DataFrame(columns = ['Query', 'Code', 'Weight'])
         for q_idx, q_dist in enumerate(self.distances):
             sorted_dists = np.argsort(q_dist)
             k_idx = sorted_dists[:self.K]
-            k_taxes = self.data_classes[k_idx]
+            k_taxes = self.data_classes[k_idx].values
             w_dict = {tax:0 for tax in k_taxes}
             
             for idx in k_idx:
                 tax = self.data_classes[idx]
                 weight = q_dist[idx]
-                w_dict[tax] += weight
+                w_dict[tax] += weight # TODO: this is wrong
             
             for k,v in w_dict.items():
                 self.classif = self.classif.append(pd.Series({'Query':q_idx, 'Code':k, 'Weight':v}), ignore_index = True)
@@ -101,12 +109,12 @@ cost_mat = cost_matrix(1, 2)
 dbcost = DistByCost(matrix[2:], matrix[:2].reshape((-1, 100)), cost_mat)
 dbcost.get_dist()
 # voters
-majVote = MajorityVote(10, dbId.dists, wc.collapsed['tax'].to_numpy())
-majVote = MajorityVote(10, dbcost.dists, wc.collapsed['tax'].to_numpy())
+majVote = MajorityVote(10, dbId.dists, wc.collapsed['tax'])
+majVote = MajorityVote(10, dbcost.dists, wc.collapsed['tax'])
 majVote.classify()
 
-weiVo = WeightedVote(10, dbId.dists, wc.collapsed['tax'].to_numpy())
-weiVo = WeightedVote(10, dbcost.dists, wc.collapsed['tax'].to_numpy())
+weiVo = WeightedVote(10, dbId.dists, wc.collapsed['tax'])
+weiVo = WeightedVote(10, dbcost.dists, wc.collapsed['tax'])
 weiVo.classify()
 
 #%% classes

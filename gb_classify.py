@@ -117,6 +117,50 @@ weiVo = WeightedVote(10, dbId.dists, wc.collapsed['tax'])
 weiVo = WeightedVote(10, dbcost.dists, wc.collapsed['tax'])
 weiVo.classify()
 
+
+# TODO remake Classifier class, handle collapser (or not), dist calculator and voter selection
+class Classifier2():
+    def __init__(self, data, tax_codes, transition=1, transversion=2):
+        self.data = data
+        self.nseqs = data.shape[0]
+        self.seqlen = data.shape[1]
+        self.tax_codes = tax_codes
+        self.cost_matrix = cost_matrix(transition, transversion)
+        
+        # These dictionaries are used to select the distance calculation and voting mechanisms
+        # To add a new one define a DistCalculator/Voter class and add it to the dictionary with a corresponding mode key (or keys)
+        self.dist_calculators = {0:DistByID, 'id':DistByID,
+                                 1:DistByCost, 'cost':DistByCost}
+        self.voters = {0:MajorityVote, 'maj':MajorityVote,
+                       1:WeightedVote, 'wei':WeightedVote}
+    
+    def set_query(self, query):
+        self.query = query.reshape((-1, self.seqlen))
+    
+    def set_k(self, k):
+        try:
+            self.k = int(k)
+        except:
+            self.k = 3
+
+    def get_dists(self, mode = 0):
+        # creates a DistCalculator object and calculates query distances
+        # modes:
+            # 0 : distance by identity
+            # 1 : distance by cost
+        dist_calculator = self.dist_calculators[mode](self.query, self.data, self.cost_matrix)
+        dist_calculator.get_dist()
+        self.distances = dist_calculator.dists
+    
+    def classify(self, mode = 0):
+        # creates a Voter object and classifies query instances
+        # modes:
+            # 0 : majority vote
+            # 1 : weighted vote
+        voter = self.voters[mode](self.K, self.distances, self.tax_codes)
+        voter.classify()
+        self.classif = voter.classif
+
 #%% classes
 class Classifier():
     def __init__(self, matrix, tax_codes, transition = 1, transversion = 2):

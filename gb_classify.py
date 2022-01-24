@@ -44,14 +44,35 @@ class DistByCost(DistCalculator):
                     q_cost += self.cost_matrix[q, s]
                 self.dists[idx0, idx1] = q_cost
 
+#%% weight functions
+def weight_1(dist, a = 1.0, b = 1.0):
+    """
+    Calculate weight as a function of distance
+
+    Parameters
+    ----------
+    dist : float
+        Distance to query.
+    a : float, optional
+        This value determines the maximum weight (increases with values of a closer to 0). At a = 1 the maximum value is 1. With a greater than 1 the maximum value tends to 0. The default is 1.0.
+    b : float, optional
+        This value sets the fallout rate according to distance. The greater the value the fastest the weight drops off. The default is 1.0.
+
+    Returns
+    -------
+    Float
+
+    """
+    return 1/(a + b * dist ** 2)
 #%% voters
 class Voter(ABC):
     # template class for voters
-    def __init__(self, K, distances, data_classes):
+    def __init__(self, K, distances, data_classes, weight_func = None):
         self.K = K # number of neighbours to take into account
         self.distances = distances # numpy array. DistCalculator.dists attribute
         self.data_classes = data_classes # pandas series. 'tax' column of a collapsed dataset
-        self.classif = False # classification table
+        self.weight_func = weight_func
+        self.results = pd.DataFrame(columns = ['query', 'classification', 'rank', 'support']) # classification table
 
     @abstractmethod
     def classify(self):
@@ -60,36 +81,39 @@ class Voter(ABC):
 class MajorityVote(Voter):
     # each of the nearest neighbours casts a single vote. Query is assigned to the taxon with the most votes
     def classify(self):
-        self.classif = pd.DataFrame(columns = ['Code', 'NN'])
-        for idx, q_dist in enumerate(self.distances):
+        results = pd.DataFrame(columns = ['query', 'classification', 'rank', 'support'])
+        for query, q_dist in enumerate(self.distances):
             sorted_dists = np.argsort(q_dist)
-            k_idx = sorted_dists[:self.K]
-            k_taxes = self.data_classes[k_idx]
-    
-            tax_counts = k_taxes.value_counts()
-            max_count = tax_counts.max()
-            most_abundant = tax_counts.loc[tax_counts == max_count].index.tolist()
-            self.classif.at[idx,:] = [np.array(most_abundant, dtype="object"), max_count]
+            k_idx = sorted_dists[:self.K]                
+            k_taxes = self.data_classes.iloc[k_idx]
+
+            for rank in k_taxes.columns:
+                tax_counts = k_taxes[rank].value_counts()
+                for tax, count in tax_counts.iteritems():
+                    results = results.append({'query':query, 'classification':tax, 'rank':rank, 'support':count}, ignore_index = True)
+        self.results = results
 
 class WeightedVote(Voter):
     # each of the neighbours casts a vote weighted by a function of its distance to the query
     # TODO: define distance weight function
     def classify(self):
-        self.classif = pd.DataFrame(columns = ['Query', 'Code', 'Weight'])
-        for q_idx, q_dist in enumerate(self.distances):
+        results = pd.DataFrame(columns = ['query', 'classification', 'rank', 'support'])
+        for query, q_dist in enumerate(self.distances):
             sorted_dists = np.argsort(q_dist)
             k_idx = sorted_dists[:self.K]
-            k_taxes = self.data_classes[k_idx].values
-            w_dict = {tax:0 for tax in k_taxes}
-            
-            for idx in k_idx:
-                tax = self.data_classes[idx]
-                weight = q_dist[idx]
-                w_dict[tax] += weight # TODO: this is wrong
-            
-            for k,v in w_dict.items():
-                self.classif = self.classif.append(pd.Series({'Query':q_idx, 'Code':k, 'Weight':v}), ignore_index = True)
-
+            k_taxes = self.data_classes.iloc[k_idx]
+            for rank in k_taxes.columns:
+                uniq_taxes = k_taxes[rank].unique()
+                tax_weight = {tax:0 for tax in uniq_taxes}
+                
+                for k in k_idx:
+                    tax = k_taxes.loc[k, rank]
+                    weight = self.weight_func(q_dist[k])
+                    tax_weight[tax] += weight
+                
+                for tax, weight in tax_weight.items():
+                    results = results.append({'query':query, 'classification':tax, 'rank':rank, 'support':weight}, ignore_index = True)
+        self.results = results
 #%% testing
 import window_collapser
 
@@ -99,24 +123,27 @@ tax_file = 'Databases/12_11_2021-23_15_53/Taxonomy_files/Nematoda_18S_tax.tsv'
 wc = window_collapser.WindowCollapser(tax_file)
 wc.set_matrix(test_file)
 wc.collapse()
-matrix = np.array(wc.collapsed['seq'].tolist())
 
+test_query = wc.matrix[:2]
+test_ref = wc.matrix[2:]
+test_tax = wc.tax_collapsed.iloc[2:].reset_index(drop = True)
 # distance calculators
-dbId = DistByID(matrix[2:], matrix[:2].reshape((-1, 100)))
+dbId = DistByID(test_ref, test_query)
 dbId.get_dist()
 
 cost_mat = cost_matrix(1, 2)
-dbcost = DistByCost(matrix[2:], matrix[:2].reshape((-1, 100)), cost_mat)
+dbcost = DistByCost(test_ref, test_query, cost_mat)
 dbcost.get_dist()
 # voters
-majVote = MajorityVote(10, dbId.dists, wc.collapsed['tax'])
-majVote = MajorityVote(10, dbcost.dists, wc.collapsed['tax'])
-majVote.classify()
+majVote_id = MajorityVote(10, dbId.dists, test_tax)
+majVote_id.classify()
+majVote_cost = MajorityVote(10, dbcost.dists, test_tax)
+majVote_cost.classify()
 
-weiVo = WeightedVote(10, dbId.dists, wc.collapsed['tax'])
-weiVo = WeightedVote(10, dbcost.dists, wc.collapsed['tax'])
-weiVo.classify()
-
+weiVo_id = WeightedVote(10, dbId.dists, test_tax, weight_1)
+weiVo_id.classify()
+weiVo_cost = WeightedVote(10, dbcost.dists, test_tax, weight_1)
+weiVo_cost.classify()
 
 # TODO remake Classifier class, handle collapser (or not), dist calculator and voter selection
 class Classifier2():

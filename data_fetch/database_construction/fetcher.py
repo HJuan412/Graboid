@@ -50,6 +50,7 @@ def acc_slicer(acc_list, chunksize):
 
 # fetch functions
 def fetch_ncbi(acc_list, out_seqs, out_taxs):
+    # download sequences from NCBI, generates a temporal fasta and am acc:taxID list
     seq_handle = Entrez.efetch(db = 'nucleotide', id = acc_list, rettype = 'fasta', retmode = 'xml')
     seqs_recs = Entrez.read(seq_handle)
     

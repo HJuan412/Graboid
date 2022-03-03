@@ -87,6 +87,7 @@ class Lister():
         self.old_file = old_file
         self.warnings = []
         self.__get_old_tab()
+        self.out_file = f'{in_dir}/{taxon}_{marker}.acc'
 
     def __check_summaries(self):
         summ_files = glob(f'{self.in_dir}/*summ')
@@ -146,7 +147,7 @@ class Lister():
     def store_list(self):
         # store filtered records in a single file (columns: Accession, Version, Database, Status), status indicates wether a record is new or being updated
         merged = pd.concat([proc.acc_subtab for proc in self.processors.values()])
-        merged.to_csv(f'{self.in_dir}/{self.taxon}_{self.marker}.acc')
+        merged.to_csv(self.out_file)
     
     def check_warnings(self):
         # collect warnings from summary processors and generate warning file

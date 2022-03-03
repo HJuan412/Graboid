@@ -8,7 +8,9 @@ Created on Mon Sep 20 14:21:22 2021
 
 #%% libraries
 from Bio import Entrez
-from datetime import datetime
+from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
 from glob import glob
 from math import ceil
 
@@ -22,6 +24,7 @@ import urllib3
 def set_entrez(email = "hernan.juan@gmail.com", apikey = "7c100b6ab050a287af30e37e893dc3d09008"):
     Entrez.email = email
     Entrez.api_key = apikey
+
 # acc data handling
 def get_file_data(filename):
     split_file = filename.split('/')[-1].split('.acc')[0].split('_')
@@ -45,18 +48,25 @@ def acc_slicer(acc_list, chunksize):
     for i in np.arange(0, n_seqs, chunksize):
         yield acc_list[i:i+chunksize]
 
-def generate_filename(tax, mark, db, timereg = True):
-    t = datetime.now()
-    filename = f'{tax}_{mark}_{db}_{t.day}-{t.month}-{t.year}_{t.hour}-{t.minute}-{t.second}.fasta'
-    return filename
-
 # fetch functions
-def fetch_ncbi(acc_list, out_handle):
-    seq_handle = Entrez.efetch(db = 'nucleotide', id = acc_list, rettype = 'fasta', retmode = 'text')
-    out_handle.write(bytearray(seq_handle.read(), 'utf-8'))
-    return
+def fetch_ncbi(acc_list, out_seqs, out_taxs):
+    seq_handle = Entrez.efetch(db = 'nucleotide', id = acc_list, rettype = 'fasta', retmode = 'xml')
+    seqs_recs = Entrez.read(seq_handle)
+    
+    seqs = []
+    taxs = []
 
-def fetch_api(apiurl, out_handle):
+    for acc, seq in zip(acc_list, seqs_recs):
+        seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence'])))
+        taxs.append(','.join(acc, seq['TSeq_taxid']))
+    
+    with open(out_seqs, 'a') as out_handle0:
+        SeqIO.write(seqs, out_handle0, 'fasta')
+
+    with open(out_taxs, 'a') as out_handle1:
+        out_handle1.write('\n'.join(taxs + ['']))
+    
+def fetch_api(apiurl, out_handle, tax_handle = None):
     http = urllib3.PoolManager()
     r = http.request('GET', apiurl, preload_content = False)
     for chunk in r.stream():
@@ -64,85 +74,94 @@ def fetch_api(apiurl, out_handle):
     r.release_conn()
     return
 
-def fetch_ena(acc_list, out_handle):
+def fetch_ena(acc_list, out_seqs, out_taxs = None): # out_taxs kept for compatibility
     accstring = '%2C'.join(acc_list)
     apiurl = f'https://www.ebi.ac.uk/ena/browser/api/fasta/{accstring}?lineLimit=0'
-    fetch_api(apiurl, out_handle)
+    with open(out_seqs, 'ab') as out_handle:
+        fetch_api(apiurl, out_handle)
     return apiurl
 
-def fetch_bold(acc_list, out_handle):
+def fetch_bold(acc_list, out_seqs, out_taxs = None):
     accstring = '|'.join(acc_list)
     apiurl = f'http://www.boldsystems.org/index.php/API_Public/sequence?ids={accstring}'
-    fetch_api(apiurl, out_handle)
+    with open(out_seqs, 'ab') as out_handle:
+        fetch_api(apiurl, out_handle)
     return
 
 #%% classes
 class DbFetcher():
-    def __init__(self, in_file, taxon, marker, database, out_dir, warn_dir):
-        self.acc_tab = pd.read_csv(in_file, index_col = 0)
-        self.marked_accs = self.acc_tab.loc[self.acc_tab['Entry'] >= 1, 'Accession'].tolist() # get entries with Entry code 1 or 2
-        self.taxon = taxon
-        self.marker = marker
+    def __init__(self, acc_tab, database, prefix):
+        self.acc_tab = acc_tab
         self.database = database
-        self.set_fetchfunc(database)
-        self.out_dir = out_dir
-        self.warn_dir = warn_dir
-        self.generate_filenames()
+        self.__set_fetchfunc(database)
+        self.out_seqs = f'{prefix}_{database}.tmp'
+        self.out_taxs = f'{prefix}_{database}.tax'
+        self.warnings = []
     
-    def set_fetchfunc(self, database):
+    def __set_fetchfunc(self, database):
         if database == 'BOLD':
             self.fetch_func = fetch_bold
         elif database == 'ENA':
             self.fetch_func = fetch_ena
         elif database == 'NCBI':
             self.fetch_func = fetch_ncbi
-    
-    def generate_filenames(self):
-        self.out_file = f'{self.out_dir}/{self.taxon}_{self.marker}_{self.database}.tmp'
-        self.warn_file = f'{self.warn_dir}/{self.taxon}_{self.marker}_{self.database}.lis'
-    
-    def add_to_warn_file(self, acc_list):
-        with open(self.warn_file, 'a') as warn_handle:
-            warn_handle.write('\n'.join(acc_list))
-        return
 
-    def fetch(self, chunk_size):
-        chunks = acc_slicer(self.marked_accs, chunk_size)
+    def fetch(self, chunk_size = 500):
+        chunks = acc_slicer(self.acc_tab['Accession'], chunk_size)
         nchunks = ceil(len(self.marked_accs)/chunk_size)
-        
-        with open(self.out_file, 'wb') as out_handle: # change mode to 'ab' so an interrupted download can be completed using a Fetcher instance with (warn_dir passed as out_dir)
-            for idx, chunk in enumerate(chunks):
-                print(f'{self.database}, {self.taxon} {self.marker}. Chunk {idx + 1} of {nchunks}')
-                try:
-                    self.fetch_func(chunk, out_handle)
-                except:
-                    print(f'Error downloading chunk {idx + 1}. Accessions stored in {self.warn_dir}')
-                    self.add_to_warn_file( chunk)
+
+        for idx, chunk in enumerate(chunks):
+            print(f'{self.database}, {self.taxon} {self.marker}. Chunk {idx + 1} of {nchunks}')
+            try:
+                self.fetch_func(chunk, self.out_seqs, self.out_taxs)
+            except:
+                self.warnings += chunk
 
 class Fetcher():
     # TODO: fetch sequences stored in warn_dir
-    def __init__(self, in_dir, out_dir, warn_dir):
-        self.in_dir = in_dir
-        self.set_acc_tab()
+    def __init__(self, taxon, marker, acc_file, out_dir, warn_dir):
+        self.taxon = taxon
+        self.marker = marker
+        self.acc_tab = pd.read_csv(acc_file)
         self.out_dir = out_dir
         self.warn_dir = warn_dir
-    
-    def set_acc_tab(self):
-        self.acc_tab = build_acc_tab(self.in_dir)
-    def check_acclists(self):
+        self.prefix = f'{out_dir}/{taxon}_{marker}'
+        self.warnings = []
+        self.__check_acclists(acc_file)
+        self.__set_fetchers()
+
+    def __check_acclists(self, acc_file):
         # make sure acc_tab is not empty
+        self.accs = True
         if len(self.acc_tab) == 0:
-            with open(f'{self.warn_dir}/fetcher.warn', 'w') as warn_handle:
-                warn_handle.write('No accession list files found in directory {self.in_dir}')
-            return False
-        return True
+            self.warnings.append(f'WARNING: Accession table {acc_file} is empty') # TODO: get acc_file from Lister
+            self.accs = False
+
+    def __set_fetchers(self):
+        # prepare the fetcher objects needed for each database
+        fetchers = []
+        if self.accs:
+            for dbase, acc_subtab in self.acc_tab.groupby('Database'):
+                fetchers.append(DbFetcher(acc_subtab, dbase, self.prefix))
+        
+        self.fetchers = fetchers
+
+    def fetch(self, chunk_size = 500):
+        for ftch in self.fetchers:
+            ftch.fetch(chunk_size)
+        
+        self.check_fetch_warnings()
+        self.save_warnings()
     
-    def fetch(self, chunk_size):
-        if self.check_acclists():
-            for idx, row in self.acc_tab.iterrows():
-                taxon = row['Taxon']
-                marker = row['Marker']
-                dbase = row['Database']
-                file = row['File']
-                dbfetch = DbFetcher(file, taxon, marker, dbase, self.out_dir, self.warn_dir)
-                dbfetch.fetch(chunk_size)
+    def check_fetch_warnings(self):
+        for ftch in self.fetchers:
+            n_warns = len(ftch.warnings)
+            total_recs = len(ftch.acc_tab)
+            if n_warns > 0:
+                self.warnings.append(f'WARNING: Failed to download {n_warns} of {total_recs} sequences from {ftch.database}:')
+                self.warnings += ftch.warnings
+    
+    def save_warnings(self):
+        if len(self.warnings) > 0:
+            with open(f'{self.warn_dir}/warnings.ftch', 'w') as handle:
+                handle.write('\n'.join(self.warnings))

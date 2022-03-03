@@ -89,8 +89,9 @@ class Director():
         # TODO: update workers
         self.surveyor = surv.Surveyor(self.taxon, self.marker, self.databases, self.tmp_dir, self.warn_dir)
         self.lister = lstr.Lister(self.taxon, self.marker, self.tmp_dir, self.warn_dir) # TODO: incorporate database updating (already in lister, just need to add it here)
-        self.taxer = txdr.TaxDirector(self.tax_dir, self.summ_dir, self.acc_dir)
-        self.fetcher = ftch.Fetcher(self.acc_dir, self.seq_dir, self.warn_dir)
+        self.fetcher = ftch.Fetcher(self.taxon, self.marker, self.lister.merged, self.tmp_dir, self.warn_dir)
+        # self.taxer = txdr.TaxDirector(self.tax_dir, self.summ_dir, self.acc_dir)
+        # self.fetcher = ftch.Fetcher(self.acc_dir, self.seq_dir, self.warn_dir)
         self.bold_postprocessor = bdpp.BOLDPostProcessor(self.seq_dir, self.seq_dir, self.warn_dir)
         self.merger = mrgr.Merger(self.seq_dir, self.seq_dir, self.warn_dir, db_order = ['NCBI', 'BOLD', 'ENA'])
     
@@ -104,7 +105,6 @@ class Director():
         self.taxer.tax_reconstruct()
     
     def direct_fetching(self, chunk_size):
-        self.fetcher.set_acc_tab()
         self.fetcher.fetch(chunk_size)
     
     def direct_bold_pp(self):

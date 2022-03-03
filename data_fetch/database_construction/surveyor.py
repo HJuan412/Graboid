@@ -21,37 +21,48 @@ class SurveyTool():
         self.marker = marker
         self.generate_outfile(out_dir)
         self.attempt = 0
+        self.ntries = 3
         self.done = False
+        self.warn = False
     
     def generate_outfile(self, out_dir):
         # This generates the output file for the downloaded summary
         dbase = self.get_dbase()
         self.out_file = f'{out_dir}/{self.taxon}_{self.marker}_{dbase}.summ'
-        return
+    
+    def survey(self, ntries = 3):
+        self.ntries = ntries
+        dbase = self.get_dbase()
+        print(f'Surveying {dbase} for {self.taxon} {self.marker}')
+        self.__attempt_dl()
+        if self.done:
+            print(f'Done getting summary from {dbase} in {self.attempt} attempts.')
+        else:
+            print(f'Failed to get summary from {dbase} after {ntries} attempts.')
+            self.warn = True
 
 class SurveyWAPI(SurveyTool):
     # Survey tool using an API
-    def survey(self):
-        # Connects to a database (BOLD or ENA) and downloads search results
-        # update attempt count
-        self.attempt += 1
+    def __attempt_dl(self):
+        self.attempt = 0
+        while self.attempt < self.ntries:
+            # connect to server & send request
+            http = urllib3.PoolManager()
+            apiurl = self.get_url()
+            r = http.request('GET', apiurl, preload_content = False)
 
-        # connect to server & send request
-        http = urllib3.PoolManager()
-        apiurl = self.get_url()
-        r = http.request('GET', apiurl, preload_content = False)
-        
-        # stream request and store in outfile
-        try:
-            with open(self.out_file, 'ab') as handle:
-                for chunk in r.stream():
-                    handle.write(chunk)
-            # close connection
-            r.release_conn()
-            self.done = True # signal success
-            return 0
-        except:
-            return 1
+            # stream request and store in outfile
+            try:
+                with open(self.out_file, 'wb') as handle: # changed to 'wb' from 'ab', see if it still works
+                    for chunk in r.stream():
+                        handle.write(chunk)
+                # close connection
+                r.release_conn()
+                self.done = True # signal success
+                break
+            except:
+                # update attempt count
+                self.attempt += 1
 
 # Specific survey tools
 # each of these uses a survey method to attempt to download a summary
@@ -76,33 +87,31 @@ class SurveyNCBI(SurveyTool):
     def get_dbase(self):
         return 'NCBI'
 
-    def survey(self):
-        # update attempt count
-        self.attempt += 1
-        try:
-            search = Entrez.esearch(db='nucleotide', term = f'{self.taxon}[Organism] AND {self.marker}[all fields]', idtype = 'acc', retmax="100000")
-            search_record = Entrez.read(search)
-            with open(self.out_file, 'w') as handle:
-                handle.write('\n'.join(search_record['IdList']))
-            self.done = True # signal success
-            return 0
-        except:
-            return 1
+    def __attempt_dl(self):
+        self.attempt = 0
+        while self.attempt < self.ntries:
+            try:
+                search = Entrez.esearch(db='nucleotide', term = f'{self.taxon}[Organism] AND {self.marker}[all fields]', idtype = 'acc', retmax="100000")
+                search_record = Entrez.read(search)
+                with open(self.out_file, 'w') as handle:
+                    handle.write('\n'.join(search_record['IdList']))
+                self.done = True # signal success
+                break
+            except:
+                self.attempt += 1
 
 class Surveyor():
     # This class manages the download process for all taxon - marker - database trio
-    def __init__(self, taxon, marker, type1tools, type2tools, out_dir, warn_dir):
+    def __init__(self, taxon, marker, databases, out_dir, warn_dir):
         """
         Parameters
         ----------
         taxon : str
-            Taxons to survey for.
-        marker : list
-            Markers to survey for.
-        type1tools : list
-            List type 1 survey tools. These tools only survey for taxons.
-        type2tools : list
-            List type 2 survey tools. These tools survey for taxon - marker duos.
+            Taxon to survey for.
+        marker : str
+            Marker to survey for.
+        databases : list
+            Public databases in which to survey for
         out_dir : str
             Path to the output directory.
         warn_dir : str
@@ -115,37 +124,35 @@ class Surveyor():
         """
         self.taxon = taxon
         self.marker = marker
-        self.type1 = type1tools
-        self.type2 = type2tools
+        self.databases = databases
+        self.__get_surv_tools()
         self.out_dir = out_dir
         self.warn_dir = warn_dir
-        self.warn_report = pd.DataFrame(columns = ['Database', 'Taxon', 'Marker'])
+        self.warn_report = pd.Series(name = 'Attempts')
     
-    def download(self, tooltype, ntries):
-        # Attempts to download perform a survey for a given taxon - marker pair with a given survey tool.
-        # If download is not completed after the given number of attempts (ntries), store a warning.
-        tool = tooltype(self.taxon, self.marker, self.out_dir)
-        dbase = tool.get_dbase()
-        print(f'Surveying {dbase} for {self.taxon} {self.marker}')
-        while tool.attempt < ntries and not tool.done:
-            tool.survey()
-        if not tool.done:
-            print(f'Failed to get summary from {dbase} after {ntries} attempts.')
-            self.warn_report = self.warn_report.append([tool.get_dbase, self.taxon, self.marker])
-        else:
-            print(f'Done getting summary from {dbase} in {tool.attempt} attempts.')
-    
+    def __get_surv_tools(self):
+        # set up the tools to survey the specified databases
+        self.survey_tools = []
+        tooldict = {'BOLD':SurveyBOLD,
+                    'ENA':SurveyENA,
+                    'NCBI':SurveyNCBI}
+
+        for db in self.databases:
+            if db in tooldict.keys():
+                tool = tooldict[db]
+                self.survey_tools.append(tool(self.taxon, self.marker, self.out_dir))
+
     def save_warn(self):
         # Generate a warning file if a taxon - marker - database can't be downloaded.
         if len(self.warn_report) > 0:
-            self.warn_report.to_csv('{self.warn_dir}/summary_warnings.csv')
-        
+            self.warn_report.to_csv('{self.warn_dir}/warnings.surv')
+
     def survey(self, ntries = 3):
         # Survey each given database for the taxon / marker duo.
         # ntries determines the number of attempts
-        for t1 in self.type1:
-            self.attempt_dl(t1, ntries, self.taxon)
-
-        for t2 in self.type2:
-            self.attempt_dl(t2, ntries, self.taxon, self.marker)
+        for tool in self.survey_tools:
+            tool.survey(ntries)
+            if tool.warn:
+                self.warn_report.at[tool.get_dbase()] = tool.attempt
+        
         self.save_warn()

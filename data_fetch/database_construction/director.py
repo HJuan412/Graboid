@@ -11,8 +11,12 @@ Director for database creation and updating
 from datetime import datetime
 import os
 
-import db_surveyor as surv
-import db_lister as lstr
+import surveyor as surv
+import lister as lstr
+
+# TODO: these all go away
+# import db_surveyor as surv
+# import db_lister as lstr
 import db_fetcher as ftch
 import db_BOLD_postproc as bdpp
 import db_merger as mrgr
@@ -36,18 +40,6 @@ def new_directories():
         os.mkdir(sdir)
     return summ_dir, seq_dir, tax_dir, acc_dir, warn_dir
 
-def get_surv_tools(bold = True, ena = False, ncbi = True):
-    t1 = []
-    t2 = []
-    if bold:
-        t1.append(surv.SurveyBOLD)
-    if ena:
-        t2.append(surv.SurveyENA)
-    if ncbi:
-        t2.append(surv.SurveyNCBI)
-    
-    return t1, t2
-
 #%% Test parameters
 taxons = ['Nematoda', 'Platyhelminthes']
 markers = ['18S', '28S', 'COI']
@@ -59,44 +51,54 @@ old_accs = None # for lister
 chunk_size = 500 # for fetcher
 #%% Main
 class Director():
-    def __init__(self, taxons, markers, db_dir = None, bold = True, ena = False, ncbi = True, email = 'hernan.juan@gmail.com', apikey = '7c100b6ab050a287af30e37e893dc3d09008'):
+    # def __init__(self, taxons, markers, db_dir = None, bold = True, ena = False, ncbi = True, email = 'hernan.juan@gmail.com', apikey = '7c100b6ab050a287af30e37e893dc3d09008'):
+    #     self.db_dir = db_dir
+    #     self.set_directories()
+    #     self.create_dirs()
+    #     self.bold = bold
+    #     self.ena = ena
+    #     self.ncbi = ncbi
+    #     self.t1, self.t2 = get_surv_tools(bold, ena, ncbi)
+    #     self.taxons = taxons
+    #     self.markers = markers
+    #     self.set_workers(taxons, markers)
+    #     ftch.set_entrez(email, apikey)
+    
+    def __init__(self, db_dir, tmp_dir, wrn_dir, taxon, marker, databases = ['NCBI', 'BOLD']):
         self.db_dir = db_dir
-        self.set_directories()
-        self.create_dirs()
-        self.bold = bold
-        self.ena = ena
-        self.ncbi = ncbi
-        self.t1, self.t2 = get_surv_tools(bold, ena, ncbi)
-        self.taxons = taxons
-        self.markers = markers
-        self.set_workers(taxons, markers)
-        ftch.set_entrez(email, apikey)
+        self.tmp_dir = tmp_dir
+        self.wrn_dir = wrn_dir
+        self.taxon = taxon
+        self.marker = marker
+        self.databases = databases
+        self.prefix = f'{taxon}_{marker}'
+        self.updating = False # checks if database already exists
 
-    def set_directories(self):
-        if self.db_dir is None:
-            self.db_dir = generate_dirname()
-        self.summ_dir, self.seq_dir, self.tax_dir, self.acc_dir, self.warn_dir = generate_subdirnames(self.db_dir)
+    def check_dir(self):
+        if os.path.isdir(self.db_dir):
+            if os.path.isfile(self.db_dir + f'/{self.prefix}.fasta') and os.path.isfile(self.db_dir + f'/{self.prefix}.tax'):
+                self.updating = True
+            # TODO: print warining if missing files
     
-    def create_dirs(self):
-        for d in [self.db_dir, self.summ_dir, self.seq_dir, self.tax_dir, self.acc_dir, self.warn_dir]:
-            if not os.path.isdir(d):
-                os.mkdir(d)
-    
-    def set_workers(self, taxons, markers):
-        self.surveyor = surv.Surveyor(taxons, markers, self.t1, self.t2, self.summ_dir, self.warn_dir)
-        self.lister = lstr.Lister(self.summ_dir, self.acc_dir, self.warn_dir, old_accs) # TODO: setting up lister before summary construction makes it start with an empty summ_tab. Build it anew in the direct_listing() method
+    def make_dirs(self):
+        os.makedirs(self.db_dir, exist_ok=bool)
+        os.makedirs(self.tmp_dir, exist_ok=bool)
+        os.makedirs(self.warn_dir, exist_ok=bool)
+
+    def set_workers(self):
+        # TODO: update workers
+        self.surveyor = surv.Surveyor(self.taxon, self.marker, self.databases, self.tmp_dir, self.warn_dir)
+        self.lister = lstr.Lister(self.taxon, self.marker, self.tmp_dir, self.warn_dir) # TODO: incorporate database updating (already in lister, just need to add it here)
         self.taxer = txdr.TaxDirector(self.tax_dir, self.summ_dir, self.acc_dir)
         self.fetcher = ftch.Fetcher(self.acc_dir, self.seq_dir, self.warn_dir)
         self.bold_postprocessor = bdpp.BOLDPostProcessor(self.seq_dir, self.seq_dir, self.warn_dir)
         self.merger = mrgr.Merger(self.seq_dir, self.seq_dir, self.warn_dir, db_order = ['NCBI', 'BOLD', 'ENA'])
     
-    def direct_survey(self):
-        self.surveyor.survey()
+    def direct_survey(self, ntries = 3):
+        self.surveyor.survey(ntries)
     
     def direct_listing(self):
-        # this method should be run after direct_survey()
-        self.lister.set_summ_tab()
-        self.lister.build_lists()
+        self.lister.make_list()
     
     def direct_tax_reconstruction(self):
         self.taxer.tax_reconstruct()

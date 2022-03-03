@@ -7,6 +7,7 @@ Created on Wed Mar  2 15:56:45 2022
 """
 
 #%% libraries
+from data_fetch import database_construction as dbc
 import argparse
 import os
 import sys
@@ -34,4 +35,5 @@ if __name__ == '__main__':
             os.makedirs(tmp_path, exist_ok=bool)
             os.makedirs(warn_path, exist_ok=bool)
             # director
+            director = dbc.director.Director()
     sys.exit()

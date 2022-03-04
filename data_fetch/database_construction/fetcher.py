@@ -127,6 +127,7 @@ class Fetcher():
         self.out_dir = out_dir
         self.warn_dir = warn_dir
         self.prefix = f'{out_dir}/{taxon}_{marker}'
+        self.out_tax = f'{out_dir}/{taxon}_{marker}_NCBI.taxsumm'
         self.warnings = []
         self.__check_acclists(acc_file)
         self.__set_fetchers()
@@ -143,7 +144,7 @@ class Fetcher():
         fetchers = []
         if self.accs:
             for dbase, acc_subtab in self.acc_tab.groupby('Database'):
-                fetchers.append(DbFetcher(acc_subtab, dbase, self.prefix))
+                fetchers.append(DbFetcher(acc_subtab, dbase, self.out_tax))
         
         self.fetchers = fetchers
 

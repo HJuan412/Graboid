@@ -13,12 +13,14 @@ import os
 
 import surveyor as surv
 import lister as lstr
+import fetcher as ftch
+import taxonomist as txnm
 
 # TODO: these all go away
 # import db_surveyor as surv
 # import db_lister as lstr
-import db_fetcher as ftch
-import db_BOLD_postproc as bdpp
+# import db_fetcher as ftch
+# import db_BOLD_postproc as bdpp
 import db_merger as mrgr
 
 import tax_director as txdr
@@ -90,9 +92,7 @@ class Director():
         self.surveyor = surv.Surveyor(self.taxon, self.marker, self.databases, self.tmp_dir, self.warn_dir)
         self.lister = lstr.Lister(self.taxon, self.marker, self.tmp_dir, self.warn_dir) # TODO: incorporate database updating (already in lister, just need to add it here)
         self.fetcher = ftch.Fetcher(self.taxon, self.marker, self.lister.merged, self.tmp_dir, self.warn_dir)
-        # self.taxer = txdr.TaxDirector(self.tax_dir, self.summ_dir, self.acc_dir)
-        # self.fetcher = ftch.Fetcher(self.acc_dir, self.seq_dir, self.warn_dir)
-        self.bold_postprocessor = bdpp.BOLDPostProcessor(self.seq_dir, self.seq_dir, self.warn_dir)
+        self.taxer = txnm.Taxonomist(self.taxon, self.marker, self.databases, self.tmp_dir, self.warn_dir)
         self.merger = mrgr.Merger(self.seq_dir, self.seq_dir, self.warn_dir, db_order = ['NCBI', 'BOLD', 'ENA'])
     
     def direct_survey(self, ntries = 3):
@@ -101,12 +101,14 @@ class Director():
     def direct_listing(self):
         self.lister.make_list()
     
-    def direct_tax_reconstruction(self):
-        self.taxer.tax_reconstruct()
-    
+    #TODO add marker filter to the BOLD fetcher
     def direct_fetching(self, chunk_size):
         self.fetcher.fetch(chunk_size)
     
+    #TODO add option to edit used ranks
+    def direct_taxing(self, chunksize):
+        self.taxer.taxing(chunksize)
+
     def direct_bold_pp(self):
         self.bold_postprocessor.set_bold_tab()
         self.bold_postprocessor.process(self.markers)

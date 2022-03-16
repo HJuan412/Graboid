@@ -10,208 +10,82 @@ Compare and merge temporal sequence files
 
 #%% libraries
 from Bio import SeqIO
-from Bio.Seq import Seq
-from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
-from Bio.SeqRecord import SeqRecord
 from glob import glob
-import pandas as pd
-#%% functions
-def build_filetab(seq_dir):
-    # list temporal sequence files, register taxon, marker and database
-    files = glob(f'{seq_dir}/*tmp')
-    filetab = pd.DataFrame(columns = ['Taxon', 'Marker', 'Database', 'File'])
-    
-    for idx, file in enumerate(files):
-        split_file = file.split('/')[-1].split('.')[0].split('_')
-        tax, mark, dbase = split_file
-        
-        if mark != '': # don't include BOLDr files
-            filetab.at[idx] = [tax, mark, dbase, file]
-    return filetab
-
-def build_ddict(dbases):
-    # build a {dbase:{}} dictionary. Will contain the seqdict for each database
-    dicts_dict = {}
-    for db in dbases:
-        dicts_dict[db] = {}
-    
-    return dicts_dict
-
-def build_tdict(dbases):
-    # build a {dbase:infotab} dictionary. Will contain the information dataframe for each database
-    tabs_dict = {}
-    for db in dbases:
-        tabs_dict[db] = build_infotab({}, db)
-    
-    return tabs_dict
-
-def build_seqdict(seqfile):
-    # build a {short_accession:(accession, header, sequence)} dictionary from a fasta file
-    seqdict = {}
-    with open(seqfile, 'r') as handle:
-        for header, seq in sfp(handle):
-            acc = header.split(' ')[0]
-            acc_short = acc.split('.')[0]
-            seqdict[acc_short] = (acc, header, seq)
-    return seqdict
-
-def get_verlist(acc_list):
-    # some accs don't have a version number, get_verlist handles those cases
-    ver_list = []
-    for acc in acc_list:
-        split_acc = acc.split('.')
-        ver = 1
-        if len(split_acc) > 1:
-            ver = int(split_acc[-1])
-        ver_list.append(ver)
-    
-    return ver_list
-
-def get_todrop(acclist):
-    to_drop = []
-    for acc in acclist:
-        if '<' in acc or '/' in acc or '=' in acc: # one slipped by, find commin criteria for fucked downloads
-            to_drop.append(acc)
-    return to_drop
-
-def filter_tab(tab):
-    # BOLD downloads some weird lines, this function deletes them
-    to_drop = get_todrop(tab.index.tolist())
-    
-    tab = tab.drop(index = to_drop, inplace = True)
-
-def build_infotab(seqdict, dbase):
-    # build a dataframe with columns [Accession, Version, Database] from the given seqdict
-    tab = pd.DataFrame.from_dict(seqdict, orient='index', columns = ['Accession', '1', '2']) # columns 1 & 2 are the header and seq elements in the seqdict, will be discarded
-    filter_tab(tab)
-
-    acc_list = tab['Accession'].tolist()
-    # ver_list = [int(acc.split('.')[-1]) for acc in acc_list] # TODO delete me!
-    ver_list = get_verlist(acc_list)
-
-    info_tab = pd.DataFrame(index = tab.index, columns = ['Accession', 'Version', 'Database'])
-    info_tab['Database'] = dbase
-    info_tab.at[:,'Accession'] = acc_list
-    info_tab.at[:, 'Version'] = ver_list
-    return info_tab
+import os
+import shutil
 
 #%% classes
-class MergeTool():
-    def __init__(self, taxon, marker, filetab, out_dir, db_order = ['NCBI', 'BOLD', 'ENA']):
-        self.dicts_dict = build_ddict(db_order)
-        self.tabs_dict = build_tdict(db_order)
-        self.db_order = db_order
-        self.read_files(filetab)
-        self.merged_tab = pd.DataFrame(columns = ['Version', 'Database'])
-        self.out_prefix = f'{out_dir}/{taxon}_{marker}'
-    
-    def add_seqdict(self, seqfile, dbase):
-        # build a seqdict from the given seqfile, if dbase is not known, add it at lowest priority
-        if not dbase in self.db_order:
-            self.db_order.append(dbase)
-            self.dicts_dict[dbase] = {}
-            self.tabs_dict = build_infotab({}, dbase)
-
-        seqdict = build_seqdict(seqfile)
-        self.dicts_dict[dbase] = seqdict
-        self.tabs_dict[dbase] = build_infotab(seqdict, dbase)
-        return
-    
-    def read_files(self, filetab):
-        # read and call add_seqdict for each file in the given table (use at construction)
-        for _, row in filetab.iterrows():
-            dbase = row['Database']
-            file = row['File']                
-            self.add_seqdict(file, dbase)
-    
-    def clear_seqdict(self, dbase):
-        # remove a seqdict, clear the merged_table
-        if dbase in self.db_order:
-            self.dicts_dict[dbase] = {}
-            self.tabs_dict[dbase] = build_infotab({}, dbase)
-        
-        self.merged_tab = self.merged_tab.iloc[0:0]
-        return
-
-    def merge_infotabs(self):
-        # merge all infotabs following the given order (repeated entries are ignored, first dbases are prioritized)
-        for dbase in self.db_order:
-            discard_accs = set(self.merged_tab.index)
-            db_dict = self.dicts_dict[dbase]
-            db_tab = self.tabs_dict[dbase]
-            db_accs = set(db_dict.keys()).difference(discard_accs) # incorporate all entries not already present
-            # remove corrupt accessions
-            to_drop = get_todrop(db_accs)
-            db_accs = db_accs.difference(set(to_drop))
-            #
-            db_subtab = db_tab.loc[db_accs]
-            self.merged_tab = pd.concat([self.merged_tab, db_subtab])
-        return
-    
-    def save_merged_tab(self):
-        out_file = self.out_prefix + '_info.tab'
-        self.merged_tab.to_csv(out_file)
-
-    def merge_seqfiles(self):
-        # merge sequences based on the merged_tab and store results (only run after merge_infotabs)
-        records = []
-        for dbase, subtab in self.merged_tab.groupby('Database'):
-            db_accs = subtab.index
-            db_dict = self.dicts_dict[dbase]
-            for acc in db_accs:
-                acc, header, seq = db_dict[acc]
-                record = SeqRecord(Seq(seq), header, description = '')
-                records.append(record)
-
-        out_file = self.out_prefix + '.fasta'
-        with open(out_file, 'w') as out_handle:
-            SeqIO.write(records, out_handle, 'fasta')
-    
-    def process(self):
-        # direct processing of the taxon - marker duo
-        self.merge_infotabs()
-        self.save_merged_tab()
-        self.merge_seqfiles()
-
 class Merger():
-    def __init__(self, in_dir, out_dir, warn_dir, db_order = ['NCBI', 'BOLD', 'ENA']):
-        """
-        Constructor of the merger class.
-
-        Parameters
-        ----------
-        in_dir : str
-            Directory containing the temporal sequence files.
-        out_dir : str
-            Directory containing the output files.
-        warn_dir : str
-            Directory containing the warning files.
-        db_order : list, optional
-            Establish the priority for considering repeated sequences.
-            The default is ['NCBI', 'BOLD', 'ENA'].
-
-        Returns
-        -------
-        None.
-
-        """
+    def __init__(self, taxon, marker, databases, in_dir, out_dir, warn_dir, old_file = None):
+        self.taxon = taxon
+        self.marker = marker
+        self.prefix = f'{taxon}_{marker}'
+        self.databases = databases
         self.in_dir = in_dir
         self.out_dir = out_dir
         self.warn_dir = warn_dir
-        self.db_order = db_order
-        self.seq_tab = build_filetab(in_dir)
+        self.old_file = old_file
+        self.warnings = []
+        self.not_found = set()
+        self.__get_files()
+        self.__rm_old_seqs()
     
-    def check_seq_tab(self):
-        # make sure seq_tab is not empty
-        if len(self.seq_tab) == 0:
-            with open(f'{self.warn_dir}/merger.warn', 'w') as warn_handle:
-                warn_handle.write('No sequence files found in directory {self.in_dir}')
-            return False
-        return True
+    def __rm_old_seqs(self):
+        # read the old sequence file (if present) and remove sequences to be replaced
+        new_accs = self.acc_list.index
+        if self.old_file is None:
+            return
+        records = []
+        with open(self.old_file, 'r') as old_handle:
+            for record in SeqIO.parse(old_handle, 'fasta'):
+                acc = record.id.spit('.')[0].split('-')[0]
+                if not acc in new_accs:
+                    records.append(record)
+        with open(f'{self.in_dir}/{self.prefix}_old.tmp', 'w') as kept_handle:
+            # store the cropped old file as a temporal file along with the new ones
+            SeqIO.write(records, kept_handle, 'fasta')
+        
+    def __get_files(self):
+        # get the taxonomy and sequence files in dicts of the form {database: file}
+        seq_files = {}
+        tax_files = {}
+        for db in self.databases:
+            seq_file = f'{self.in_dir}/{self.prefix}_{db}.tmp'
+            tax_file = f'{self.in_dir}/{self.prefix}_{db}.tax'
+            check_seq = os.path.isfile(seq_file)
+            check_tax = os.path.isfile(tax_file)
+            missing = []
+            if not check_seq:
+                missing.append(seq_file)
+            if not check_tax:
+                missing.append(tax_file)
+            
+            # if either file is missing, list a warning and skip this database
+            if len(missing) > 0:
+                for m in missing:
+                    self.warnings.append(f'WARNING: file {m} not found')
+                continue
+            seq_files[db] = seq_file
+            tax_files[db] = tax_file
+        
+        self.seq_files = seq_files
+        self.tax_files = tax_files
+    
+    def __merge(self):
+        # merge all temporal sequence files into the output path
+        files = glob(f'{self.in_dir}/{self.prefix}_*.tmp')
+        with open(f'{self.out_dir}/{self.prefix}.fasta', 'w') as out_handle:
+            for file in files:
+                with open(file, 'r') as in_handle:
+                    shutil.copyfileobj(in_handle, out_handle)
+    
+    # TODO: merge taxonomies
+
+    def __check_warnings(self):
+        if len(self.warnings) > 0:
+            with open(f'{self.warn_dir}/warnings.merge', 'w') as handle:
+                handle.write('\n'.join(self.warnings))
     
     def merge(self):
-        if self.check_seq_tab():
-            for tax, sub_tab0 in self.seq_tab.groupby('Taxon'):
-                for mark, sub_tab1 in sub_tab0.groupby('Marker'):
-                    merge_agent = MergeTool(tax, mark, sub_tab1, self.out_dir, self.db_order)
-                    merge_agent.process()
+        self.__merge()
+        self.__check_warnings()

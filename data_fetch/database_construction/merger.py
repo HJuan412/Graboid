@@ -73,6 +73,7 @@ class Merger():
     
     def __merge(self):
         # merge all temporal sequence files into the output path
+        # TODO: merge old files as well
         files = glob(f'{self.in_dir}/{self.prefix}_*.tmp')
         with open(f'{self.out_dir}/{self.prefix}.fasta', 'w') as out_handle:
             for file in files:

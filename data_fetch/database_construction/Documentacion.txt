@@ -1,0 +1,127 @@
+Director:
+	Argumentos:
+		db_dir:	Directorio de salida para la base de datos generada
+		tmp_dir: 	Directorio para los archivos temporales (esto debería tener un valor por defecto)
+		wrn_dir:	Directorio para las advertencias (esto debería tener un valor por defecto)
+		taxon:		Taxon a recuperar
+		marker:	Marcador molecular a recuperar
+		databases:	Bases de datos publicas a explorar
+	
+	Clase Director:
+		Fase 1)
+			- Checkeo de archivos fasta y tax en directorio de salida (db_dir), determina si la base se está actualizando o creando de novo
+			- Creación de directorios
+		
+		Fase 2)
+			- Creación de workers (los trabajadores deberían poder inicializarse simultáneamente):
+				surveyor
+				lister
+				fetcher
+				taxer
+				merger
+		
+		Fase 3)
+			- Dirección
+		
+		Fase 4)
+			- Remoción de temporales y registro de advertencias
+
+Workers:
+	Surveyor
+	   Explora las bases de datos públicas en busca de las secuencias de taxón+marcador
+		Argumentos:
+			taxon:
+			marker:
+			databases:
+			out_dir: (tmp_dir)
+			warn_dir:
+
+		Método survey(ntries = 3)
+			Para cada base de datos, se hacen ntries intentos de descargar un sumareio de los registros obtenidos al hacer la búsqueda cruzada de taxon+marker
+			Resultados se almacenan en out_dir
+			Si una base de datos no puede ser explorada, se genera una advertencia.
+	
+	Lister
+	   Prepara la descarga de las secuencias, elmimnando registros repetidos entre ambas bases de datosdistintas bases de datos o ya presentes en una versión anterior.
+	   Genera el catálogo de secuencias.
+		Argumentos:
+			taxon:
+			marker:
+			in_dir: directorio que contiene los sumarios producidos por Surveyor (tmp_dir)
+			warn_dir:
+			old_file: catálogo de secuencias de la versión anterior de la base de datos (si existe, por defecto None)
+			out_dir: (tmp_dir)
+		
+		Método make_list()
+			Método process()
+				- Lista archivos sumarios presentes en in_dir (genera advertencia si no encuentra ninguno)
+				- Genera un objeto SummProcessor para cada sumario
+				- Resuelve registros compartidos entre los sumarios (se asegura de que queden solo en uno)
+				- Resuelve registros ya presentes en la base de datos (si hay una versión más nueva, actualiza los registros)
+			Almacenar tabla de accessions, columnas:
+				Accession
+				Version
+				Database
+				Status: ("new", "update")
+			archivo de salida es out_dir/taxon_marker.acc
+	
+	Fetcher
+	   Descarga los registros contenidos en la lista de accessions generada por Lister
+	   	Argumentos:
+	   		taxon:
+	   		marker:
+	   		acc_file: tabla de accessions gnerada por Lister
+	   		out_dir: (tmp_dir)
+	   		warn_dir:
+	   	
+	   	Método fetch(chunk_size=500)
+	   		Para cada base de datos en la tabla de accessions trata de descargar las secuencias listadas (Si es NCBI, intenta descargar las secuencias y las taxonomías)
+	   		Archivos descargados se almacenan como out_dir/taxon_marker_database.tmp y out_dir/taxon_marker_database.tax
+	
+	Taxonomist
+	   Genera tablas taxonómicas & de taxids para cada registro descargado
+	   TODO: generar tabla acc2taxid
+		Argumentos:
+			taxon:
+			marker:
+			databases:
+			in_dir: (tmp_dir)
+			warn_dir:
+		
+		Método taxing(chunksize = 500)
+			Para cada base de datos extrae los taxones con sus códigos correspondientes (para el caso de NCBI, los descarga). Genera archivos out_dir/taxon_marker_database.tax y out_dir/taxon_marker_database.taxid para cada base de datos
+			# TODO: generar archivo acc2taxid apuntando cada registro de la base de datos a su file correspondiente
+	
+	Merger
+	   Combina los archivos de secuencia descargados entre las distintas bases de datos y los archivos de las bases de datos originales
+		Argumentos:
+			taxon:
+			marker:
+			databases:
+			in_dir: (tmp_dir)
+			out_dir: (out_dir)
+			warn_dir:
+			old_file: Archivo con las secuencias de la base de datos original
+		
+		Método merge:
+			Combina los archivos de secuencias temporales. Si no hay un archivo original, guarda a out_dir.
+			Si hay un archivo original, añade las secuencias al final del mismo y reemplaza las que deban ser actualizadas
+	
+	Merger_tax
+	   Combina las tablas taxonómicas de las diferentes bases de datos (homologa ids de secuencias de BOLD a los de NCBI)
+		Argumentos:
+			taxon:
+			marker:
+			databases:
+			in_dir: (tmp_dir)
+			out_dir: (out_dir)
+			warn_dir:
+			old_file: Archivo con las secuencias de la base de datos original
+		
+		Método merge_taxons:
+			Homologa los códigos taxonómicos de las diferentes bases de datos (de haber más de una, o de haber una base original)
+			Sustituye los códigos homologados en las bases secundarias
+			Combina las tablas de id taxonómicos
+			Actualiza la lista acc2taxid
+			Combina con taxonomias anteriores (si las hubiera)
+			Guarda resultado en out_dir

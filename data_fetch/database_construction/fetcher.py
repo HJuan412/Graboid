@@ -117,20 +117,21 @@ class DbFetcher():
                 self.fetch_func(chunk, self.out_seqs, self.out_taxs)
             except:
                 self.warnings += chunk
+    # TODO: add method to extract taxonomy from BOLD
 
 class Fetcher():
     # TODO: fetch sequences stored in warn_dir
     def __init__(self, taxon, marker, acc_file, out_dir, warn_dir):
         self.taxon = taxon
         self.marker = marker
-        self.acc_tab = pd.read_csv(acc_file)
+        self.acc_tab = pd.read_csv(acc_file) # TODO: this should not be done at init (acc_file may not be ready)
         self.out_dir = out_dir
         self.warn_dir = warn_dir
         self.prefix = f'{out_dir}/{taxon}_{marker}'
         self.out_tax = f'{out_dir}/{taxon}_{marker}_NCBI.taxsumm'
         self.warnings = []
-        self.__check_acclists(acc_file)
-        self.__set_fetchers()
+        self.__check_acclists(acc_file) # TODO: this should be done when loading the acc_file
+        self.__set_fetchers() # TODO: this should be done when loading the acc_file
 
     def __check_acclists(self, acc_file):
         # make sure acc_tab is not empty
@@ -148,7 +149,7 @@ class Fetcher():
         
         self.fetchers = fetchers
 
-    def fetch(self, chunk_size = 500):
+    def fetch(self, chunk_size = 500): # TODO: add attempt counter
         for ftch in self.fetchers:
             ftch.fetch(chunk_size)
         

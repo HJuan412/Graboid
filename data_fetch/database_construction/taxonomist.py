@@ -186,8 +186,10 @@ class Taxonomist():
         self.prefix = f'{in_dir}/{taxon}_{marker}'
         self.warnings = []
         self.__set_taxers()
+        # TODO: set out_dir
     
     def __set_taxers(self):
+        # TODO: homoheneize taxonomist constructors, tidy up these conditionals
         taxers = {}
         if 'BOLD' in self.databases:
             taxers['BOLD'] = TaxonomistBOLD(self.taxon, self.marker, f'{self.prefix}_BOLD.tmp', f'{self.prefix}_BOLD.summ', self.in_dir)
@@ -216,3 +218,4 @@ class Taxonomist():
             taxr.taxing(chunksize)
         self.__check_warnings()
         self.__save_warnings()
+        # TODO: build acc2taxid file

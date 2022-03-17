@@ -87,7 +87,7 @@ class Lister():
         self.old_file = old_file
         self.warnings = []
         self.__get_old_tab()
-        self.out_file = f'{in_dir}/{taxon}_{marker}.acc'
+        self.out_file = f'{in_dir}/{taxon}_{marker}.acc' # TODO: cambiar a out_dir
 
     def __check_summaries(self):
         summ_files = glob(f'{self.in_dir}/*summ')

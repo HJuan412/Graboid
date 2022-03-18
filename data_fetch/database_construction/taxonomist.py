@@ -30,7 +30,7 @@ def extract_tax_data(record):
     lineage = record['LineageEx'] + [{'TaxId':record['TaxId'], 'ScientificName':record['ScientificName'], 'Rank':record['Rank']}]
     for lin in lineage:
         taxonomy[lin['Rank']] = lin['ScientificName']
-        taxonomy_id[lin['Rank']] = lin['TaxID']
+        taxonomy_id[lin['Rank']] = lin['TaxId']
     
     return taxonomy, taxonomy_id
 
@@ -51,7 +51,7 @@ class TaxonomistNCBI():
     
     def __read_tax_file(self):
         # load acc:taxid list, generate reverse list to find accessions based on taxid, generate list of unique taxids to avoid redundant downloads
-        tax_tab = pd.read_csv(self.in_file, index_col = 0)
+        tax_tab = pd.read_csv(self.in_file, header = None, index_col = 0)
         self.taxid_list = tax_tab[1]
         self.taxid_rev = pd.Series(index = self.taxid_list.values, data = self.taxid_list.index)
         self.uniq_taxs = self.taxid_list.unique()
@@ -62,8 +62,8 @@ class TaxonomistNCBI():
         # generate empty taxonomy tables tax & taxid (used to store the taxonomic IDs), guide tables link a taxid with its full taxonomy
         self.tax_table = pd.DataFrame(index = self.taxid_list.index, columns = self.ranks)
         self.taxid_table = pd.DataFrame(index = self.taxid_list.index, columns = self.ranks)
-        self.guide_table = pd.DataFrame(index = self.uniq_tax, columns = self.ranks) # this will be used to store the taxonomic data and later distribute it to each record
-        self.guideid_table = pd.DataFrame(index = self.uniq_tax, columns = self.ranks)
+        self.guide_table = pd.DataFrame(index = self.uniq_taxs, columns = self.ranks) # this will be used to store the taxonomic data and later distribute it to each record
+        self.guideid_table = pd.DataFrame(index = self.uniq_taxs, columns = self.ranks)
 
     def __update_guide(self, taxids, records):
         # extract data from a single record and updates the guide tables
@@ -83,10 +83,10 @@ class TaxonomistNCBI():
     
     def __update_tables(self):
         # write the final taxonomic tables using the complete guide tables
-        for taxid in self.uniq_taxs.values:
+        for taxid in self.uniq_taxs:
             instances = self.taxid_rev.loc[taxid] # records with the given ID
-            self.tax_table.at[instances] = self.guide_table.loc[taxid]
-            self.taxid_table.at[instances] = self.guideid_table.loc[taxid]
+            self.tax_table.at[instances] = self.guide_table.loc[taxid].values
+            self.taxid_table.at[instances] = self.guideid_table.loc[taxid].values
 
     def __dl_tax_records(self, chunksize = 500):
         # attempts to download the taxonomic records in chunks of size chunksize
@@ -148,7 +148,8 @@ class TaxonomistBOLD():
     
     def __get_tax_tab(self):
         # use the acc list and rank list to extract relevant taxon names and ids
-        summ_tab = pd.read_csv(self.summ_file, sep = '\t', index_col = 0)
+        # summ_tab = pd.read_csv(self.summ_file, sep = '\t', index_col = 0) # TODO: delete me
+        summ_tab = pd.read_csv(self.summ_file, sep = '\t', encoding = 'latin-1', index_col = 0, low_memory = False) # latin-1 to parse BOLD files
         col_headers = []
         for rk in self.ranks:
             col_headers.append(f'{rk}_taxID')
@@ -196,6 +197,7 @@ class Taxonomist():
         if 'NCBI' in self.databases:
             taxers['NCBI'] = TaxonomistNCBI(self.taxon, self.marker, f'{self.prefix}_NCBI.tax', self.in_dir)
         
+        self.taxers = taxers
         if len(taxers) == 0:
             self.warnings.append('WARNING: No databases found by the taxonomy reconstructor')
             

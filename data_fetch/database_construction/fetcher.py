@@ -59,7 +59,7 @@ def fetch_ncbi(acc_list, out_seqs, out_taxs):
 
     for acc, seq in zip(acc_list, seqs_recs):
         seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence'])))
-        taxs.append(','.join(acc, seq['TSeq_taxid']))
+        taxs.append(','.join([acc, seq['TSeq_taxid']]))
     
     with open(out_seqs, 'a') as out_handle0:
         SeqIO.write(seqs, out_handle0, 'fasta')
@@ -91,7 +91,9 @@ def fetch_bold(acc_list, out_seqs, out_taxs = None):
 
 #%% classes
 class DbFetcher():
-    def __init__(self, acc_tab, database, prefix):
+    def __init__(self, taxon, marker, acc_tab, database, prefix):
+        self.taxon = taxon
+        self.marker = marker
         self.acc_tab = acc_tab
         self.database = database
         self.__set_fetchfunc(database)
@@ -109,7 +111,7 @@ class DbFetcher():
 
     def fetch(self, chunk_size = 500):
         chunks = acc_slicer(self.acc_tab['Accession'], chunk_size)
-        nchunks = ceil(len(self.marked_accs)/chunk_size)
+        nchunks = ceil(len(self.acc_tab)/chunk_size)
 
         for idx, chunk in enumerate(chunks):
             print(f'{self.database}, {self.taxon} {self.marker}. Chunk {idx + 1} of {nchunks}')
@@ -124,14 +126,14 @@ class Fetcher():
     def __init__(self, taxon, marker, acc_file, out_dir, warn_dir):
         self.taxon = taxon
         self.marker = marker
-        self.acc_tab = pd.read_csv(acc_file) # TODO: this should not be done at init (acc_file may not be ready)
+        # self.acc_tab = pd.read_csv(acc_file) # TODO: this should not be done at init (acc_file may not be ready)
         self.out_dir = out_dir
         self.warn_dir = warn_dir
         self.prefix = f'{out_dir}/{taxon}_{marker}'
-        self.out_tax = f'{out_dir}/{taxon}_{marker}_NCBI.taxsumm'
+        # self.out_tax = f'{out_dir}/{taxon}_{marker}_NCBI.taxsumm' # TODO: remove this
         self.warnings = []
-        self.__check_acclists(acc_file) # TODO: this should be done when loading the acc_file
-        self.__set_fetchers() # TODO: this should be done when loading the acc_file
+        # self.__check_acclists(acc_file) # TODO: this should be done when loading the acc_file
+        # self.__set_fetchers() # TODO: this should be done when loading the acc_file
 
     def __check_acclists(self, acc_file):
         # make sure acc_tab is not empty
@@ -145,9 +147,14 @@ class Fetcher():
         fetchers = []
         if self.accs:
             for dbase, acc_subtab in self.acc_tab.groupby('Database'):
-                fetchers.append(DbFetcher(acc_subtab, dbase, self.out_tax))
+                fetchers.append(DbFetcher(self.taxon, self.marker, acc_subtab, dbase, self.prefix))
         
         self.fetchers = fetchers
+    
+    def load_accfile(self, acc_file):
+        self.acc_tab = pd.read_csv(acc_file)
+        self.__check_acclists(acc_file)
+        self.__set_fetchers()
 
     def fetch(self, chunk_size = 500): # TODO: add attempt counter
         for ftch in self.fetchers:

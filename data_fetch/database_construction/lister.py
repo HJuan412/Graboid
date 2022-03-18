@@ -50,7 +50,7 @@ class SummProcessor():
         accs = self.readfunc(self.in_file)
         splitaccs = [acc.split('.') for acc in accs]
         vers = [acc[-1] if len(acc) > 1 else '1' for acc in splitaccs]
-        shortaccs = [acc.split(f'.{ver}')[0] for acc, ver in zip(self.accs, vers)]
+        shortaccs = [acc.split(f'.{ver}')[0] for acc, ver in zip(accs, vers)]
         return shortaccs, vers
     
     def build_acc_subtab(self):
@@ -58,6 +58,7 @@ class SummProcessor():
         shortaccs, vers = self.get_shortaccs_ver()
         acc_subtab = pd.DataFrame({'Accession': shortaccs, 'Version':vers}, index = shortaccs)
         acc_subtab['Database'] = self.database
+        acc_subtab['Status'] = 'New'
         self.acc_subtab = acc_subtab
         
         if len(self.acc_subtab) == 0:
@@ -71,7 +72,6 @@ class SummProcessor():
         to_replace = compare.loc[compare].index # replace records in old record if this version is greater
         
         self.acc_subtab.drop(to_drop, inplace = True)
-        self.acc_subtab['Status'] = 'New'
         self.acc_subtab.at[to_replace, 'Status'] = 'Update'
 
         if len(to_drop) > 0 and len(self.acc_subtab) == 0:
@@ -82,12 +82,12 @@ class Lister():
     def __init__(self, taxon, marker, in_dir, warn_dir, old_file = None):
         self.taxon = taxon
         self.marker = marker
-        self.in_dir = in_dir
+        self.in_dir = in_dir # TODO: agregar out_dir
         self.warn_dir = warn_dir
         self.old_file = old_file
         self.warnings = []
         self.__get_old_tab()
-        self.out_file = f'{in_dir}/{taxon}_{marker}.acc' # TODO: cambiar a out_dir
+        self.out_file = f'{in_dir}/{taxon}_{marker}.acc' # TODO: cambiar in_dir por out_dir
 
     def __check_summaries(self):
         summ_files = glob(f'{self.in_dir}/*summ')
@@ -118,7 +118,7 @@ class Lister():
         for acc, subtab in sub_merged.groupby('Accession'):
             lead = 'NCBI'
             if not 'NCBI' in subtab['Database'].values:
-                lead = subtab['Databases'].values[0]
+                lead = subtab['Database'].values[0]
             # drop accession from all database summaries except lead's
             to_drop = subtab.loc[subtab['Database'] != lead, 'Database'].values
             for db in to_drop:

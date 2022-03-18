@@ -34,7 +34,7 @@ class SurveyTool():
         self.ntries = ntries
         dbase = self.get_dbase()
         print(f'Surveying {dbase} for {self.taxon} {self.marker}')
-        self.__attempt_dl()
+        self.attempt_dl()
         if self.done:
             print(f'Done getting summary from {dbase} in {self.attempt} attempts.')
         else:
@@ -43,7 +43,7 @@ class SurveyTool():
 
 class SurveyWAPI(SurveyTool):
     # Survey tool using an API
-    def __attempt_dl(self):
+    def attempt_dl(self):
         self.attempt = 0
         while self.attempt < self.ntries:
             # connect to server & send request
@@ -67,6 +67,8 @@ class SurveyWAPI(SurveyTool):
 # Specific survey tools
 # each of these uses a survey method to attempt to download a summary
 class SurveyBOLD(SurveyWAPI):
+    # TODO: BOLD downloads take too long regardless of mode (summary or sequence), furthermore, the api used to build the summary doesn't allow filtering by marker
+    # consider using the full data retrieval API
     def get_dbase(self):
         return 'BOLD'
 
@@ -87,7 +89,7 @@ class SurveyNCBI(SurveyTool):
     def get_dbase(self):
         return 'NCBI'
 
-    def __attempt_dl(self):
+    def attempt_dl(self):
         self.attempt = 0
         while self.attempt < self.ntries:
             try:
@@ -125,10 +127,10 @@ class Surveyor():
         self.taxon = taxon
         self.marker = marker
         self.databases = databases
-        self.__get_surv_tools()
         self.out_dir = out_dir
         self.warn_dir = warn_dir
         self.warn_report = pd.Series(name = 'Attempts')
+        self.__get_surv_tools()
     
     def __get_surv_tools(self):
         # set up the tools to survey the specified databases

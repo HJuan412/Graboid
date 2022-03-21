@@ -34,31 +34,65 @@ def extract_tax_data(record):
     
     return taxonomy, taxonomy_id
 
+def build_BOLD_guidetab(df, cols, ranks):
+    guide_tab = pd.DataFrame(columns = cols)
+    rank = ranks[-1]
+    
+    for taxon, subtab in df.groupby(f'{rank}_name'):
+        guide_tab = pd.concat([guide_tab, subtab.iloc[0].to_frame().transpose()], ignore_index = True)
+    
+    if len(ranks) > 1:
+        sub_df = df.loc[df[f'{rank}_name'].isna()]
+        guide_tab = pd.concat([guide_tab, build_BOLD_guidetab(sub_df, cols, ranks[:-1])], ignore_index = True)
+    
+    return guide_tab
 #%% classes
 class TaxonomistNCBI():
-    def __init__(self, taxon, marker, in_file, out_dir):
+    def __init__(self, taxon, marker, in_dir, out_dir):
         self.taxon = taxon
         self.marker = marker
-        self.in_file = in_file
+        self.in_dir = in_dir
         self.out_dir = out_dir
         self.set_ranks()
         self.warnings = []
         self.dl_warnings = []
-        self.__read_tax_file()
-        self.__make_tax_table()
+        self.in_file = f'{self.in_dir}/{taxon}_{marker}_NCBI.taxtmp'
         self.tax_out = f'{out_dir}/{taxon}_{marker}_NCBI.tax'
         self.taxid_out = f'{out_dir}/{taxon}_{marker}_NCBI.taxid'
     
-    def __read_tax_file(self):
-        # load acc:taxid list, generate reverse list to find accessions based on taxid, generate list of unique taxids to avoid redundant downloads
-        tax_tab = pd.read_csv(self.in_file, header = None, index_col = 0)
-        self.taxid_list = tax_tab[1]
+    def __read_infile(self):
+        if not os.path.isfile(self.in_file):
+            self.warnings.append(f'WARNING: NCBI summary file {self.in_file} not found')
+            self.taxid_list = None
+            return
+        
+        taxid_list = pd.read_csv(self.in_file, index_col = 0, header = None)
+        
+        if len(taxid_list) == 0:
+            self.warnings.append(f'WARNING: NCBI summary file {self.in_file} is empty')
+            self.taxid_list = None
+            return
+        self.taxid_list = taxid_list[1]
+    
+    def __process_taxtab(self):
+        if self.taxid_list is None:
+            self.taxid_rev = None
+            self.uniq_taxs = None
+            return
         self.taxid_rev = pd.Series(index = self.taxid_list.values, data = self.taxid_list.index)
         self.uniq_taxs = self.taxid_list.unique()
-        if len(self.taxid_list) == 0:
-            self.warnings.append(f'WARNING: No entries found in the taxonomy file {self.in_file}')
+        
+        
+    # def __read_tax_file(self):
+    #     # load acc:taxid list, generate reverse list to find accessions based on taxid, generate list of unique taxids to avoid redundant downloads
+    #     tax_tab = pd.read_csv(self.in_file, header = None, index_col = 0)
+    #     self.taxid_list = tax_tab[1]
+    #     self.taxid_rev = pd.Series(index = self.taxid_list.values, data = self.taxid_list.index)
+    #     self.uniq_taxs = self.taxid_list.unique()
+    #     if len(self.taxid_list) == 0:
+    #         self.warnings.append(f'WARNING: No entries found in the taxonomy file {self.in_file}')
     
-    def __make_tax_table(self):
+    def __make_tax_tables(self):
         # generate empty taxonomy tables tax & taxid (used to store the taxonomic IDs), guide tables link a taxid with its full taxonomy
         self.tax_table = pd.DataFrame(index = self.taxid_list.index, columns = self.ranks)
         self.taxid_table = pd.DataFrame(index = self.taxid_list.index, columns = self.ranks)
@@ -117,6 +151,14 @@ class TaxonomistNCBI():
         self.ranks = ranklist
     
     def taxing(self, chunksize = 500):
+        # get input files and prepare to recieve data
+        self.__read_infile()
+        self.__process_taxtab()
+        self.__make_tax_tables()
+        
+        if self.taxid_list is None:
+            return
+
         self.__dl_tax_records()
         self.__fill_blanks()
         self.__update_tables()
@@ -124,41 +166,80 @@ class TaxonomistNCBI():
         self.__save_tables()
 
 class TaxonomistBOLD():
-    def __init__(self, taxon, marker, seq_file, summ_file, out_dir):
+    def __init__(self, taxon, marker, in_dir, out_dir):
         self.taxon = taxon
         self.marker = marker
-        self.seq_file = seq_file
-        self.summ_file = summ_file
+        self.in_dir = in_dir
         self.out_dir = out_dir
         self.set_ranks()
         self.warnings = []
-        self.__get_accs()
+        self.in_file = f'{self.in_dir}/{taxon}_{marker}_BOLD.tmp'
+        self.seq_out = f'{out_dir}/{taxon}_{marker}_BOLD.seqtmp'
         self.tax_out = f'{out_dir}/{taxon}_{marker}_BOLD.tax'
         self.taxid_out = f'{out_dir}/{taxon}_{marker}_BOLD.taxid'
     
-    def __get_accs(self):
-        # get a list of accessions of the downloaded records
-        accessions = []
-        with open(self.seq_file, 'r') as handle:
-            for header, _ in sfp(handle):
-                accessions.append(header.split('|')[0])
-        self.accessions = accessions
-        if len(self.accessions) == 0:
-            self.warnings.append(f'WARNING: Provided BOLD sequence file {self.seq_file} is empty')
+    def set_marker_vars(self, marker_vars):
+        self.marker_vars = marker_vars
+
+    def __read_infile(self):
+        if not os.path.isfile(self.in_file):
+            self.warnings.append(f'WARNING: BOLD summary file {self.in_file} not found')
+            self.bold_tab = None
+            return
+        
+        bold_tab = pd.read_csv(self.in_file, sep = '\t', encoding = 'latin-1', index_col = 0, low_memory = False) # latin-1 to parse BOLD files
+
+        if len(bold_tab) == 0:
+            self.warnings.append(f'WARNING: BOLD summary file {self.in_file} is empty')
+            self.bold_tab = None
+            return
+        bold_tab = bold_tab.loc[bold_tab['markercode'].isin(self.marker_vars)]
+        self.bold_tab = bold_tab
+
+    # def __get_accs(self):
+    #     # get a list of accessions of the downloaded records
+    #     accessions = []
+    #     with open(self.seq_file, 'r') as handle:
+    #         for header, _ in sfp(handle):
+    #             accessions.append(header.split('|')[0])
+    #     self.accessions = accessions
+    #     if len(self.accessions) == 0:
+    #         self.warnings.append(f'WARNING: Provided BOLD sequence file {self.seq_file} is empty')
     
     def __get_tax_tab(self):
         # use the acc list and rank list to extract relevant taxon names and ids
-        # summ_tab = pd.read_csv(self.summ_file, sep = '\t', index_col = 0) # TODO: delete me
-        summ_tab = pd.read_csv(self.summ_file, sep = '\t', encoding = 'latin-1', index_col = 0, low_memory = False) # latin-1 to parse BOLD files
-        col_headers = []
+        cols = []
         for rk in self.ranks:
-            col_headers.append(f'{rk}_taxID')
-            col_headers.append(f'{rk}_name')
-        self.tax_tab = summ_tab.loc[self.accessions, col_headers]
+            cols.append(f'{rk}_name')
+            cols.append(f'{rk}_taxID')
+        self.tax_tab = self.bold_tab.loc[:, cols]
     
     def __fill_blanks(self):
-        # TODO
-        pass
+        for idx, rk in enumerate(self.ranks[1:]):
+            blank_idx = self.tax_tab.loc[self.tax_tab[f'{rk}_name'].isna()].index
+            parent_rk = self.ranks[idx]
+            self.tax_tab.at[blank_idx, f'{rk}_name'] = self.tax_tab.loc[blank_idx, f'{parent_rk}_name']
+            self.tax_tab.at[blank_idx, f'{rk}_taxID'] = self.tax_tab.loc[blank_idx, f'{parent_rk}_taxID']
+
+    def __build_guide_tabs(self):
+        cols = []
+        for rk in self.ranks:
+            cols.append(f'{rk}_name')
+            cols.append(f'{rk}_taxID')
+
+        self.guide_table = build_BOLD_guidetab(self.tax_tab, cols, self.ranks)
+    
+    def __get_seqs(self):
+        records = []
+        
+        for idx, row in self.bold_tab.iterrows():
+            head_list = [str(idx), str(row['genbank_accession']), str(row['species_name'])]
+            header = '>' + ' '.join(head_list)
+            seq = row['nucleotides']
+            records.append('\n'.join([header, seq]))
+        
+        with open(self.seq_out, 'w') as handle:
+            handle.write('\n'.join(records))
 
     def __save_tables(self):
         # build and save tax and taxid tables
@@ -174,32 +255,28 @@ class TaxonomistBOLD():
     
     def taxing(self, chunksize = None):
         # chunksize kept for compatibility
+        self.__read_infile()
         self.__get_tax_tab()
+        self.__fill_blanks()
+        self.__get_seqs()
         self.__save_tables()
 
 class Taxonomist():
-    def __init__(self, taxon, marker, databases, in_dir, warn_dir):
+    def __init__(self, taxon, marker, databases, in_dir, out_dir, warn_dir):
         self.taxon = taxon
         self.marker = marker
         self.databases = databases
         self.in_dir = in_dir
+        self.out_dir = out_dir
         self.warn_dir = warn_dir
         self.prefix = f'{in_dir}/{taxon}_{marker}'
         self.warnings = []
         self.__set_taxers()
-        # TODO: set out_dir
     
     def __set_taxers(self):
-        # TODO: homoheneize taxonomist constructors, tidy up these conditionals
-        taxers = {}
-        if 'BOLD' in self.databases:
-            taxers['BOLD'] = TaxonomistBOLD(self.taxon, self.marker, f'{self.prefix}_BOLD.tmp', f'{self.prefix}_BOLD.summ', self.in_dir)
-        if 'NCBI' in self.databases:
-            taxers['NCBI'] = TaxonomistNCBI(self.taxon, self.marker, f'{self.prefix}_NCBI.tax', self.in_dir)
-        
+        taxers = {'NCBI': TaxonomistNCBI(self.taxon, self.marker, self.in_dir, self.out_dir),
+                  'BOLD': TaxonomistBOLD(self.taxon, self.marker, self.in_dir, self.out_dir)}
         self.taxers = taxers
-        if len(taxers) == 0:
-            self.warnings.append('WARNING: No databases found by the taxonomy reconstructor')
             
     def set_ranks(self, ranklist = ['phylum', 'class', 'order', 'family', 'genus', 'species']):
         self.ranks = ranklist

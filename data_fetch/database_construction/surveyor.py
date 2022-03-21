@@ -8,6 +8,7 @@ Created on Fri Oct 29 14:12:47 2021
 
 #%% libraries
 from Bio import Entrez
+import lister
 import pandas as pd
 import urllib3
 
@@ -104,7 +105,7 @@ class SurveyNCBI(SurveyTool):
 
 class Surveyor():
     # This class manages the download process for all taxon - marker - database trio
-    def __init__(self, taxon, marker, out_dir, warn_dir, databases = ['NCBI']):
+    def __init__(self, taxon, marker, out_dir, warn_dir, old_file = None, databases = ['NCBI']):
         """
         Parameters
         ----------
@@ -131,11 +132,13 @@ class Surveyor():
         self.warn_dir = warn_dir
         self.warn_report = pd.Series(name = 'Attempts')
         self.__get_surv_tools()
+        # prelister must be defined AFTER the survey tools
+        self.prelister = lister.PreLister(self.taxon, self.marker, self.survey_tools['NCBI'].out_file, self.out_dir, self.warn_dir, old_file)
     
     def __get_surv_tools(self):
         # set up the tools to survey the specified databases
         # BOLD is currently deactivated, records are downloaded via the Fetcher module. Kept just in case
-        self.survey_tools = []
+        self.survey_tools = {}
         tooldict = {'BOLD':SurveyBOLD,
                     'ENA':SurveyENA,
                     'NCBI':SurveyNCBI}
@@ -143,7 +146,7 @@ class Surveyor():
         for db in self.databases:
             if db in tooldict.keys():
                 tool = tooldict[db]
-                self.survey_tools.append(tool(self.taxon, self.marker, self.out_dir))
+                self.survey_tools[db] = tool(self.taxon, self.marker, self.out_dir)
 
     def save_warn(self):
         # Generate a warning file if a taxon - marker - database can't be downloaded.
@@ -153,9 +156,12 @@ class Surveyor():
     def survey(self, ntries = 3):
         # Survey each given database for the taxon / marker duo.
         # ntries determines the number of attempts
-        for tool in self.survey_tools:
+        for tool in self.survey_tools.values():
             tool.survey(ntries)
             if tool.warn:
                 self.warn_report.at[tool.get_dbase()] = tool.attempt
         
         self.save_warn()
+        
+        # prelister compares the summary with the old_file (if present) and generates the acc_file
+        self.prelister.pre_list()

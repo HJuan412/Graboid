@@ -104,7 +104,7 @@ class SurveyNCBI(SurveyTool):
 
 class Surveyor():
     # This class manages the download process for all taxon - marker - database trio
-    def __init__(self, taxon, marker, databases, out_dir, warn_dir):
+    def __init__(self, taxon, marker, out_dir, warn_dir, databases = ['NCBI']):
         """
         Parameters
         ----------
@@ -112,12 +112,12 @@ class Surveyor():
             Taxon to survey for.
         marker : str
             Marker to survey for.
-        databases : list
-            Public databases in which to survey for
         out_dir : str
             Path to the output directory.
         warn_dir : str
             Path to the warning directory.
+        databases : list. Optionañ
+            Public databases in which to survey for. Currently, surveyor only looks in NCBI.
 
         Returns
         -------
@@ -134,6 +134,7 @@ class Surveyor():
     
     def __get_surv_tools(self):
         # set up the tools to survey the specified databases
+        # BOLD is currently deactivated, records are downloaded via the Fetcher module. Kept just in case
         self.survey_tools = []
         tooldict = {'BOLD':SurveyBOLD,
                     'ENA':SurveyENA,

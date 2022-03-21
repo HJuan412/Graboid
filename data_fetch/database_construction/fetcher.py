@@ -15,6 +15,7 @@ from glob import glob
 from math import ceil
 
 import numpy as np
+import os
 import pandas as pd
 import urllib3
 
@@ -24,22 +25,6 @@ import urllib3
 def set_entrez(email = "hernan.juan@gmail.com", apikey = "7c100b6ab050a287af30e37e893dc3d09008"):
     Entrez.email = email
     Entrez.api_key = apikey
-
-# acc data handling
-def get_file_data(filename):
-    split_file = filename.split('/')[-1].split('.acc')[0].split('_')
-
-    return split_file + [filename]
-
-def build_acc_tab(acc_dir):
-    acc_files = glob(f'{acc_dir}/*.acc')
-    n_files = len(acc_files)
-    acc_tab = pd.DataFrame(index = range(n_files), columns = ['Taxon', 'Marker', 'Database', 'File'])
-    
-    for idx, file in enumerate(acc_files):
-        
-        acc_tab.at[idx] = get_file_data(file)
-    return acc_tab
 
 # accession list handling
 def acc_slicer(acc_list, chunksize):
@@ -67,7 +52,7 @@ def fetch_ncbi(acc_list, out_seqs, out_taxs):
     with open(out_taxs, 'a') as out_handle1:
         out_handle1.write('\n'.join(taxs + ['']))
     
-def fetch_api(apiurl, out_handle, tax_handle = None):
+def fetch_api(apiurl, out_handle):
     http = urllib3.PoolManager()
     r = http.request('GET', apiurl, preload_content = False)
     for chunk in r.stream():
@@ -75,16 +60,23 @@ def fetch_api(apiurl, out_handle, tax_handle = None):
     r.release_conn()
     return
 
-def fetch_ena(acc_list, out_seqs, out_taxs = None): # out_taxs kept for compatibility
-    accstring = '%2C'.join(acc_list)
-    apiurl = f'https://www.ebi.ac.uk/ena/browser/api/fasta/{accstring}?lineLimit=0'
-    with open(out_seqs, 'ab') as out_handle:
-        fetch_api(apiurl, out_handle)
-    return apiurl
+# def fetch_ena(acc_list, out_seqs, out_taxs = None): # out_taxs kept for compatibility
+#     accstring = '%2C'.join(acc_list)
+#     apiurl = f'https://www.ebi.ac.uk/ena/browser/api/fasta/{accstring}?lineLimit=0'
+#     with open(out_seqs, 'ab') as out_handle:
+#         fetch_api(apiurl, out_handle)
+#     return apiurl
 
-def fetch_bold(acc_list, out_seqs, out_taxs = None):
-    accstring = '|'.join(acc_list)
-    apiurl = f'http://www.boldsystems.org/index.php/API_Public/sequence?ids={accstring}'
+# def fetch_bold(acc_list, out_seqs, out_taxs = None):
+#     accstring = '|'.join(acc_list)
+#     apiurl = f'http://www.boldsystems.org/index.php/API_Public/sequence?ids={accstring}'
+#     with open(out_seqs, 'ab') as out_handle:
+#         fetch_api(apiurl, out_handle)
+#     return
+
+def fetch_bold(taxon, marker, out_seqs, out_taxs = None):
+    # downloads sequence AND summary
+    apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={taxon}&marker={marker}&format=tsv'
     with open(out_seqs, 'ab') as out_handle:
         fetch_api(apiurl, out_handle)
     return
@@ -104,8 +96,8 @@ class DbFetcher():
     def __set_fetchfunc(self, database):
         if database == 'BOLD':
             self.fetch_func = fetch_bold
-        elif database == 'ENA':
-            self.fetch_func = fetch_ena
+        # elif database == 'ENA':
+        #     self.fetch_func = fetch_ena
         elif database == 'NCBI':
             self.fetch_func = fetch_ncbi
 
@@ -121,19 +113,99 @@ class DbFetcher():
                 self.warnings += chunk
     # TODO: add method to extract taxonomy from BOLD
 
+# Each database gets its own fetcher
+class DBFetcher2():
+    def __init__(self, database, taxon, marker, out_dir, warn_dir, chunk_size = 500):
+        self.database = database
+        self.taxon = taxon
+        self.marker = marker
+        self.out_dir = out_dir
+        self.warn_dir = warn_dir
+        self.chunk_size = chunk_size
+        
+        self.warnings = []
+        self.out_seqs = f'{out_dir}/{taxon}_{marker}_{database}.tmp'
+        self.out_taxs = f'{out_dir}/{taxon}_{marker}_{database}.taxtmp'
+
+class NCBIFetcher(DBFetcher2):
+    def set_acc_list(self, acc_list):
+        self.acc_list = acc_list
+
+    def fetch(self):
+        # download sequences from NCBI to fasta and a acc:taxID list
+        if self.acc_list is None:
+            return
+
+        chunks = acc_slicer(self.acc_list, self.chunk_size)
+        for chunk in chunks:
+            try:
+                seq_handle = Entrez.efetch(db = 'nucleotide', id = chunk, rettype = 'fasta', retmode = 'xml')
+                seqs_recs = Entrez.read(seq_handle)
+                
+                seqs = []
+                taxs = []
+        
+                for acc, seq in zip(chunk, seqs_recs):
+                    seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence'])))
+                    taxs.append(','.join([acc, seq['TSeq_taxid']]))
+                
+                with open(self.out_seqs, 'a') as out_handle0:
+                    SeqIO.write(seqs, out_handle0, 'fasta')
+        
+                with open(self.out_taxs, 'a') as out_handle1:
+                    out_handle1.write('\n'.join(taxs + ['']))
+            except:
+                self.warnings += chunk
+
+class BOLDFetcher(DBFetcher2):
+    def fetch(self):
+        # downloads sequence AND summary
+        apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={self.taxon}&marker={self.marker}&format=tsv'
+        with open(self.out_seqs, 'ab') as out_handle:
+            fetch_api(apiurl, out_handle)
+        return
+
+class Fetcher2():
+    def __init__(self, taxon, marker, acc_file, out_dir, warn_dir):
+        self.taxon = taxon
+        self.marker = marker
+        self.out_dir = out_dir
+        self.warn_dir = warn_dir
+        self.prefix = f'{out_dir}/{taxon}_{marker}'
+        self.warnings = []
+        self.__set_fetchers()
+    
+    def __set_fetchers(self):
+        fetchers = {'NCBI':NCBIFetcher('NCBI', self.taxon, self.marker, self.out_dir, self.warn_dir),
+                    'BOLD':BOLDFetcher('BOLD', self.taxon, self.marker, self.out_dir, self.warn_dir)}
+        fetchers['NCBI'].set_acc_list(None)
+        self.fetchers = fetchers
+
+    def read_acclist(self, acc_file):
+        if os.path.isfile(acc_file) is None:
+            self.warnings.append(f'WARNING: File {acc_file} not found')
+            self.acc_tab = None
+            return
+
+        self.acc_tab = pd.read_csv(acc_file)
+        if len(self.acc_tab) == 0:
+            self.warnings.append(f'WARNING: Accession table {acc_file} is empty')
+            return
+        self.fetchers['NCBI'].set_acc_list(self.acc_tab['Accession'])
+    
+    def fetch(self, databases = ['NCBI', 'BOLD']):
+        for db in databases:
+            self.fetchers[db].fetch()
+
 class Fetcher():
     # TODO: fetch sequences stored in warn_dir
     def __init__(self, taxon, marker, acc_file, out_dir, warn_dir):
         self.taxon = taxon
         self.marker = marker
-        # self.acc_tab = pd.read_csv(acc_file) # TODO: this should not be done at init (acc_file may not be ready)
         self.out_dir = out_dir
         self.warn_dir = warn_dir
         self.prefix = f'{out_dir}/{taxon}_{marker}'
-        # self.out_tax = f'{out_dir}/{taxon}_{marker}_NCBI.taxsumm' # TODO: remove this
         self.warnings = []
-        # self.__check_acclists(acc_file) # TODO: this should be done when loading the acc_file
-        # self.__set_fetchers() # TODO: this should be done when loading the acc_file
 
     def __check_acclists(self, acc_file):
         # make sure acc_tab is not empty

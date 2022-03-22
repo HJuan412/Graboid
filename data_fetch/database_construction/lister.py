@@ -255,3 +255,127 @@ class PreLister():
         self.merge_with_old()
         self.save_tab()
         self.save_warnings()
+
+class PostLister():
+    def __init__(self, taxon, marker, in_dir, out_dir, warn_dir, old_file = None):
+        self.taxon = taxon
+        self.marker = marker
+        self.in_dir = out_dir
+        self.out_dir = out_dir
+        self.warn_dir = warn_dir
+        self.old_file = old_file
+        self.warnings = []
+        self.set_marker_vars([marker])
+    
+    def set_marker_vars(self, marker_vars):
+        # BOLD records may have variations of the marker name (18S/18s, COI-3P/COI-5P)
+        self.marker_vars = list(marker_vars)
+
+    def __make_boldaccs(self):
+        bold_dict = {}
+        for idx in self.bold_tab.index:
+            split_idx = idx.split('-')
+            bold_dict[split_idx[0]] = (idx, split_idx[1])
+        self.bold_accs = pd.DataFrame.from_dict(bold_dict, orient = 'index', columns = ['Accession', 'Version'])
+    
+    def __make_boldgbdict(self):
+        bold_gb = {}
+        bold_subtab = self.bold_tab.loc[~self.bold_tab['genbank_accession'].isna(), 'genbank_accession']
+        for idx, acc in bold_subtab.iteritems():
+            split_idx = idx.split('-')
+            split_acc = acc.split('.')
+            bold_gb[split_acc[0]] = split_idx[0]
+        self.bold_gb = pd.Series(bold_gb)
+
+    def __detect_BOLD(self):
+        bold_file = f'{self.in_dir}/{self.taxon}_{self.marker}_BOLD.tmp'
+        if not os.path.isfile(bold_file):
+            self.warnings.append(f'WARNING: BOLD summary file {bold_file} not found')
+            self.bold_tab = None
+            self.bold_accs = None
+            return
+        
+        bold_tab = pd.read_csv(bold_file, sep = '\t', encoding = 'latin-1', index_col = 0, low_memory = False) # latin-1 to parse BOLD files
+
+        if len(bold_tab) == 0:
+            self.warnings.append(f'WARNING: BOLD summary file {self.in_file} is empty')
+            self.bold_tab = None
+            return
+        bold_tab = bold_tab.loc[bold_tab['markercode'].isin(self.marker_vars)]
+        self.bold_tab = bold_tab
+        self.__make_boldaccs()
+        self.__make_boldgbdict()
+
+    def __detect_NCBI(self):
+        ncbi_file = f'{self.in_dir}/{self.taxon}_{self.marker}_NCBI.acc'
+        
+        if not os.path.isfile(ncbi_file):
+            self.warnings.append(f'WARNING: NCBI summary file {ncbi_file} not found')
+            self.ncbi_tab = None
+            return
+        
+        self.ncbi_tab = pd.read_csv(ncbi_file, index_col = 0)
+    
+    def __read_oldfile(self):
+        if self.old_file is None:
+            self.old_tab = None
+            return
+        
+        if not os.path.isfile(self.old_file):
+            self.warnings.append(f'WARNING: file {self.in_file} not found')
+            return
+
+        if len(self.old_tab) == 0:
+            self.warnings.append(f'WARNING: file {self.old_file} is empty')
+            self.old_tab = None
+            return
+
+        self.old_tab = pd.read_csv(self.old_file, index_col = 0)
+
+    def detect(self):
+        self.__detect_BOLD()
+        self.__detect_NCBI()
+        self.__read_oldfile()
+    
+    def __bold_old(self):
+        # compare bold_accs vs old_tab
+        self.filtered_bold = None
+        
+        if self.bold_tab is None:
+            return
+
+        if not self.old_tab is None:
+            intersect = self.bold_accs.index.intersection(self.old_tab.index) 
+            if len(intersect) == 0:
+                return
+            
+            bold_acc = self.bold_accs.loc[intersect]
+            old_acc = self.old_tab.loc[intersect, ['Accession', 'Version']]
+            
+            filtered = bold_acc.loc[bold_acc['Version'] > old_acc['Version']]
+            if len(filtered) == 0:
+                return
+        else:
+            filtered = self.bold_accs.copy()
+        filtered['Database'] = 'BOLD'
+        self.filtered_bold = filtered
+    
+    def __bold_ncbi(self):
+        # compare filtered_bold vs ncbi_tab
+        self.filtered = self.ncbi_tab.copy()
+        self.filtered['Database'] = 'NCBI'
+        
+        if self.filtered_bold is None:
+            return
+        
+        if len(self.bold_gb) == 0:
+            self.filtered = pd.concat([self.filtered, self.filtered_bold])
+            return
+        
+        intersect = self.bold_gb.index.intersection(self.filtered.index)
+        filtered_bold = self.filtered_bold.drop(intersect)
+        self.filtered = pd.concat([self.filtered, filtered_bold])
+
+    def compare(self):
+        self.__bold_old()
+        self.__bold_ncbi()

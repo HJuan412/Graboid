@@ -172,6 +172,7 @@ class TaxonomistBOLD():
         self.in_dir = in_dir
         self.out_dir = out_dir
         self.set_ranks()
+        self.set_marker_vars([marker])
         self.warnings = []
         self.in_file = f'{self.in_dir}/{taxon}_{marker}_BOLD.tmp'
         self.seq_out = f'{out_dir}/{taxon}_{marker}_BOLD.seqtmp'
@@ -179,7 +180,8 @@ class TaxonomistBOLD():
         self.taxid_out = f'{out_dir}/{taxon}_{marker}_BOLD.taxid'
     
     def set_marker_vars(self, marker_vars):
-        self.marker_vars = marker_vars
+        # BOLD records may have variations of the marker name (18S/18s, COI-3P/COI-5P)
+        self.marker_vars = list(marker_vars)
 
     def __read_infile(self):
         if not os.path.isfile(self.in_file):

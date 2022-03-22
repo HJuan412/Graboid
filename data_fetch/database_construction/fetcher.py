@@ -43,7 +43,7 @@ def fetch_ncbi(acc_list, out_seqs, out_taxs):
     taxs = []
 
     for acc, seq in zip(acc_list, seqs_recs):
-        seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence'])))
+        seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), name = seq['TSeq_orgname'], description = None))
         taxs.append(','.join([acc, seq['TSeq_taxid']]))
     
     with open(out_seqs, 'a') as out_handle0:

@@ -122,12 +122,18 @@ class DBFetcher2():
         self.out_dir = out_dir
         self.warn_dir = warn_dir
         self.chunk_size = chunk_size
+        self.__set_outfiles()
         
         self.warnings = []
-        self.out_seqs = f'{out_dir}/{taxon}_{marker}_{database}.tmp'
-        self.out_taxs = f'{out_dir}/{taxon}_{marker}_{database}.taxtmp'
+    
+    def __set_outfiles(self):
+        pass
 
 class NCBIFetcher(DBFetcher2):
+    def __set_outfiles(self):
+        self.out_seqs = f'{self.out_dir}/{self.taxon}_{self.marker}_{self.database}.seqtmp'
+        self.out_taxs = f'{self.out_dir}/{self.taxon}_{self.marker}_{self.database}.taxtmp'
+
     def set_acc_list(self, acc_list):
         self.acc_list = acc_list
 
@@ -158,6 +164,9 @@ class NCBIFetcher(DBFetcher2):
                 self.warnings += chunk
 
 class BOLDFetcher(DBFetcher2):
+    def __set_outfiles(self):
+        self.out_seqs = f'{self.out_dir}/{self.taxon}_{self.marker}_{self.database}.tmp'
+
     def fetch(self):
         # downloads sequence AND summary
         apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={self.taxon}&marker={self.marker}&format=tsv'

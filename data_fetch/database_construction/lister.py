@@ -262,7 +262,7 @@ class PostLister():
     def __init__(self, taxon, marker, in_dir, out_dir, warn_dir, old_file = None):
         self.taxon = taxon
         self.marker = marker
-        self.in_dir = out_dir
+        self.in_dir = in_dir
         self.out_dir = out_dir
         self.warn_dir = warn_dir
         self.old_file = old_file
@@ -367,6 +367,10 @@ class PostLister():
     
     def __bold_ncbi(self):
         # compare filtered_bold vs ncbi_tab
+        self.filtered = None
+        if self.ncbi_tab is None:
+            return
+
         self.filtered = self.ncbi_tab.copy()
         self.filtered['Database'] = 'NCBI'
         
@@ -378,7 +382,8 @@ class PostLister():
             return
         
         intersect = self.bold_gb.index.intersection(self.filtered.index)
-        filtered_bold = self.filtered_bold.drop(intersect)
+        intersect_idx = self.bold_gb.loc[intersect].values # get the index of intersecting values
+        filtered_bold = self.filtered_bold.drop(intersect_idx)
         self.filtered = pd.concat([self.filtered, filtered_bold])
 
     def compare(self):

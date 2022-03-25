@@ -28,8 +28,7 @@ class Merger():
         self.warnings = []
         self.out_file = f'{out_dir}/{taxon}_{marker}.fasta'
         self.__get_files()
-        self.__rm_old_seqs()
-    
+        
     def __get_files(self):
         seqfiles = {}
         taxfiles = {}
@@ -50,11 +49,17 @@ class Merger():
 
     def build_list(self):
         post_lister = lister.PostLister(self.taxon, self.marker, self.in_dir, self.in_dir, self.warn_dir)
-        # TODO: handle set_marker_vars
         post_lister.detect()
         post_lister.compare()
         self.acc_tab = post_lister.filtered
-        # TODO: manage post_lister warnings
+        
+        if len(post_lister.warnings) > 0:
+            self.warnings.append('Post Lister warnings:')
+            self.warnings += post_lister.warnings
+            self.warnings.append('---')
+        
+        if self.acc_tab is None:
+            self.warnings.append('WARNING: Failed to create accession list, check Post Lister warnings')
     
     def build_seqfile(self):
         records = []
@@ -76,6 +81,22 @@ class Merger():
         mtax.build_taxid_flats()
         mtax.correct_BOLD()
         mtax.build_taxfiles(self.acc_tab)
+    
+    def __check_warnings(self):
+        if len(self.warnings) > 0:
+            with open(f'{self.warn_dir}/warnings.merge', 'w') as handle:
+                handle.write('\n'.join(self.warnings))
+
+    def __merge(self):
+        self.build_list()
+        if self.acc_tab is None:
+            return
+        self.build_seqfile()
+        self.merge_taxons()
+    
+    def merge(self):
+        self.__merge()
+        self.__check_warnings()
 
 class MergerTax():
     def __init__(self, taxon, marker, databases, in_dir, out_dir, warn_dir, old_file = None):
@@ -88,6 +109,7 @@ class MergerTax():
         self.old_file = old_file
         self.tax_outfile = f'{out_dir}/{taxon}_{marker}.tax'
         self.taxid_outfile = f'{out_dir}/{taxon}_{marker}.taxid'
+        self.taxid_guidefile = f'{out_dir}/{taxon}_{marker}.taxguide'
         self.__get_files()
         self.__load_files()
     
@@ -139,28 +161,37 @@ class MergerTax():
 
     def correct_BOLD(self):
         bold_corrected = self.bold_taxid.copy()
-        
         for rk in self.ranks:
             ncbi_flat_sub = self.ncbi_flat.loc[self.ncbi_flat['Rank'] == rk]
             bold_flat_sub = self.bold_flat.loc[self.bold_flat['Rank'] == rk]
             intersection = ncbi_flat_sub.index.intersection(bold_flat_sub.index)
             to_correct = self.ncbi_flat.loc[intersection]
-            print(rk, to_correct)
-            
     
             for tax, row in to_correct.iterrows():
                 rank = row['Rank']
                 tax_id = row['Taxid']
                 idx = self.bold_tax.loc[self.bold_tax[rank] == tax].index
                 bold_corrected.at[idx, f'{rank}_id'] = tax_id
-        
         self.bold_taxid = bold_corrected
     
+    def build_taxid_guide(self, tax_tab, taxid_tab):
+        taxid_guide = pd.DataFrame(columns = ['TaxName', 'Rank', 'ParentTaxId'])
+        
+        for parent_idx, rk in enumerate(self.ranks[1:]):
+            parent_rk = self.ranks[parent_idx]
+            for tax, subtab in tax_tab.groupby(rk):
+                idx = subtab.index[0]
+                taxid = taxid_tab.loc[idx, f'{rk}_id']
+                parent_taxid = taxid_tab.loc[idx, f'{parent_rk}_id']
+                taxid_guide.at[taxid] = [tax, rk, parent_taxid]
+        taxid_guide.to_csv(self.taxid_guidefile)
+        
     def build_taxfiles(self, acc_tab):
         # NCBI
         ncbi_accs = set(acc_tab.loc[acc_tab['Database'] == 'NCBI', 'Accession'].tolist())
-        ncbi_tax_subtab = self.ncbi_tax.loc[ncbi_accs]
-        ncbi_taxid_subtab = self.ncbi_taxid.loc[ncbi_accs]
+        intersect_accs = ncbi_accs.intersection(set(self.ncbi_tax.index)) # some of the accessions in acc_tab may not be in ncbi_tax
+        ncbi_tax_subtab = self.ncbi_tax.loc[intersect_accs]
+        ncbi_taxid_subtab = self.ncbi_taxid.loc[intersect_accs]
         
         # BOLD
         bold_accs = set(acc_tab.loc[acc_tab['Database'] == 'BOLD', 'Accession'].tolist())
@@ -170,5 +201,6 @@ class MergerTax():
         tax_file = pd.concat([ncbi_tax_subtab, bold_tax_subtab])
         taxid_file = pd.concat([ncbi_taxid_subtab, bold_taxid_subtab])
         
+        self.build_taxid_guide(tax_file, taxid_file)
         tax_file.to_csv(self.tax_outfile)
         taxid_file.to_csv(self.taxid_outfile)

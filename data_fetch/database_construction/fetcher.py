@@ -122,12 +122,11 @@ class DBFetcher2():
         self.out_dir = out_dir
         self.warn_dir = warn_dir
         self.chunk_size = chunk_size
-        self.__set_outfiles()
         
         self.warnings = []
     
-    def __set_outfiles(self):
-        pass
+    # def __set_outfiles(self):
+    #     pass
 
 class NCBIFetcher(DBFetcher2):
     def __set_outfiles(self):
@@ -139,6 +138,7 @@ class NCBIFetcher(DBFetcher2):
 
     def fetch(self):
         # download sequences from NCBI to fasta and a acc:taxID list
+        self.__set_outfiles()
         if self.acc_list is None:
             return
 
@@ -152,7 +152,7 @@ class NCBIFetcher(DBFetcher2):
                 taxs = []
         
                 for acc, seq in zip(chunk, seqs_recs):
-                    seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence'])))
+                    seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
                     taxs.append(','.join([acc, seq['TSeq_taxid']]))
                 
                 with open(self.out_seqs, 'a') as out_handle0:
@@ -169,6 +169,7 @@ class BOLDFetcher(DBFetcher2):
 
     def fetch(self):
         # downloads sequence AND summary
+        self.__set_outfiles()
         apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={self.taxon}&marker={self.marker}&format=tsv'
         with open(self.out_seqs, 'ab') as out_handle:
             fetch_api(apiurl, out_handle)

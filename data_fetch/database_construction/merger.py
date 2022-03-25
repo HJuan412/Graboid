@@ -10,6 +10,7 @@ Compare and merge temporal sequence files
 
 #%% libraries
 from Bio import SeqIO
+import bold_marker_vars
 import lister
 import pandas as pd
 
@@ -23,6 +24,7 @@ class Merger():
         self.out_dir = out_dir
         self.warn_dir = warn_dir
         self.old_file = old_file
+        self.__set_marker_vars(bold_marker_vars.marker_vars[marker])
         self.warnings = []
         self.out_file = f'{out_dir}/{taxon}_{marker}.fasta'
         self.__get_files()
@@ -42,6 +44,10 @@ class Merger():
         self.taxfiles = taxfiles
         self.taxidfiles = taxidfiles
     
+    def __set_marker_vars(self, marker_vars):
+        # BOLD records may have variations of the marker name (18S/18s, COI-3P/COI-5P)
+        self.marker_vars = list(marker_vars)
+
     def build_list(self):
         post_lister = lister.PostLister(self.taxon, self.marker, self.in_dir, self.in_dir, self.warn_dir)
         # TODO: handle set_marker_vars

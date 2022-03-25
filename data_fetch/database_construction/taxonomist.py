@@ -12,6 +12,7 @@ This script fetches the taxonomy data for the downloaded records
 from Bio import Entrez
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 
+import bold_marker_vars
 import numpy as np
 import os
 import pandas as pd
@@ -172,14 +173,14 @@ class TaxonomistBOLD():
         self.in_dir = in_dir
         self.out_dir = out_dir
         self.set_ranks()
-        self.set_marker_vars([marker])
+        self.__set_marker_vars(bold_marker_vars.marker_vars[marker])
         self.warnings = []
         self.in_file = f'{self.in_dir}/{taxon}_{marker}_BOLD.tmp'
         self.seq_out = f'{out_dir}/{taxon}_{marker}_BOLD.seqtmp'
         self.tax_out = f'{out_dir}/{taxon}_{marker}_BOLD.tax'
         self.taxid_out = f'{out_dir}/{taxon}_{marker}_BOLD.taxid'
     
-    def set_marker_vars(self, marker_vars):
+    def __set_marker_vars(self, marker_vars):
         # BOLD records may have variations of the marker name (18S/18s, COI-3P/COI-5P)
         self.marker_vars = list(marker_vars)
 

@@ -161,7 +161,7 @@ class NCBIFetcher(DBFetcher2):
                 with open(self.out_taxs, 'a') as out_handle1:
                     out_handle1.write('\n'.join(taxs + ['']))
             except:
-                self.warnings += chunk
+                self.warnings += chunk.tolist()
 
 class BOLDFetcher(DBFetcher2):
     def __set_outfiles(self):

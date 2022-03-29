@@ -151,7 +151,7 @@ class Surveyor():
     def save_warn(self):
         # Generate a warning file if a taxon - marker - database can't be downloaded.
         if len(self.warn_report) > 0:
-            self.warn_report.to_csv('{self.warn_dir}/warnings.surv')
+            self.warn_report.to_csv(f'{self.warn_dir}/warnings.surv')
 
     def survey(self, ntries = 3):
         # Survey each given database for the taxon / marker duo.

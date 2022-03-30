@@ -1,0 +1,11 @@
+Archivos *_ref_.fasta contienen secuencias de referencia de S. cerevisiae
+	==> 18S_ref_.fasta <==
+	>NG_063315.1 Saccharomyces cerevisiae NRRL Y-12632 18S rRNA gene, partial sequence; from TYPE material
+
+	==> 28S_ref_.fasta <==
+	>NG_042623.1 Saccharomyces cerevisiae NRRL Y-12632 28S rRNA, partial sequence; from TYPE material
+
+	==> COI_ref_.fasta <==
+	>NC_027264.1  Saccharomyces cerevisiae isolate NCYC3594 mitochondrion, complete genome
+
+Carpetas ref_*_base contienen bases de datos de blast para cada marcador

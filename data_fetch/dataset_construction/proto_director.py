@@ -83,8 +83,8 @@ taxons = ['nematoda', 'platyhelminthes']
 markers = ['18s', '28s', 'coi']
 for taxon in taxons:
     for marker in markers:
-        if taxon == 'nematoda' and marker == '18s':
-            pass
+        # taxon = 'nematoda' use these lines to test for a specific combo
+        # marker = 'coi'
         in_dir = f'{taxon}_{marker}/out_dir'
         out_dir = f'{taxon}_{marker}/out_dir'
         warn_dir = f'{taxon}_{marker}/warn_dir'

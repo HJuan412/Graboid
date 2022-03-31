@@ -135,14 +135,4 @@ class MatBuilder():
             self.matrix[accnum,:] = row
         self.matrix.flush()
         self.__save_metafiles()
-
-#%% test
-if __name__=='__main__':
-    blast_file = 'nematoda_18s/out_dir/nematoda_18s.blast'
-    seq_file = 'nematoda_18s/out_dir/nematoda_18s_nogaps.fasta'
-    
-    # worker_builder = MatBuilder('nematoda', '18s', blast_file, seq_file, 'nematoda_18s/out_dir', 'nematoda_18s/tmp_dir', 'nematoda_18s/warn_dir')
-    # worker_builder.build_matrix()
-
-    # dims = (24700, 1730)
-    # mat = np.memmap('nematoda_18s/out_dir/nematoda_18s.npy', dtype = 'int64', mode = 'r', shape = dims)
+        

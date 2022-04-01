@@ -11,7 +11,7 @@ Feature selection
 import numpy as np
 import pandas as pd
 
-#%% functions - feature selection
+#%% functions - information quantification
 def get_entropy(array):
     # entropy of a single array
     valid_rows = array[np.argwhere(array != 16)]
@@ -77,4 +77,21 @@ def get_gain(matrix, tax_tab):
     gain_tab = pd.DataFrame.from_dict(gain_dict, orient = 'index')
     return gain_tab
 
-# TODO: build training data
+#%% functions - feature selection
+def select_features(table, rank, nsites, criterium = 'diff'):
+    selected = set()
+    if criterium == 'diff':
+        sub_tab = table.loc[table['rank'] == f'{rank}_id'].drop('rank', axis = 1)
+        for tax, row in sub_tab.iterrows():
+            sorted_diff = row.sort_values(ascending = False).index.tolist()
+            selected.update(sorted_diff[:nsites])
+    elif criterium == 'gain':
+        series = table.loc[f'{rank}_id']
+        sorted_idxs = series.sort_values(ascending = False).index.tolist()
+        selected.update(sorted_idxs[:nsites])
+    
+    return list(selected)
+
+def build_training_data(matrix, col_list):
+    return matrix[:,col_list]
+# TODO: how do the selected sites map to the reference sequence

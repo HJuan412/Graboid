@@ -9,6 +9,7 @@ Build an alignment matrix from the blast report
 
 #%% libraries
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import string
@@ -76,6 +77,48 @@ def build_row(acc, seq, seq_coords, mat_coords, rowlen, transdict):
         numseq = np.array([transdict[base] for base in subseq], dtype = 'int64')
         row[mat_coor[0]:mat_coor[1]+1] = numseq    
     return row.astype(np.int64)
+
+def get_coverage_data(in_file):
+    blast_tab = read_blast(in_file)
+    rows, cols, offset = get_mat_dims(blast_tab)
+    coords = build_coords(blast_tab[['qstart', 'qend', 'sstart', 'send']], offset)[1]
+    cov_data = np.zeros(cols)
+    for coo in coords:
+        cov_data[coo[0]:coo[1]] += 1
+    return cov_data, cov_data / rows
+
+def plot_coverage_data(taxon, marker, cov_data, mode = None):
+    # mode 'perc' plot is given in percentage
+    tot_data = cov_data[0]
+    perc_data = cov_data[1]
+
+    view = len(tot_data)
+    xticklen = int(view/10)
+    xticks = np.arange(0, view + 1, xticklen)
+    xlabs = np.arange(0, len(tot_data)+1, xticklen)
+
+    # generate plot information
+    # per base coverage data
+    cov = tot_data
+    ylabel = 'Coverabe (bases)'
+    if mode == 'perc':
+        # use percentages instead
+        cov = perc_data
+        ylabel = 'Coverage (%)'
+
+    x = np.arange(len(cov))
+
+    # plot
+    fig, ax = plt.subplots(figsize = (12,7))
+    ax.margins(x=0.005, y = 0.01)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xlabs)
+    ax.set_xlabel('Position')
+    ax.set_ylabel(ylabel)
+    ax.set_title(f'{taxon}, {marker}\nPer base coverage')
+    ax.plot(x, cov, color = 'r', label = 'Per base coverage')
+    # ax.legend()
+    return
 #%% classes
 class MatBuilder():
     def __init__(self, taxon, marker, blast_file, seq_file, out_dir, warn_dir):

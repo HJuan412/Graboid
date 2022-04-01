@@ -10,9 +10,6 @@ Blast downloaded sequences against references
 #%% libraries
 from Bio.Blast.Applications import NcbiblastnCommandline as blast_cline
 from glob import glob
-import matrix2 # TODO: remember to change to matrix when matrix2 is renamed
-import matplotlib.pyplot as plt
-import numpy as np
 import os
 
 #%% functions
@@ -21,47 +18,6 @@ def blast(query, ref, out_file, threads = 1):
     cline = blast_cline(cmd = 'blastn', task = 'blastn', db = ref, query = query, out = out_file, outfmt = "6 qseqid pident length qstart qend sstart send evalue", ungapped = True, num_threads = threads)
     cline()
 
-def get_coverage_data(in_file):
-    blast_tab = matrix2.read_blast(in_file)
-    rows, cols, offset = matrix2.get_mat_dims(blast_tab)
-    coords = matrix2.build_coords(blast_tab[['qstart', 'qend', 'sstart', 'send']], offset)[1]
-    cov_data = np.zeros(cols)
-    for coo in coords:
-        cov_data[coo[0]:coo[1]] += 1
-    return cov_data, cov_data / rows
-
-def plot_coverage_data(taxon, marker, cov_data, mode = None):
-    # mode 'perc' plot is given in percentage
-    tot_data = cov_data[0]
-    perc_data = cov_data[1]
-
-    view = len(tot_data)
-    xticklen = int(view/10)
-    xticks = np.arange(0, view + 1, xticklen)
-    xlabs = np.arange(0, len(tot_data)+1, xticklen)
-
-    # generate plot information
-    # per base coverage data
-    cov = tot_data
-    ylabel = 'Coverabe (bases)'
-    if mode == 'perc':
-        # use percentages instead
-        cov = perc_data
-        ylabel = 'Coverage (%)'
-
-    x = np.arange(len(cov))
-
-    # plot
-    fig, ax = plt.subplots(figsize = (12,7))
-    ax.margins(x=0.005, y = 0.01)
-    ax.set_xticks(xticks)
-    ax.set_xticklabels(xlabs)
-    ax.set_xlabel('Position')
-    ax.set_ylabel(ylabel)
-    ax.set_title(f'{taxon}, {marker}\nPer base coverage')
-    ax.plot(x, cov, color = 'r', label = 'Per base coverage')
-    # ax.legend()
-    return
 #%% classes
 class Blaster():
     def __init__(self, taxon, marker, in_file, ref_dir, out_dir, warn_dir):

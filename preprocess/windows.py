@@ -76,37 +76,7 @@ def build_cons_tax(subtab):
         if len(uniq_vals) == 1:
             cons_tax.at[rk] = uniq_vals[0]
     return cons_tax
-        
-# TODO: handle entropy calculation in a different
-def entropy(matrix):
-    n_cols = matrix.shape[1]
 
-    entropy = np.zeros(n_cols)
-    for i in range(n_cols):
-        valid_rows = matrix[np.argwhere(matrix[:,i] != 16), i]
-        n_rows = len(valid_rows)
-        freqs = np.unique(valid_rows, return_counts = True)[1] / n_rows
-        entropy[i] = -np.sum(np.log2(freqs) * freqs)
-        
-    return (2-entropy) / 2 # 1 min entropy, 0 max entropy
-
-def per_tax_entropy(matrix, acc_tab, acc_list):
-    n_cols = matrix.shape[1]
-    ent_dict = {}
-    for rk in acc_tab.columns:
-        rank_col = acc_tab[rk]
-        uniq_taxes = rank_col.unique()
-        n_taxs = len(uniq_taxes)
-        per_tax_ent = np.zeros((n_taxs, n_cols))
-
-        for idx, tax in enumerate(uniq_taxes):
-            tax_idx = rank_col.loc[rank_col == tax].index.tolist()
-            sub_matrix = matrix[tax_idx]
-            sub_entropy = entropy(sub_matrix)
-            per_tax_ent[idx, :] = sub_entropy
-        
-        ent_dict[rk] = per_tax_ent
-    return ent_dict
 #%% classes
 class WindowLoader():
     def __init__(self, taxon, marker, in_dir, out_dir, tmp_dir, warn_dir):

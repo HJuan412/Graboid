@@ -99,17 +99,17 @@ def build_training_data(matrix, col_list):
 
 def plot_gain(table, rank, criterium = 'diff'):
     fig, ax = plt.subplots(figsize = (7,10))
-
+    
+    # TODO: handle header and labels
     if criterium == 'diff':
         sub_mat = table.loc[table['rank'] == f'{rank}_id'].drop('rank', axis = 1).to_numpy()
         x = np.arange(sub_mat.shape[1])
         y = sub_mat.mean(axis = 0)
         y_std = np.array([col.std() for col in sub_mat.T]) # have to do this shit to get deviation for some reason
-        print(len(x))
-        print(len(y))
-        print(len(y_std))
         ax.bar(x, y, yerr = y_std)
     elif criterium == 'gain':
         data = table.loc[f'{rank}_id'].to_numpy()
         x = np.arange(len(data))
         ax.bar(x, data)
+    
+    ax.margins(x = 0.05, y = 0.01)

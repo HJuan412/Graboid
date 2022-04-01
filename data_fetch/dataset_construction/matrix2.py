@@ -78,6 +78,7 @@ def build_row(acc, seq, seq_coords, mat_coords, rowlen, transdict):
         row[mat_coor[0]:mat_coor[1]+1] = numseq    
     return row.astype(np.int64)
 
+# plotting functions
 def get_coverage_data(in_file):
     blast_tab = read_blast(in_file)
     rows, cols, offset = get_mat_dims(blast_tab)

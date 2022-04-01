@@ -8,10 +8,12 @@ This script retrieves windows from a given data matrix and calculates entropy & 
 """
 
 #%% libraries
+from numba import njit
 import numpy as np
 import os
 import pandas as pd
 #%%
+# filter matrix
 def filter_rows(matrix):
     # keeps the index of all non empty rows
     filtered_idx = []
@@ -39,6 +41,42 @@ def filter_cols(matrix, thresh = 0.2):
     
     return filtered_idx
 
+# collapse unique rows
+def get_val_idx(col):
+    # get the indexes for each unique value in the column
+    col_values = np.unique(col)
+    val_idxs = [np.argwhere(col == value) for value in col_values]
+    return val_idxs
+
+def collapse_matrix(matrix, row_idx = None, col_idx = 0):
+    # returns a list of indexes from each cluster of unique sequences
+    # set initial rows
+    if row_idx is None:
+        row_idx = np.arange(matrix.shape[0])
+    
+    uniq_seqs = []
+    sub_mat = matrix[row_idx]
+    uniq_val_idxs = get_val_idx(sub_mat[:, col_idx])
+
+    for val_idx in uniq_val_idxs:
+        row_idx1 = row_idx[val_idx].flatten()
+        # stop conditions: last column reached or only one row remaining
+        if len(row_idx1) == 1 or col_idx + 1 == matrix.shape[1]:
+            uniq_seqs.append(list(row_idx1))
+            continue
+        uniq_seqs += collapse_matrix(matrix, row_idx1, col_idx + 1)
+    
+    return uniq_seqs
+
+def build_cons_tax(subtab):
+    cols = subtab.columns[1:]
+    cons_tax = pd.Series(index=cols)
+    for rk in cols:
+        uniq_vals = subtab[rk].unique()
+        if len(uniq_vals) == 1:
+            cons_tax.at[rk] = uniq_vals[0]
+    return cons_tax
+        
 # TODO: handle entropy calculation in a different
 def entropy(matrix):
     n_cols = matrix.shape[1]
@@ -161,11 +199,15 @@ class Window():
             return
         self.thresh = thresh
         window = self.matrix[self.rows]
-        self.min_seqs = window.shape[1] * (1-thresh)
+        self.min_seqs = window.shape[0] * (1-thresh)
         cols = filter_cols(window, self.thresh)
         self.window = window[:, cols]
         self.cols = cols
-        self.shape = (len(self.rows), len(self.cols))
+        self.shape = self.window.shape
+        self.get_acctab()
+        # collapse windows
+        self.uniques = collapse_matrix(self.window) # Collapse the window, this is a list of OF LISTS of the indexes of unique sequences
+        self.get_reps()
     
     def get_acctab(self):
         # load the accession table for the current window (depends on the window loader existing)
@@ -173,9 +215,39 @@ class Window():
         if self.loader is None:
             return
         self.acc_tab = self.loader.load_acctab(self.rows)
+    
+    def get_col_idxs(self):
+        return np.array(self.cols) + self.wstart
+    
+    def get_reps(self):
+        reps = {}
+        for uq in self.uniques:
+            if len(uq) == 1:
+                reps[uq[0]] = uq
+            else:
+                reps[uq[0]] = uq
+        self.reps = reps
+
+    def build_cons_mat(self):
+        # this builds a matrix and taxid_table with unique sequences
+        # in the case of repeated sequences, a consensus taxonomy is built, conflicting ranks are left blank
+        cons_mat = []
+        cols = self.acc_tab.columns[1:]
+        reps = list(self.reps.keys())
+        cons_tax = pd.DataFrame(index = reps, columns = cols)
+        
+        for uq in reps:
+            cons_mat.append(self.window[uq])
+            if len(self.reps[uq]) == 1:
+                cons_tax.at[uq] = self.acc_tab.loc[uq]
+            else:
+                subtab = self.acc_tab.loc[self.reps[uq]]
+                cons_tax.at[uq] = build_cons_tax(subtab)
+        self.cons_mat = np.array(cons_mat)
+        self.cons_tax = cons_tax
+        
 
 #%% test
 if __name__ == '__main__':
     wl = WindowLoader('nematoda', '18s', 'nematoda_18s/out_dir', 'nematoda_18s/out_dir', 'nematoda_18s/tmp_dir', 'nematoda_18s/warn_dir')
-    window = wl.get_window(0, 100)
-    window.get_acctab()
+    window = wl.get_window(200, 300)

@@ -80,3 +80,10 @@ def cost_matrix(transition = 1, transversion = 2):
                     dists.append(short_dist[b1, b2])
             full_dist[idx1, idx2] = np.average(dists)
     return np.array(full_dist, dtype = np.float64)
+
+def id_matrix():
+    mat = np.ones((17,17))
+    for i in range(16):
+        mat[i,i] = 0
+    
+    return mat

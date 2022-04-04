@@ -215,9 +215,3 @@ class Window():
                 cons_tax.at[uq] = build_cons_tax(subtab)
         self.cons_mat = np.array(cons_mat)
         self.cons_tax = cons_tax
-        
-
-#%% test
-if __name__ == '__main__':
-    wl = WindowLoader('nematoda', '18s', 'nematoda_18s/out_dir', 'nematoda_18s/out_dir', 'nematoda_18s/tmp_dir', 'nematoda_18s/warn_dir')
-    window = wl.get_window(200, 300)

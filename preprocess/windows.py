@@ -117,7 +117,7 @@ class WindowLoader():
         if not self.dim_file is None:
             self.dims = tuple(pd.read_csv(self.dim_file, sep = '\t', header = None).iloc[0])
 
-        if not self.dim_file is None:
+        if not self.acc_file is None:
             with open(self.acc_file, 'r') as handle:
                 self.accs = handle.read().splitlines()
     

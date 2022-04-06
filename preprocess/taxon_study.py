@@ -72,7 +72,6 @@ class SuperCluster():
     
     def get_collapsed_data(self):
         # this method returns the matrix of unique sequences in each taxon
-        # TODO: collapse after building the matrix (in case of repeated sequences between taxons), remove repeats
         tax_collapsed = []
         seq_collapsed = []
         
@@ -81,7 +80,18 @@ class SuperCluster():
                 tax_collapsed.append(tax)
                 seq_collapsed.append(seq)
         
-        return tax_collapsed, np.array(seq_collapsed)
+        collapsed_data = np.array(seq_collapsed)
+        # collapse after building the matrix (in case of repeated sequences between taxons), remove repeats
+        post_collapsed_idx = windows.collapse_matrix(collapsed_data)
+        seq_postcollapsed = []
+        tax_postcollapsed = []
+        
+        for pci in post_collapsed_idx:
+            if len(pci) == 1:
+                idx = pci[0]
+                seq_postcollapsed.append(seq_collapsed[idx])
+                tax_postcollapsed.append(tax_collapsed[idx])
+        return tax_postcollapsed, np.array(seq_postcollapsed)
         
 
 class TaxCluster():

@@ -8,7 +8,6 @@ This script retrieves windows from a given data matrix and calculates entropy & 
 """
 
 #%% libraries
-from numba import njit
 import numpy as np
 import os
 import pandas as pd
@@ -94,11 +93,13 @@ def collapse_matrix(matrix, row_idx = None, col_idx = 0):
     return uniq_seqs
 
 def build_cons_tax(subtab):
-    cols = subtab.columns[1:]
+    # recieves a taxonomc subtable of all the integrants of a sequence cluster
+    cols = subtab.columns[1:] # drop accession column
     cons_tax = pd.Series(index=cols)
     for rk in cols:
         uniq_vals = subtab[rk].unique()
         if len(uniq_vals) == 1:
+            # if there are no conflicting taxonomies at the given rank (rk), assign it as the consensus taxon, elsewhere leave it empty
             cons_tax.at[rk] = uniq_vals[0]
     return cons_tax
 
@@ -186,8 +187,13 @@ class Window():
         self.row_thresh = row_thresh
         self.col_thresh = col_thresh
         
-        cols = filter_matrix(self.matrix, col_thresh, axis = 1)
-        rows = filter_matrix(self.matrix[:,cols], row_thresh, axis = 0)
+        # filter columns first
+        # cols = filter_matrix(self.matrix, col_thresh, axis = 1)
+        # rows = filter_matrix(self.matrix[:,cols], row_thresh, axis = 0)
+        
+        # fitler rows first
+        rows = filter_matrix(self.matrix, row_thresh, axis = 0)
+        cols = filter_matrix(self.matrix[rows], col_thresh, axis = 1)
 
         window = self.matrix[rows][:, cols]
         self.min_seqs = window.shape[0] * (1-col_thresh)
@@ -225,15 +231,16 @@ class Window():
         # this builds a matrix and taxid_table with unique sequences
         # in the case of repeated sequences, a consensus taxonomy is built, conflicting ranks are left blank
         cons_mat = []
-        cols = self.acc_tab.columns[1:]
-        reps = list(self.reps.keys())
+        cols = self.acc_tab.columns[1:] # drop the accession column
+        reps = list(self.reps.keys()) # representatives of each cluster
         cons_tax = pd.DataFrame(index = reps, columns = cols)
         
         for uq in reps:
-            cons_mat.append(self.window[uq])
+            cons_mat.append(self.window[uq]) # append representative to the consensus matrix
             if len(self.reps[uq]) == 1:
-                cons_tax.at[uq] = self.acc_tab.loc[uq]
+                cons_tax.at[uq] = self.acc_tab.loc[uq] # add the representative's taxonomy to the consensus tab (if it is the only member of the group)
             else:
+                # build consensus taxonomy for all the integrants of the cluster
                 subtab = self.acc_tab.loc[self.reps[uq]]
                 cons_tax.at[uq] = build_cons_tax(subtab)
         self.cons_mat = np.array(cons_mat)

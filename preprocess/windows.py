@@ -14,9 +14,34 @@ import os
 import pandas as pd
 #%%
 # filter matrix
+def filter_matrix(matrix, thresh = 1, axis = 0):
+    # filter rows (axis = 0) or columns (axis = 1) according to a maximum number of empty values
+    n_lines = matrix.shape[axis]
+    n_places = matrix.shape[[1,0][axis]]
+    filtered_idx = []
+    max_empty = thresh * n_places
+
+    for idx in np.arange(n_lines):
+        if axis == 0:
+            line = matrix[idx, :]
+        else:
+            line = matrix[:, idx]
+
+        vals, counts = np.unique(line, return_counts = True)
+        if not 16 in vals:
+            filtered_idx.append(idx)
+            continue
+        empty_idx = np.argwhere(vals == 16)
+        if counts[empty_idx] < max_empty:
+            filtered_idx.append(idx)
+    
+    return np.array(filtered_idx).astype(int)
+
 def filter_rows(matrix):
     # keeps the index of all non empty rows
     filtered_idx = []
+    n_rows, n_cols = matrix.shape
+
     for idx, row in enumerate(matrix):
         vals, counts = np.unique(row, return_counts = True)
         if len(vals) == 1 and vals[0] == 16:
@@ -125,7 +150,7 @@ class WindowLoader():
         if not self.mat_file is None:
             self.matrix = np.memmap(self.mat_file, dtype = np.int64, mode = 'r', shape = self.dims)
     
-    def get_window(self, wstart, wend, thresh = 0.2):
+    def get_window(self, wstart, wend, row_thresh = 0.2, col_thresh = 0.2):
         self.window = np.empty(0)
         self.rows = []
         
@@ -138,7 +163,7 @@ class WindowLoader():
 
         window = np.array(self.matrix[:, wstart:wend])
         # Windows are handled as a different class
-        out_window = Window(window, wstart, wend, thresh, self)
+        out_window = Window(window, wstart, wend, row_thresh, col_thresh, self)
         return out_window
     
     def load_acctab(self, row_list):
@@ -147,37 +172,35 @@ class WindowLoader():
         return tab.loc[filtered_accs].reset_index()
 
 class Window():
-    def __init__(self, matrix, wstart, wend, thresh = 0.2, loader = None):
+    def __init__(self, matrix, wstart, wend, row_thresh = 0.2, col_thresh = 0.2, loader = None):
         self.matrix = matrix
         self.wstart = wstart
         self.wend = wend
         self.width = wend - wstart
         self.loader = loader
         self.shape = (0,0)
-        self.__preproc_window()
-        self.process_window(thresh)
+        self.process_window(row_thresh, col_thresh)
     
-    def __preproc_window(self):
-        rows = filter_rows(self.matrix)
-        self.rows = rows
-    
-    def process_window(self, thresh):
+    def process_window(self, row_thresh, col_thresh):
         # run this method every time you want to change the column threshold
-        if type(thresh) is not float:
-            return
-        if 0 >= thresh > 1:
-            return
-        self.thresh = thresh
-        window = self.matrix[self.rows]
-        self.min_seqs = window.shape[0] * (1-thresh)
-        cols = filter_cols(window, self.thresh)
-        self.window = window[:, cols]
+        self.row_thresh = row_thresh
+        self.col_thresh = col_thresh
+        
+        cols = filter_matrix(self.matrix, col_thresh, axis = 1)
+        rows = filter_matrix(self.matrix[:,cols], row_thresh, axis = 0)
+
+        window = self.matrix[rows][:, cols]
+        self.min_seqs = window.shape[0] * (1-col_thresh)
+        self.min_sites = window.shape[1] * (1-row_thresh)
         self.cols = cols
-        self.shape = self.window.shape
+        self.rows = rows
+        self.shape = window.shape
+        self.window = window
         self.get_acctab()
         # collapse windows
         self.uniques = collapse_matrix(self.window) # Collapse the window, this is a list of OF LISTS of the indexes of unique sequences
         self.get_reps()
+        self.build_cons_mat()
     
     def get_acctab(self):
         # load the accession table for the current window (depends on the window loader existing)

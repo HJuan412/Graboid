@@ -230,6 +230,7 @@ class Window():
     def build_cons_mat(self):
         # this builds a matrix and taxid_table with unique sequences
         # in the case of repeated sequences, a consensus taxonomy is built, conflicting ranks are left blank
+        # TODO: conflicting data should be left as ambiguous members of the last unconflicted rank
         cons_mat = []
         cols = self.acc_tab.columns[1:] # drop the accession column
         reps = list(self.reps.keys()) # representatives of each cluster

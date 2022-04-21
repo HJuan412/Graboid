@@ -122,8 +122,8 @@ class Selector():
         self.generate_diff_tab()
         self.rank = None
         # default selection is all the sites and sequences
-        self.selected_sites = np.arange(matrix.shape[0])
-        self.selected_seqs = np.arange(matrix.shape[1])
+        self.selected_sites = np.arange(matrix.shape[1])
+        self.selected_seqs = np.arange(matrix.shape[0])
     
     def set_rank(self, rank):
         self.rank = rank

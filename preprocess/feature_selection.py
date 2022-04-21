@@ -113,3 +113,64 @@ def plot_gain(table, rank, criterium = 'diff'):
         ax.bar(x, data)
     
     ax.margins(x = 0.05, y = 0.01)
+
+#%%
+class Selector():
+    def __init__(self, matrix, tax):
+        self.matrix = matrix
+        self.tax = tax
+        self.generate_diff_tab()
+        self.rank = None
+        # default selection is all the sites and sequences
+        self.selected_sites = np.arange(matrix.shape[0])
+        self.selected_seqs = np.arange(matrix.shape[1])
+    
+    def set_rank(self, rank):
+        self.rank = rank
+
+    def generate_diff_tab(self):
+        # Get the entropy difference for each base/taxon/rank
+        general_entropy = get_matrix_entropy(self.matrix)
+        p_tax_ent = per_tax_entropy(self.matrix, self.tax)
+        p_tax_ent = p_tax_ent.loc[p_tax_ent.index.notnull()]
+        diff_tab = p_tax_ent.iloc[:,:-1] - general_entropy
+        diff_tab['rank'] = p_tax_ent['rank']
+        
+        self.diff_tab = diff_tab
+    
+    def select_sites(self, nsites):
+        # get the nsites more informative sites per taxon for the current rank
+        # should run this after select_taxons
+        selected = set()
+        sub_tab = self.diff_tab.loc[self.diff_tab['rank'] == f'{self.rank}_id'].drop('rank', axis = 1)
+        for tax, row in sub_tab.iterrows():
+            sorted_diff = row.sort_values(ascending = False).index.tolist()
+            selected.update(sorted_diff[:nsites])
+        self.selected_sites = selected
+    
+    def select_taxons(self, ntaxes=None, minseqs=None, thresh=None):
+        # ntaxes: select the ntaxes most populated taxons
+        # minseqs (int): select all taxes with more than minseqs sequences
+        # thresh (float): select taxes representing more than thresh percent of the total
+        # get the sequences corresponding to the m most populated taxons
+        rank_col = self.tax[self.rank]
+        tax_counts = rank_col.value_counts(ascending = False)
+        
+        # can use different criteria for selecting taxons
+        if not ntaxes is None:
+            selected = tax_counts.iloc[:ntaxes]
+        elif not minseqs is None:
+            selected = tax_counts.loc[tax_counts >= minseqs]
+        elif not thresh is None:
+            seq_thresh = len(rank_col) * thresh
+            selected = tax_counts.loc[tax_counts >= seq_thresh]
+        
+        selected_tax = selected.index.to_numpy()
+        selected_idx = np.argwhere(rank_col.isin(selected_tax).values)
+        self.selected_tax = selected_tax
+        self.selected_seqs = selected_idx
+    
+    def get_training_data(self):
+        selected_matrix = self.matrix[self.selected_seqs, self.selected_sites]
+        selected_tax = self.tax.iloc[self.selected_seqs]
+        return selected_matrix, selected_tax

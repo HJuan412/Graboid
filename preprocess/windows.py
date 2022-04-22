@@ -96,11 +96,12 @@ def build_cons_tax(subtab):
     # recieves a taxonomc subtable of all the integrants of a sequence cluster
     cols = subtab.columns[1:] # drop accession column
     cons_tax = pd.Series(index=cols)
-    for rk in cols:
+    for idx, rk in enumerate(cols):
         uniq_vals = subtab[rk].unique()
         if len(uniq_vals) == 1:
-            # if there are no conflicting taxonomies at the given rank (rk), assign it as the consensus taxon, elsewhere leave it empty
-            cons_tax.at[rk] = uniq_vals[0]
+            # if there are no conflicting taxonomies at the given rank (rk), assign it as the consensus taxon
+            # set the lower values as the current unconflicting taxon
+            cons_tax.iloc[idx:] = uniq_vals[0]
     return cons_tax
 
 #%% classes
@@ -230,7 +231,6 @@ class Window():
     def build_cons_mat(self):
         # this builds a matrix and taxid_table with unique sequences
         # in the case of repeated sequences, a consensus taxonomy is built, conflicting ranks are left blank
-        # TODO: conflicting data should be left as ambiguous members of the last unconflicted rank
         cons_mat = []
         cols = self.acc_tab.columns[1:] # drop the accession column
         reps = list(self.reps.keys()) # representatives of each cluster

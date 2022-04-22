@@ -153,7 +153,7 @@ class Selector():
         for tax, row in sub_tab.iterrows():
             sorted_diff = row.sort_values(ascending = False).index.tolist()
             selected.update(sorted_diff[:nsites])
-        self.selected_sites = np.array(list(selected))
+        self.selected_sites = np.array(list(selected), dtype = int)
     
     def select_taxons(self, ntaxes=None, minseqs=None, thresh=None):
         # ntaxes: select the ntaxes most populated taxons
@@ -174,8 +174,8 @@ class Selector():
         
         selected_tax = selected.index.to_numpy()
         selected_idx = np.argwhere(rank_col.isin(selected_tax).values).flatten()
-        self.selected_tax = selected_tax
-        self.selected_seqs = selected_idx
+        self.selected_tax = selected_tax.astype(int)
+        self.selected_seqs = selected_idx.astype(int)
     
     def get_training_data(self):
         selected_matrix = self.matrix[self.selected_seqs][:,self.selected_sites]

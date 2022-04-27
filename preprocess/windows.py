@@ -252,7 +252,7 @@ class Window():
         self.window = window
         self.get_taxtab()
         # collapse windows
-        self.cons_mat, self.cons_tax = collapse(self.window, self.acc_tab)
+        self.cons_mat, self.cons_tax = collapse(self.window, self.tax_tab)
 
     def get_taxtab(self):
         # load the accession table for the current window (depends on the window loader existing)

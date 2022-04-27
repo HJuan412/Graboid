@@ -8,6 +8,7 @@ This script retrieves windows from a given data matrix and calculates entropy & 
 """
 
 #%% libraries
+import numba as nb
 import numpy as np
 import os
 import pandas as pd
@@ -66,36 +67,55 @@ def filter_cols(matrix, thresh = 0.2):
     return filtered_idx
 
 # collapse unique rows
+#%%
+@nb.njit
+def get_slice(arr, idx):
+    # this function slices a 2d array in numba (numba can't handle regular slicing)
+    n = len(idx)
+    k = arr[0].shape[0]
+    sliced = np.zeros((n,k), dtype = np.int32)
+
+    for iidx, i in enumerate(idx):
+        sliced[iidx] = arr[i]
+
+    return sliced
+
+@nb.njit
 def get_val_idx(col):
     # get the indexes for each unique value in the column
     col_values = np.unique(col)
-    val_idxs = [np.argwhere(col == value) for value in col_values]
-    return val_idxs
+    col_values = col_values[col_values != 16]
+    missing = np.argwhere(col == 16).flatten()
+    indexes = []
+    for value in col_values:
+        val_idxs = np.argwhere(col == value).flatten()
+        indexes.append(np.concatenate((val_idxs, missing)))
+    return indexes
 
-def collapse_matrix(matrix, row_idx = None, col_idx = 0):
+@nb.njit
+def get_effective_seqs(matrix=np.array([[]]), row_idx=None, col_idx=0):
     # returns a list of indexes from each cluster of unique sequences
     # set initial rows
     if row_idx is None:
         row_idx = np.arange(matrix.shape[0])
-    
-    uniq_seqs = []
-    sub_mat = matrix[row_idx]
+    uniq_seqs = [[0]] # this is used to define the datatype (lists of integers) to be used in uniq_seqs (keeps numba from bitching)
+    sub_mat = get_slice(matrix, row_idx)
     uniq_val_idxs = get_val_idx(sub_mat[:, col_idx])
-
+    
     for val_idx in uniq_val_idxs:
         row_idx1 = row_idx[val_idx].flatten()
         # stop conditions: last column reached or only one row remaining
         if len(row_idx1) == 1 or col_idx + 1 == matrix.shape[1]:
             uniq_seqs.append(list(row_idx1))
             continue
-        uniq_seqs += collapse_matrix(matrix, row_idx1, col_idx + 1)
+        uniq_seqs += get_effective_seqs(matrix, row_idx1, col_idx + 1)
     
-    return uniq_seqs
+    return uniq_seqs[1:] # slice result to omit the initial 0 when defining uniq_seqs
 
 def build_cons_tax(subtab):
     # recieves a taxonomc subtable of all the integrants of a sequence cluster
     cols = subtab.columns[1:] # drop accession column
-    cons_tax = pd.Series(index=cols)
+    cons_tax = pd.Series(index=cols, dtype = int)
     for idx, rk in enumerate(cols):
         uniq_vals = subtab[rk].unique()
         if len(uniq_vals) == 1:
@@ -103,6 +123,33 @@ def build_cons_tax(subtab):
             # set the lower values as the current unconflicting taxon
             cons_tax.iloc[idx:] = uniq_vals[0]
     return cons_tax
+
+def get_reps(array):
+    # generates a dictionary of representatives for each cluster of effective sequences
+    reps = {}
+    for uq in array:
+        if len(uq) == 1:
+            reps[uq[0]] = uq
+        else:
+            reps[uq[0]] = uq
+    return reps
+
+def collapse(matrix, tax_tab):
+    # directs construction of the collapsed matrix and taxonomy table
+    effective_seqs = get_effective_seqs(matrix)
+    reps = get_reps(effective_seqs)
+    collapsed_mat = matrix[list(reps.keys())]
+    collapsed_tax = pd.DataFrame(index = reps.keys(), columns = tax_tab.columns[1:], dtype = int)
+    
+    for rep, clust in reps.items():
+        if len(clust) == 1:
+            collapsed_tax.at[rep] = tax_tab.loc[rep] # add the representative's taxonomy to the consensus tab (if it is the only member of the group)
+        else:
+            # build consensus taxonomy for all the integrants of the cluster
+            subtab = tax_tab.loc[clust]
+            collapsed_tax.at[rep] = build_cons_tax(subtab)
+
+    return collapsed_mat, collapsed_tax.astype(int)
 
 #%% classes
 class WindowLoader():
@@ -203,46 +250,16 @@ class Window():
         self.rows = rows
         self.shape = window.shape
         self.window = window
-        self.get_acctab()
+        self.get_taxtab()
         # collapse windows
-        self.uniques = collapse_matrix(self.window) # Collapse the window, this is a list of OF LISTS of the indexes of unique sequences
-        self.get_reps()
-        self.build_cons_mat()
-    
-    def get_acctab(self):
+        self.cons_mat, self.cons_tax = collapse(self.window, self.acc_tab)
+
+    def get_taxtab(self):
         # load the accession table for the current window (depends on the window loader existing)
-        self.acc_tab = None
+        self.tax_tab = None
         if self.loader is None:
             return
-        self.acc_tab = self.loader.load_acctab(self.rows)
+        self.tax_tab = self.loader.load_acctab(self.rows)
     
     def get_col_idxs(self):
         return np.array(self.cols) + self.wstart
-    
-    def get_reps(self):
-        reps = {}
-        for uq in self.uniques:
-            if len(uq) == 1:
-                reps[uq[0]] = uq
-            else:
-                reps[uq[0]] = uq
-        self.reps = reps
-
-    def build_cons_mat(self):
-        # this builds a matrix and taxid_table with unique sequences
-        # in the case of repeated sequences, a consensus taxonomy is built, conflicting ranks are left blank
-        cons_mat = []
-        cols = self.acc_tab.columns[1:] # drop the accession column
-        reps = list(self.reps.keys()) # representatives of each cluster
-        cons_tax = pd.DataFrame(index = reps, columns = cols)
-        
-        for uq in reps:
-            cons_mat.append(self.window[uq]) # append representative to the consensus matrix
-            if len(self.reps[uq]) == 1:
-                cons_tax.at[uq] = self.acc_tab.loc[uq] # add the representative's taxonomy to the consensus tab (if it is the only member of the group)
-            else:
-                # build consensus taxonomy for all the integrants of the cluster
-                subtab = self.acc_tab.loc[self.reps[uq]]
-                cons_tax.at[uq] = build_cons_tax(subtab)
-        self.cons_mat = np.array(cons_mat)
-        self.cons_tax = cons_tax

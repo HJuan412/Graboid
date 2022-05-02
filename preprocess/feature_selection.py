@@ -9,15 +9,18 @@ Feature selection
 
 #%% modules
 import matplotlib.pyplot as plt
+import numba as nb
 import numpy as np
 import pandas as pd
 
 #%% functions - information quantification
+@nb.njit
 def get_entropy(array):
-    # entropy of a single array
-    valid_rows = array[np.argwhere(array != 16)]
+    valid_rows = array[np.argwhere(array != 16).flatten()]
     n_rows = len(valid_rows)
-    freqs = np.unique(valid_rows, return_counts = True)[1] / n_rows
+    values = np.unique(valid_rows)
+    counts = np.array([(valid_rows == val).sum() for val in values])
+    freqs = counts / n_rows
     return -np.sum(np.log2(freqs) * freqs)
 
 def get_matrix_entropy(matrix):

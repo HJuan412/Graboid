@@ -6,14 +6,18 @@ Created on Mon May  2 10:21:15 2022
 @author: hernan
 """
 #%% libraries
+import distance
+import numba as nb
 import numpy as np
 import pandas as pd
 
 #%% functions
-def get_dists(q, data, dist_mat):
-    # TODO: get this function from distance module
-    # get this function from the distance module
-    pass
+@nb.njit
+def get_dists(query, data, dist_mat):
+    dist = np.zeros(data.shape[0])
+    for idx, ref in enumerate(data):
+        dist[idx] = distance.calc_distance(query, ref, dist_mat)
+    return dist
 
 def get_neighs(q, data, dist_mat):
     # get the neighbours to q sorted by distance

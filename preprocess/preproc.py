@@ -11,42 +11,80 @@ import sys
 sys.path.append('preprocess')
 sys.path.append('classif')
 #%% libraries
-import cost_matrix
-import windows
-import feature_selection as fsel
-import taxon_study as tstud
+from classif import cost_matrix
+from preprocess import windows
+from preprocess import feature_selection as fsel
+from preprocess import taxon_study as tstud
+import numpy as np
+import pandas as pd
+import time
 #%%
 taxon = 'nematoda'
 marker = '18s'
-in_dir = 'nematoda_18s/out_dir'
-out_dir = 'nematoda_18s/out_dir'
-tmp_dir = 'nematoda_18s/tmp_dir'
-warn_dir = 'nematoda_18s/warn_dir'
+in_dir = '/home/hernan/PROYECTOS/nematoda_18s/out_dir'
+out_dir = '/home/hernan/PROYECTOS/nematoda_18s/out_dir'
+tmp_dir = '/home/hernan/PROYECTOS/nematoda_18s/tmp_dir'
+warn_dir = '/home/hernan/PROYECTOS/nematoda_18s/warn_dir'
 
-w_start = 200
-w_end = 400
+max_pos = 1730
+w_len = 200
 row_thresh = 0.2
-col_thresh = 0.5
+col_thresh = 0.2
 
 cost_mat = cost_matrix.cost_matrix()
 id_mat = cost_matrix.id_matrix()
 
+#%% cycle trough rank and windows
+step = 15
+
+rang = np.arange(0, max_pos - w_len, step)
+if rang[-1] < max_pos - w_len:
+    np.append(rang, max_pos - w_len)
+ranks = ('phylum', 'class', 'order', 'family', 'genus', 'species')
 if __name__ == '__main__':
     # generate window
     wl = windows.WindowLoader(taxon, marker, in_dir, out_dir, tmp_dir, warn_dir)
     # TODO: handle warning when window doesn't pass one of the thresholds
-    window = wl.get_window(w_start, w_end, row_thresh, col_thresh)
-    window.build_cons_mat() # builds a matrix without repeated seqs and a consensus tax_table (cons_mat, cons_tax)
-    
-    # select attributes
-    gain_tab = fsel.get_gain(window.cons_mat, window.cons_tax)
-    diff_tab = fsel.get_ent_diff(window.cons_mat, window.cons_tax)
-    
-    gain_selected = fsel.select_features(gain_tab, 'family', 15, 'gain')
-    diff_selected = fsel.select_features(diff_tab, 'family', 10, 'diff')
+    for w_start in rang:
+        w_end = w_start + w_len
+        window = wl.get_window(w_start, w_end, row_thresh, col_thresh)
+        
+        for rank in ranks:
+            # select attributes
+            if len(window.cons_mat > 1):
+                selector = fsel.Selector(window.cons_mat, window.cons_tax)
+                selector.set_rank(rank)
+                
+                selector.select_taxons(minseqs = 10)
+                selector.generate_diff_tab()
+                selector.select_sites(10)
+                t_mat, t_tax = selector.get_training_data()
+                
+                if len(t_mat) > 1:
+                    super_c = tstud.SuperCluster(t_mat, t_tax, rank)
+                    col_tax, col_mat = super_c.get_collapsed_data()
 
-    gain_train = fsel.build_training_data(window.cons_mat, gain_selected)
-    diff_train = fsel.build_training_data(window.cons_mat, diff_selected)
-    
-    super_c = tstud.SuperCluster(diff_train, window.cons_tax, 'family')
-    col_tax, col_mat = super_c.get_collapsed_data()
+#%% single execution
+w_start = 250
+rank = 'family'
+if __name__ == '__main__':
+    # generate window
+    wl = windows.WindowLoader(taxon, marker, in_dir, out_dir, tmp_dir, warn_dir)
+    # TODO: handle warning when window doesn't pass one of the thresholds
+    w_end = w_start + w_len
+    # pre collapse happens in window construction
+    window = wl.get_window(w_start, w_end, row_thresh, col_thresh)
+    # select attributes
+    if len(window.cons_mat > 1):
+        selector = fsel.Selector(window.cons_mat, window.cons_tax)
+        selector.set_rank(rank)
+        
+        selector.select_taxons(minseqs = 10)
+        selector.generate_diff_tab()
+        selector.select_sites(10)
+        t_mat, t_tax = selector.get_training_data()
+        # post collapse, generates the final data matrix and taxonomy table
+        x, y = windows.collapse(t_mat, t_tax.reset_index())
+        if len(t_mat) > 1:
+            super_c = tstud.SuperCluster(t_mat, t_tax, rank)
+            col_tax, col_mat = super_c.get_collapsed_data()

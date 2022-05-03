@@ -6,7 +6,7 @@ Created on Mon May  2 10:21:15 2022
 @author: hernan
 """
 #%% libraries
-import distance
+from . import distance
 import numba as nb
 import numpy as np
 import pandas as pd

@@ -183,6 +183,23 @@ def get_effective_seqs_3(matrix):
                 repeated.add(idx1 + idx0 + 1)
     effective_seqs = np.array(list(seqs.difference(repeated)))
     return effective_seqs
+
+def get_effective_clusters(matrix):
+    # cluster all rows with no differences in the KNOWN (!= 16) sequence
+    eff_clusts = {}
+    unassigned = np.arange(matrix.shape[0])
+    while len(unassigned) > 0:
+        rep = unassigned[0]
+        members = []
+        to_remove = []
+        for idx0, (idx1, seq) in enumerate(zip(unassigned, matrix[unassigned])):
+            if get_ident(rep, seq):
+                members.append(idx1)
+                to_remove.append(idx0)
+        eff_clusts[rep] = members
+        unassigned = np.delete(unassigned, to_remove)
+    return eff_clusts
+
 #%% classes
 class WindowLoader():
     def __init__(self, taxon, marker, in_dir, out_dir, tmp_dir, warn_dir):

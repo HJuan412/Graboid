@@ -12,6 +12,7 @@ import numba as nb
 import numpy as np
 import os
 import pandas as pd
+from classif import cost_matrix
 #%%
 # filter matrix
 def filter_matrix(matrix, thresh = 1, axis = 0):
@@ -111,7 +112,9 @@ def get_effective_seqs(matrix=np.array([[]]), row_idx=None, col_idx=0):
         uniq_seqs += get_effective_seqs(matrix, row_idx1, col_idx + 1)
     
     return uniq_seqs[1:] # slice result to omit the initial 0 when defining uniq_seqs
-
+# run the function to pre-compile it
+TEST = np.array([[1,2,3],[1,2,3],[1,2,4]])
+get_effective_seqs(TEST)
 def build_cons_tax(subtab):
     # recieves a taxonomc subtable of all the integrants of a sequence cluster
     cols = subtab.columns[1:] # drop accession column
@@ -151,6 +154,35 @@ def collapse(matrix, tax_tab):
 
     return collapsed_mat, collapsed_tax.astype(int)
 
+#%% new function to get effective seqs better, stronger faster
+ID_MAT = cost_matrix.id_matrix()
+ID_MAT[-1]=0
+ID_MAT[:,-1]=0
+@nb.njit
+def get_ident(seq0, seq1):
+    # similar to the calc_distance function but interrupts itself at the first difference
+    for site0, site1 in zip(seq0, seq1):
+        if ID_MAT[site0, site1] > 0:
+            return False
+    return True
+
+def get_effective_seqs_3(matrix):
+    # uses the numba get_ident function for distance calculation
+    # removes clustered sequences from the search
+    seqs = set(np.arange(matrix.shape[0]))
+    repeated = set()
+    for idx0, seq0 in enumerate(matrix):
+        if idx0 in repeated:
+            continue
+        for idx1, seq1 in enumerate(matrix[idx0+1:]):
+            if (idx1 + idx0 + 1) in repeated:
+                continue
+            ident = get_ident(seq0, seq1)
+            if ident:
+                repeated.add(idx0)
+                repeated.add(idx1 + idx0 + 1)
+    effective_seqs = np.array(list(seqs.difference(repeated)))
+    return effective_seqs
 #%% classes
 class WindowLoader():
     def __init__(self, taxon, marker, in_dir, out_dir, tmp_dir, warn_dir):
@@ -242,7 +274,6 @@ class Window():
         # fitler rows first
         rows = filter_matrix(self.matrix, row_thresh, axis = 0)
         cols = filter_matrix(self.matrix[rows], col_thresh, axis = 1)
-
         window = self.matrix[rows][:, cols]
         self.min_seqs = window.shape[0] * (1-col_thresh)
         self.min_sites = window.shape[1] * (1-row_thresh)

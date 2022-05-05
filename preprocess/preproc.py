@@ -72,6 +72,13 @@ if __name__ == '__main__':
     wl = windows.WindowLoader(taxon, marker, in_dir, out_dir, tmp_dir, warn_dir)
     # TODO: handle warning when window doesn't pass one of the thresholds
     w_end = w_start + w_len
+    w0 = np.array(wl.matrix[:,w_start:w_end])
+    rows = windows.filter_matrix(w0, 0.2)
+    w1 = w0[rows]
+    cols = windows.filter_matrix(w1, 0.2, 1)
+    window = w1[:,cols]
+    effs = windows.get_effective_seqs(window)
+    #%%
     # pre collapse happens in window construction
     window = wl.get_window(w_start, w_end, row_thresh, col_thresh)
     # select attributes

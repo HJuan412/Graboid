@@ -8,6 +8,7 @@ This script retrieves windows from a given data matrix and calculates entropy & 
 """
 
 #%% libraries
+import copy
 import numba as nb
 import numpy as np
 import os
@@ -120,6 +121,7 @@ def get_effective_seqs(matrix=np.array([[]]), row_idx=None, col_idx=0):
 # run the function to pre-compile it
 TEST = np.array([[1,2,3],[1,2,3],[1,2,4]])
 get_effective_seqs(TEST)
+
 def build_cons_tax(subtab):
     # recieves a taxonomc subtable of all the integrants of a sequence cluster
     cols = subtab.columns[1:] # drop accession column
@@ -141,6 +143,47 @@ def get_reps(array):
         else:
             reps[uq[0]] = uq
     return reps
+
+def get_shared_seqs(reps_dict):
+    owners = {}
+    for rep, seqs in reps_dict.items():
+        for seq in seqs:
+            if seq in owners.keys():
+                owners[seq].append(rep)
+            else:
+                owners[seq] = [rep]
+    shared = {seq:owns for seq, owns in owners.items() if len(owns) > 1}
+    return shared
+
+def rename_reps(reps_dict, shared_seqs):
+    to_rename = shared_seqs.intersection(reps_dict.keys())
+    for rep in to_rename:
+        new_name = reps_dict[rep][0]
+        reps_dict[new_name] = reps_dict.pop(rep)
+
+def clear_reps(reps_dict, shared_dict):
+    clear_dict = copy.deepcopy(reps_dict)
+    for seq, owns in shared_dict.items():
+        for owner in owns:
+            clear_dict[owner].remove(seq)
+    clear_dict = {k:v for k,v in clear_dict.items() if len(v) > 0}
+    rename_reps(clear_dict, set(shared_dict.keys()))
+    return clear_dict
+
+def make_effective_seq(matrix, repidx=0):
+    # gets the effective sequence of a cluster, taking the known value over the unknown when possible
+    # all sites are unknown by default
+    effective_seq = np.ones(matrix.shape[1], dtype = int) * 16
+    # transpose the matrix to traverse each column as a row
+    for idx, row in enumerate(matrix.T):
+        vals = np.unique(row)
+        effective_seq[idx] = min(vals)
+        # contingency: more than one known value in the cluster (THIS SHOULD NEVER HAPPEN)
+        if len(vals) > 1:
+            if not 16 in vals:
+                print(f'{repidx} site {idx} is has conflicts')
+                effective_seq[idx] = -1
+    return effective_seq
 
 def collapse(matrix, tax_tab):
     # directs construction of the collapsed matrix and taxonomy table

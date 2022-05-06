@@ -201,13 +201,13 @@ def collapse(matrix, tax_tab):
     shared = get_shared_seqs(reps)
     clear = clear_reps(reps, shared)
     rename_reps(clear, set(shared.keys()))
-    
+
     effective_rows = []
     for rep, cluster in clear.items():
-        clear_submat = matrix[clear[cluster]]
+        clear_submat = matrix[cluster]
         effective_rows.append(make_effective_seq(clear_submat, rep))
     collapsed_mat = np.array(effective_rows)
-    collapsed_tax = pd.DataFrame(index = reps.keys(), columns = tax_tab.columns[1:], dtype = int)
+    collapsed_tax = pd.DataFrame(index = clear.keys(), columns = tax_tab.columns[1:], dtype = int)
     
     for rep, clust in clear.items():
         if len(clust) == 1:
@@ -216,7 +216,8 @@ def collapse(matrix, tax_tab):
             # build consensus taxonomy for all the integrants of the cluster
             subtab = tax_tab.loc[clust]
             collapsed_tax.at[rep] = build_cons_tax(subtab)
-
+    
+    collapsed_tax.reset_index(drop=True, inplace=True)
     return collapsed_mat, collapsed_tax.astype(int)
 
 #%% new function to get effective seqs better, stronger faster

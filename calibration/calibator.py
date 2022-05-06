@@ -15,6 +15,7 @@ import pandas as pd
 from classif import classification
 from classif import cost_matrix
 from preprocess import feature_selection as fsele
+from preprocess import preproc
 from preprocess import windows
 
 #%% functions
@@ -204,21 +205,19 @@ calibration_result = pd.DataFrame(columns=['rank',
                                            'precision',
                                            'recall',
                                            'F1_score'])
-
+start, end = w_coords[15]
 for start, end in w_coords[15:16] :
     print(f'Window {start} - {end}')
     window = loader.get_window(start, end, row_thresh, col_thresh)
     selector = fsele.Selector(window.cons_mat, window.cons_tax)
     selector.select_taxons(minseqs = min_seqs)
     selector.generate_diff_tab()
+    
     for k in k_range:
         print(f'\t{k} neighbours')
         for n_sites in site_range:
             print(f'\t\t{n_sites} sites')
-            selector.select_sites(n_sites)
-            t_mat, t_tax = selector.get_training_data('family')
-            # post collapse, generates the final data matrix and taxonomy table
-            x, y = windows.collapse(t_mat, t_tax.reset_index())
+            x,y, super_c = preproc.preprocess(window, row_thresh=0.2, col_trhesh=0.2, minseqs=min_seqs, nsites=n_sites)
 
             loo_classif = pd.DataFrame(columns = y.columns)
             # iterate trough the data

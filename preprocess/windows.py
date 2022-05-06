@@ -145,6 +145,7 @@ def get_reps(array):
     return reps
 
 def get_shared_seqs(reps_dict):
+    # generates a dictionary with shared sequences and their respective owners
     owners = {}
     for rep, seqs in reps_dict.items():
         for seq in seqs:
@@ -155,13 +156,8 @@ def get_shared_seqs(reps_dict):
     shared = {seq:owns for seq, owns in owners.items() if len(owns) > 1}
     return shared
 
-def rename_reps(reps_dict, shared_seqs):
-    to_rename = shared_seqs.intersection(reps_dict.keys())
-    for rep in to_rename:
-        new_name = reps_dict[rep][0]
-        reps_dict[new_name] = reps_dict.pop(rep)
-
 def clear_reps(reps_dict, shared_dict):
+    # uses the reps and shared dicts to remove shared sequences
     clear_dict = copy.deepcopy(reps_dict)
     for seq, owns in shared_dict.items():
         for owner in owns:
@@ -170,11 +166,24 @@ def clear_reps(reps_dict, shared_dict):
     rename_reps(clear_dict, set(shared_dict.keys()))
     return clear_dict
 
+def rename_reps(reps_dict, shared_seqs):
+    # use this on the clear_dict, shared_seqs is a set of the shared_dict keys
+    # if a given cluster's representative is a shared sequence, replace it with another sequence from the cluster
+    to_rename = shared_seqs.intersection(reps_dict.keys())
+    for rep in to_rename:
+        new_name = reps_dict[rep][0]
+        reps_dict[new_name] = reps_dict.pop(rep)
+
 def make_effective_seq(matrix, repidx=0):
     # gets the effective sequence of a cluster, taking the known value over the unknown when possible
     # all sites are unknown by default
     effective_seq = np.ones(matrix.shape[1], dtype = int) * 16
     # transpose the matrix to traverse each column as a row
+    if matrix.shape[0] == 1:
+        # single row in matrix, effective_seq already known
+        effective_seq = matrix[0]
+        return effective_seq
+
     for idx, row in enumerate(matrix.T):
         vals = np.unique(row)
         effective_seq[idx] = min(vals)
@@ -189,10 +198,18 @@ def collapse(matrix, tax_tab):
     # directs construction of the collapsed matrix and taxonomy table
     effective_seqs = get_effective_seqs(matrix)
     reps = get_reps(effective_seqs)
-    collapsed_mat = matrix[list(reps.keys())]
+    shared = get_shared_seqs(reps)
+    clear = clear_reps(reps, shared)
+    rename_reps(clear, set(shared.keys()))
+    
+    effective_rows = []
+    for rep, cluster in clear.items():
+        clear_submat = matrix[clear[cluster]]
+        effective_rows.append(make_effective_seq(clear_submat, rep))
+    collapsed_mat = np.array(effective_rows)
     collapsed_tax = pd.DataFrame(index = reps.keys(), columns = tax_tab.columns[1:], dtype = int)
     
-    for rep, clust in reps.items():
+    for rep, clust in clear.items():
         if len(clust) == 1:
             collapsed_tax.at[rep] = tax_tab.loc[rep] # add the representative's taxonomy to the consensus tab (if it is the only member of the group)
         else:

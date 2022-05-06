@@ -86,11 +86,16 @@ def get_val_idx(col):
     # get the indexes for each unique value in the column
     col_values = np.unique(col)
     col_values = col_values[col_values != 16]
+    # generate at least one index array (this step is needed for the case in shich the entire column is unknown)
+    n_values = range(max(1, len(col_values)))
+    indexes = [np.empty(0, dtype = np.int64) for val in n_values]
+    # every index array will include the indexes of the missing values
     missing = np.argwhere(col == 16).flatten()
-    indexes = []
-    for value in col_values:
+    for idx, value in enumerate(col_values):
         val_idxs = np.argwhere(col == value).flatten()
-        indexes.append(np.concatenate((val_idxs, missing)))
+        indexes[idx] = val_idxs
+    for idx, index in enumerate(indexes):
+        indexes[idx] = np.concatenate((index, missing))
     return indexes
 
 @nb.njit

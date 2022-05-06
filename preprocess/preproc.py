@@ -18,18 +18,14 @@ from preprocess import taxon_study as tstud
 import numpy as np
 
 #%% functions
-def preprocess(window, row_thresh=0.2, col_trhesh=0.2, minseqs=5, nsites=10, rank='genus'):
+def preprocess(selector, row_thresh=0.2, col_trhesh=0.2, minseqs=5, nsites=10, rank='genus'):
     # select attributes
-    if len(window.cons_mat > 1):
-        selector = fsel.Selector(window.cons_mat, window.cons_tax)
-        selector.select_taxons(minseqs=minseqs)
-        selector.generate_diff_tab()
-        selector.select_sites(nsites)
-        t_mat, t_tax = selector.get_training_data(rank)
-        # post collapse, generates the final data matrix and taxonomy table
-        x, y = windows.collapse(t_mat, t_tax.reset_index())
-        if len(t_mat) > 1:
-            super_c = tstud.SuperCluster(x, y, rank)
+    selector.select_sites(nsites)
+    t_mat, t_tax = selector.get_training_data(rank)
+    # post collapse, generates the final data matrix and taxonomy table
+    x, y = windows.collapse(t_mat, t_tax.reset_index())
+    if len(t_mat) > 1:
+        super_c = tstud.SuperCluster(x, y, rank)
     return x, y, super_c
 
 #%%

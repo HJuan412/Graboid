@@ -57,6 +57,20 @@ def get_rowcol(mat, idx):
     return np.concatenate((col, row))
 
 #%% classes
+class clust_iterator():
+    def __init__(self, cluster):
+        self._cluster = cluster
+        self._tax_list = cluster.tax_list
+        self._index = 0
+    
+    def __next__(self):
+        if self._index < len(self._tax_list):
+            tax = self._tax_list[self._index]
+            result = self._cluster[tax]
+            self._index += 1
+            return result
+        raise StopIteration
+
 class SuperCluster():
     # This class contains all the taxon clusters of selected data
     def __init__(self, matrix, tax_tab, rank, dist_matrix = cost):
@@ -95,7 +109,9 @@ class SuperCluster():
                 seq_postcollapsed.append(seq_collapsed[idx])
                 tax_postcollapsed.append(tax_collapsed[idx])
         return tax_postcollapsed, np.array(seq_postcollapsed)
-        
+    
+    def __iter__(self):
+        return clust_iterator(self)
 
 class TaxCluster():
     # this class holds the sequences of a unique taxon

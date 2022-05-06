@@ -65,6 +65,9 @@ class SuperCluster():
         self.centroid_dists = get_paired_dists(self.centroids, dist_matrix)
         self.get_collisions()
     
+    def __getitem__(self, item):
+        return self.clusters[item]
+
     def get_collisions(self):
         collisions = np.argwhere(self.centroid_dists == 0)
         collisions = collisions[np.argwhere(collisions[:,0]<collisions[:,1])].reshape((-1,2))

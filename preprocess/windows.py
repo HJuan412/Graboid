@@ -116,7 +116,6 @@ def get_effective_seqs(matrix=np.array([[]]), row_idx=None, col_idx=0):
             uniq_seqs.append(list(row_idx1))
             continue
         uniq_seqs += get_effective_seqs(matrix, row_idx1, col_idx + 1)
-    
     return uniq_seqs[1:] # slice result to omit the initial 0 when defining uniq_seqs
 # run the function to pre-compile it
 TEST = np.array([[1,2,3],[1,2,3],[1,2,4]])
@@ -265,7 +264,118 @@ def get_effective_clusters(matrix):
         eff_clusts[rep] = members
         unassigned = np.delete(unassigned, to_remove)
     return eff_clusts
+#%%
+SH_MAT = np.zeros((17,17), dtype = int)
+SH_MAT[-1,:-1] = -1
+SH_MAT[:-1,-1] = 1
+# build roadmap
+def build_roadmap(matrix):
+    # build a map of the positions of each value in each column of the matrix
+    roadmap = []
+    for col in matrix.T:
+        col_vals = {val:[] for val in np.unique(col)}
+        for idx, val in enumerate(col):
+            col_vals[val].append(idx)
+        col_vals = {k:set(v) for k,v in col_vals.items()}
+        roadmap.append(col_vals)
+    return roadmap
 
+# build nodes
+# should start with idxs as set(np.arange(matrix.shape[0]))
+def build_nodes(seq=[], idxs=set(), roadmap=[]):
+    if len(roadmap) == 0:
+        return [seq], [idxs]
+    total_seqs = []
+    total_idxs = []
+    col_vals = roadmap[0]
+    for val, val_idxs in col_vals.items():
+        overlap = idxs.intersection(val_idxs) # if set is empty there is no overlap
+        if len(overlap) == 0:
+            continue
+        new_seq = seq + [val]
+        branch_seqs, branch_idxs = build_nodes(new_seq, overlap, roadmap[1:])
+        total_seqs += branch_seqs
+        total_idxs += branch_idxs
+    return total_seqs, total_idxs
+
+def collapse_0(matrix):
+    # collapse identical sequences and keep their indexes
+    roadmap = build_roadmap(matrix)
+    init_idxs = set(np.arange(matrix.shape[0]))
+    effective_seqs, effective_idxs = build_nodes(idxs=init_idxs, roadmap=roadmap)
+    effs = np.array(effective_seqs)
+    effi = [list(ei) for ei in effective_idxs]
+    return effs, effi
+
+def get_ident_matrix(eff_seqs):
+    # build a matrix with the pairwise identity between the effective sequences
+    # 1 : sequences have the same identity
+    # 0 : sequences differ in at least one effective site
+    ident_mat = np.zeros((eff_seqs.shape[0], eff_seqs.shape[0]))
+    for idx0, seq0 in enumerate(eff_seqs):
+        for idx1, seq1 in enumerate(eff_seqs[idx0+1:]):
+            ident_mat[idx0, idx1+idx0+1] = get_ident(seq0, seq1)
+    return ident_mat
+
+def get_shscore(seq0, seq1):
+    # get the shared score between sequences with the same identity, keep the one with less missing data
+    # if shscore > 0 : seq0 is more complete than seq1
+    # if shscore < 0 : seq1 is more complete than seq0
+    # if shscore = 0 : seq1 and seq0 are equally complete but missing different sites
+    score = 0
+    for s0, s1 in zip(seq0, seq1):
+        score += SH_MAT[s0, s1]
+    # returns the index of the most incomplete sequence
+    # TODO: what happens if there is a draw?
+    return int(score > 0)
+
+def compare_ident(ident, matrix):
+    # score the pairs of sequences with identity, keep the most complete one in each case
+    pairs = np.argwhere(ident == 1)
+    scores = np.zeros(pairs.shape[0], dtype = int)
+    for idx, pair in enumerate(pairs):
+        seq0 = matrix[pair[0]]
+        seq1 = matrix[pair[1]]
+        scores[idx] = get_shscore(seq0, seq1)
+    return pairs, scores
+
+def get_winners(nseqs, pairs, scores):
+    # return the indexes of the winners (sequences to keep)
+    # losers (sequences to drop) are repeated sequences with more missing data
+    winners = np.arange(nseqs, dtype = int)
+    losers = np.zeros(len(pairs), dtype = int)
+    for idx, (pair, sc) in enumerate(zip(pairs, scores)):
+        losers[idx] = pair[sc]
+    losers = np.unique(losers)
+    winners = np.delete(winners, losers)
+    return winners
+
+def crop_effectives(effective_seqs, effective_idxs):
+    # remove redundant sequences from the effective sequences cluster
+    ident = get_ident_matrix(effective_seqs)
+    pairs, scores = compare_ident(ident, effective_seqs)
+    winners = get_winners(len(effective_seqs), pairs, scores)
+    cropped_seqs = effective_seqs[winners]
+    cropped_idxs = [effective_idxs[wn] for wn in winners]
+    return cropped_seqs, cropped_idxs
+
+def collapse_1(matrix, tax_tab):
+    # directs construction of the collapsed matrix and taxonomy table
+    effective_seqs, effective_idxs = collapse_0(matrix)
+    cropped_seqs, cropped_idxs = crop_effectives(effective_seqs, effective_idxs)
+
+    collapsed_tax = pd.DataFrame(index = np.arange(len(cropped_idxs)), columns = tax_tab.columns[1:], dtype = int)
+    
+    for idx, clust in enumerate(cropped_idxs):
+        if len(clust) == 1:
+            collapsed_tax.at[idx] = tax_tab.loc[clust] # add the representative's taxonomy to the consensus tab (if it is the only member of the group)
+        else:
+            # build consensus taxonomy for all the integrants of the cluster
+            subtab = tax_tab.loc[clust]
+            collapsed_tax.at[idx] = build_cons_tax(subtab)
+    
+    collapsed_tax.reset_index(drop=True, inplace=True)
+    return cropped_seqs, collapsed_tax.astype(int)
 #%% classes
 class WindowLoader():
     def __init__(self, taxon, marker, in_dir, out_dir, tmp_dir, warn_dir):

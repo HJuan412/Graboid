@@ -368,7 +368,7 @@ def collapse_1(matrix, tax_tab):
     
     for idx, clust in enumerate(cropped_idxs):
         if len(clust) == 1:
-            collapsed_tax.at[idx] = tax_tab.loc[clust] # add the representative's taxonomy to the consensus tab (if it is the only member of the group)
+            collapsed_tax.at[idx] = tax_tab.loc[clust[0]] # add the representative's taxonomy to the consensus tab (if it is the only member of the group)
         else:
             # build consensus taxonomy for all the integrants of the cluster
             subtab = tax_tab.loc[clust]
@@ -460,23 +460,21 @@ class Window():
         self.row_thresh = row_thresh
         self.col_thresh = col_thresh
         
-        # filter columns first
-        # cols = filter_matrix(self.matrix, col_thresh, axis = 1)
-        # rows = filter_matrix(self.matrix[:,cols], row_thresh, axis = 0)
-        
         # fitler rows first
         rows = filter_matrix(self.matrix, row_thresh, axis = 0)
         cols = filter_matrix(self.matrix[rows], col_thresh, axis = 1)
         window = self.matrix[rows][:, cols]
-        self.min_seqs = window.shape[0] * (1-col_thresh)
-        self.min_sites = window.shape[1] * (1-row_thresh)
+        # TODO: delete these 2 attrs (fool)
+        # self.min_seqs = window.shape[0] * (1-col_thresh)
+        # self.min_sites = window.shape[1] * (1-row_thresh)
         self.cols = cols
         self.rows = rows
         self.shape = window.shape
         self.window = window
         self.get_taxtab()
         # collapse windows
-        self.cons_mat, self.cons_tax = collapse(self.window, self.tax_tab)
+        # self.cons_mat, self.cons_tax = collapse(self.window, self.tax_tab)
+        self.cons_mat, self.cons_tax = collapse_1(self.window, self.tax_tab)
 
     def get_taxtab(self):
         # load the accession table for the current window (depends on the window loader existing)

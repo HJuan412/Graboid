@@ -23,7 +23,8 @@ def preprocess(selector, row_thresh=0.2, col_trhesh=0.2, minseqs=5, nsites=10, r
     selector.select_sites(nsites)
     t_mat, t_tax = selector.get_training_data(rank)
     # post collapse, generates the final data matrix and taxonomy table
-    x, y = windows.collapse(t_mat, t_tax.reset_index())
+    x, y = windows.collapse_1(t_mat, t_tax.reset_index())
+    super_c = None
     if len(t_mat) > 1:
         super_c = tstud.SuperCluster(x, y, rank)
     return x, y, super_c

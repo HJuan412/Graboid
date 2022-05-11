@@ -80,7 +80,7 @@ def classify(q, k, data, tax_tab, dist_mat, q_name=0, mode='majority', support_f
     
     # generate the result tables
     if mode == 'majority':
-        results = classify_majority(neighs, tax_tab)
+        results = classify_majority(neighs, tax_tab, dist_mat)
         results['total_K'] = k
     elif mode == 'weighted':
         supports = support_func(dists)
@@ -92,7 +92,7 @@ def classify_majority(neighs, tax_tab, dist_mat):
     result_tab = pd.DataFrame(columns = ['query', 'rank', 'taxon', 'K', 'total_K'])
     
     sub_tax = tax_tab.iloc[neighs]
-    for rank in tax_tab.columns():
+    for rank in tax_tab.columns:
         # count reperesentatives of each taxon amongst the k neighbours
         tax_counts = sub_tax[rank].value_counts(ascending = False)
         # select winners as those with the maximum detected number of neighbours
@@ -100,10 +100,10 @@ def classify_majority(neighs, tax_tab, dist_mat):
         max_val = tax_counts.max()
         winners = tax_counts.loc[tax_counts == max_val].index
         for wn in winners:
-            row = pd.DataFrame.from_dict({'rank':rank,
-                                          'taxon':wn,
-                                          'K':max_val})
-            result_tab = pd.concat([result_tab, row], ignore_index=True)
+            row = pd.Series({'rank':rank,
+                             'taxon':wn,
+                             'K':max_val})
+            result_tab = result_tab.append(row, ignore_index=True)
     return result_tab
 
 def classify_weighted(neighs, supports, tax_tab):

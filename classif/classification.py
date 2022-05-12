@@ -88,6 +88,44 @@ def classify(q, k, data, tax_tab, dist_mat, q_name=0, mode='majority', support_f
     results['query'] = q_name
     return results
 
+def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0, mode='majority', support_func=wknn):
+    # classification function used in calibration, generates a prediction for multiple values of K
+    # q : query sequence
+    # k_range : possible numbers of neighbours
+    # data : reference sequences
+    # tax_tab : reference taxonomy table
+    # dist_mat : distance matrix to be used
+    # q_name : name of the query (defaults to 0)
+    # mode : "majority" for majority vote or "weighted" for distance weighted
+    # support_func : wknn or dwknn, used to calculate neighbour support in "weighted" mode
+    # classification director, handles distance & support calculation, & neighbour selection
+    # k defaults to all neighbours (this kills the majority vote)
+    
+    # TODO: use multiple queries, q is a 2d array, q_name is an array/list
+
+    # TODO: make it so that it can use multiple classification criteria (majority/weighted + wknn/weighted + dwknn) in a single run
+    # TODO: (cont) should return a list of result tables or a single table?
+    
+    results = []
+    # get the data
+    neighs, dists = get_neighs(q, data, dist_mat)
+    
+    # generate the result tables
+    # iterate trough the values of k in k_range, generate a result for each
+    for k in k_range:
+        k_neighs = neighs[:k]
+        k_dists = dists[:k]
+        if mode == 'majority':
+            k_results = classify_majority(k_neighs, tax_tab, dist_mat)
+            k_results['total_K'] = k
+        elif mode == 'weighted':
+            supports = support_func(k_dists)
+            k_results = classify_majority(k_neighs, supports, tax_tab)
+        k_results['query'] = q_name
+        results.append(k_results)
+
+    return results
+
 def classify_majority(neighs, tax_tab, dist_mat):
     result_tab = pd.DataFrame(columns = ['query', 'rank', 'taxon', 'K', 'total_K'])
     

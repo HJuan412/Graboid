@@ -120,7 +120,7 @@ def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0, mode='ma
             k_results['total_K'] = k
         elif mode == 'weighted':
             supports = support_func(k_dists)
-            k_results = classify_majority(k_neighs, supports, tax_tab)
+            k_results = classify_weighted(k_neighs, supports, tax_tab)
         k_results['query'] = q_name
         results.append(k_results)
 
@@ -148,19 +148,20 @@ def classify_weighted(neighs, supports, tax_tab):
     result_tab = pd.DataFrame(columns = ['query', 'rank', 'taxon', 'K', 'support', 'mean_support', 'std_support'])
 
     sub_tax = tax_tab.iloc[neighs]
-    for rank in tax_tab.columns():
+    for rank in tax_tab.columns:
         rank_tab = pd.DataFrame(columns = ['query', 'rank', 'taxon', 'K', 'support', 'mean_support', 'std_support'])
         taxes = sub_tax[rank].unique()
         for tax in taxes:
             # calculate the total, mean and std support of each represented taxon 
-            tax_neighs = np.argwhere(sub_tax[rank] == tax)
+            tax_neighs = np.argwhere(sub_tax[rank].to_numpy() == tax)
             tax_supports = supports[tax_neighs]
-            row = pd.DataFrame.from_dict({'rank':rank,
-                                          'taxon':tax,
-                                          'K':len(tax_neighs),
-                                          'support':tax_supports.sum(),
-                                          'mean_support':tax_supports.mean(),
-                                          'std_support':tax_supports.std()})
+            row = pd.DataFrame({'rank':rank,
+                                'taxon':tax,
+                                'K':len(tax_neighs),
+                                'support':tax_supports.sum(),
+                                'mean_support':tax_supports.mean(),
+                                'std_support':tax_supports.std()},
+                               index = [0])
             rank_tab = pd.concat([rank_tab, row], ignore_index=True)
         result_tab = pd.concat([result_tab, rank_tab], ignore_index=True)
     

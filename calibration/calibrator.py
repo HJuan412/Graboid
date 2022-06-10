@@ -100,7 +100,7 @@ def build_cal_tab(pred_tax, real_tax, n_ranks=6):
         results.append(rank_metrics)
     return np.concatenate(results)
 
-def loo_calibrate(garrus, w_size, w_step, max_k, step_k, max_sites, step_sites, dist_mat, break_pt=3):
+def loo_calibrate(garrus, w_size, w_step, max_k, step_k, max_sites, step_sites, dist_mat):
     # set calibration parameters & initialize results table    
     # set coordinate ranges for the sliding windows
     max_pos = garrus.loader.dims[1]
@@ -130,15 +130,18 @@ def loo_calibrate(garrus, w_size, w_step, max_k, step_k, max_sites, step_sites, 
     
     # begin calibration
     for idx, (start, end) in enumerate(w_coords):
+        print(f'Window {start} - {end}')
         # extract window and select atributes
         window = garrus.loader.get_window(start, end, garrus.row_thresh, garrus.col_thresh)
         
+        # TODO: tune up selector
         selector = fsele.Selector(window.cons_mat, window.cons_tax)
         selector.select_taxons(minseqs = garrus.min_seqs)
         selector.generate_diff_tab()
         
         # preprocess
         for n_sites in site_range:
+            print(f'\t{n_sites} sites')
             # post collapse, generates the final data matrix and taxonomy table
             x,y, super_c = preproc.preprocess(selector, garrus.row_thresh, garrus.col_thresh, minseqs=min_seqs, nsites=n_sites)
             
@@ -520,6 +523,6 @@ def run(taxon, marker):
 
     t0 = time.time()
     cal = Calibrator(taxon, marker, in_dir, out_dir, tmp_dir, warn_dir)
-    results = cal.loo_calibrate3(w_size, w_step, max_k, step_k, max_sites, step_sites, dist_mat)
+    results = loo_calibrate(cal, w_size, w_step, max_k, step_k, max_sites, step_sites, dist_mat)
     t1 = time.time()
     return t1 - t0, results

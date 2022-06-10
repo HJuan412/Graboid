@@ -99,7 +99,138 @@ def build_cal_tab(pred_tax, real_tax, n_ranks=6):
         rank_metrics = np.insert(rank_metrics, 0, rank, axis=1)
         results.append(rank_metrics)
     return np.concatenate(results)
+
+def loo_calibrate(garrus, w_size, w_step, max_k, step_k, max_sites, step_sites, dist_mat, break_pt=3):
+    # set calibration parameters & initialize results table    
+    # set coordinate ranges for the sliding windows
+    max_pos = garrus.loader.dims[1]
+    start_range = np.arange(0, max_pos - w_size, w_step)
+    if start_range[-1] < max_pos - w_size:
+        # add a tail window, if needed, to cover the entire sequence
+        np.append(start_range, max_pos - w_size)
+    end_range = start_range + w_size
+    w_coords = np.array([start_range, end_range]).T
     
+    # k & sites ranges
+    k_range = np.arange(1, max_k, step_k)
+    site_range = np.arange(5, max_sites, step_sites)
+    
+    # set up results table
+    calibration_result = pd.DataFrame(columns=['rank',
+                                               'taxon',
+                                               'w_start',
+                                               'w_end',
+                                               'K',
+                                               'n_sites',
+                                               'accuracy',
+                                               'precision',
+                                               'recall',
+                                               'F1_score',
+                                               'mode']) # do all three modes in a single table
+    
+    # begin calibration
+    for idx, (start, end) in enumerate(w_coords):
+        # extract window and select atributes
+        window = garrus.loader.get_window(start, end, garrus.row_thresh, garrus.col_thresh)
+        
+        selector = fsele.Selector(window.cons_mat, window.cons_tax)
+        selector.select_taxons(minseqs = garrus.min_seqs)
+        selector.generate_diff_tab()
+        
+        # preprocess
+        for n_sites in site_range:
+            # post collapse, generates the final data matrix and taxonomy table
+            x,y, super_c = preproc.preprocess(selector, garrus.row_thresh, garrus.col_thresh, minseqs=min_seqs, nsites=n_sites)
+            
+            # loo_result tables are plain lists, later to be converted into np.arrays
+            # these store the classifications for each query
+            loo_maj = []
+            loo_wknn = []
+            loo_dwknn = []
+            
+            # iterate trought the data
+            idx_gen = loo_generator(x.shape[0])
+            n_seqs = x.shape[0]
+            quintile = int(n_seqs / 5)
+            
+            # outer loop
+            for train_idx, test_idx in idx_gen:
+                if len(train_idx) == 0:
+                    # no training sequences (only 1 sequence passed the filters)
+                    continue
+                if test_idx % quintile == 0:
+                    print(f'\t\tCalibrated {test_idx} of {n_seqs} ({(test_idx/n_seqs) * 100:.2f}%)')
+                
+                # build the datasets
+                query = x[test_idx]
+                train_data = x[train_idx]
+                train_tax = y.iloc[train_idx]
+                
+                # get classifications using each method
+                results_maj, results_wknn, results_dwknn = classification.calibration_classify(query, k_range, train_data, train_tax, dist_mat, q_name=test_idx)
+                
+                # update classification tables
+                for res_tab, loo_tab, mode in [(results_maj, loo_maj, 'majority'),
+                                                 (results_wknn, loo_wknn, 'weighted'),
+                                                 (results_dwknn, loo_dwknn, 'weighted')]:
+                    for k, tab in zip(k_range, res_tab):
+                        classif = classification.get_classif(tab, mode)
+                        classif = np.insert(classif, [0, len(classif)], [test_idx, k])
+                        loo_tab.append(classif)
+            
+            if len(loo_maj) == 0:
+                continue
+            
+            # convert classification tables into np.arrays
+            loo_maj = np.array(loo_maj)
+            loo_wknn = np.array(loo_wknn)
+            loo_dwknn = np.array(loo_dwknn)
+            
+            # get classification metrics
+            cal_res = []
+            # get metrics for each mode,K,n_sites combination
+            for mode, loo_tab in enumerate((loo_maj, loo_wknn, loo_dwknn)):
+                for k in k_range:
+                    # select the results submatrix for the current K and get the metrics for each rank
+                    k_submat = loo_tab[loo_tab[:,-1] == k]
+                    cal_tab = build_cal_tab(k_submat, y)
+                    # add remaining columns
+                    cal_tab = np.insert(cal_tab, 2, start, axis=1)
+                    cal_tab = np.insert(cal_tab, 3, end, axis=1)
+                    cal_tab = np.insert(cal_tab, 4, k, axis=1)
+                    cal_tab = np.insert(cal_tab, 5, n_sites, axis=1)
+                    cal_tab = np.append(cal_tab, np.ones((len(cal_tab), 1))*mode, axis=1)
+                    cal_res.append(cal_tab)
+            
+            # build results subtable
+            cal_res = np.concatenate(cal_res)
+            cal_res_tab = pd.DataFrame(cal_res, columns=['rank',
+                                                            'taxon',
+                                                            'w_start',
+                                                            'w_end',
+                                                            'K',
+                                                            'n_sites',
+                                                            'accuracy',
+                                                            'precision',
+                                                            'recall',
+                                                            'F1_score',
+                                                            'mode'])
+            # translate numeric codes
+            cal_res_tab['rank'].replace({0:'phylum',
+                                         1:'class',
+                                         2:'order',
+                                         3:'family',
+                                         4:'genus',
+                                         5:'species'},
+                                        inplace=True)
+            cal_res_tab['mode'].replace({0:'maj',
+                                         1:'wknn',
+                                         2:'dwknn'},
+                                        inplace=True)
+            
+            # update results table
+            calibration_result = pd.concat([calibration_result, cal_res_tab], ignore_index=True)
+    return calibration_result
 #%% classes
 class Calibrator():
     def __init__(self, taxon, marker, in_dir, out_dir, tmp_dir, warn_dir, row_thresh=0.2, col_thresh=0.2, min_seqs=10):
@@ -114,6 +245,7 @@ class Calibrator():
         self.col_thresh = col_thresh
         self.min_seqs = min_seqs
     
+    # TODO: leave this class as a data container, loo_calibrate should be an external function. Delete loo_calibrate methods
     # leave one out calibration
     def loo_calibrate(self, w_size, w_step, max_k, step_k, max_sites, step_sites, dist_mat, mode='majority', support_func=classification.wknn):
         # set up parameter ranges
@@ -363,8 +495,6 @@ class Calibrator():
         return calibration_result
 
 #%%
-
-# def loo_calibrate(self, w_size, w_step, max_k, step_k, max_sites, step_sites, dist_mat, mode='majority', support_func=classification.wknn):
 w_size = 200
 w_step = 15
 max_k = 15
@@ -393,111 +523,3 @@ def run(taxon, marker):
     results = cal.loo_calibrate3(w_size, w_step, max_k, step_k, max_sites, step_sites, dist_mat)
     t1 = time.time()
     return t1 - t0, results
-
-def run2():
-    cal = Calibrator(taxon, marker, in_dir, out_dir, tmp_dir, warn_dir)
-    results = cal.loo_calibrate2(w_size, w_step, max_k, step_k, max_sites, step_sites, dist_mat)
-    return results
-# params = run()
-#%%
-# TODO: delete this cell
-if __name__ == '__main__':
-    # sped up version:
-        # make n_sites the outer loop : collapse calls go from len(range(nsites)) * len(range(k)) to just len(range(nsites))
-        # for each inst, calculate distances ONCE and predict for all k's in a single pass
-    taxon = 'nematoda'
-    marker = '18s'
-    in_dir = '/home/hernan/PROYECTOS/nematoda_18s/out_dir'
-    out_dir = '/home/hernan/PROYECTOS/nematoda_18s/out_dir'
-    tmp_dir = '/home/hernan/PROYECTOS/nematoda_18s/tmp_dir'
-    warn_dir = '/home/hernan/PROYECTOS/nematoda_18s/warn_dir'
-
-    loader = windows.WindowLoader(taxon, marker, in_dir, out_dir, tmp_dir, warn_dir)
-    # set up parameter ranges
-    # window coordinates
-    max_pos = loader.dims[1]
-    start_range = np.arange(0, max_pos - w_size, w_step)
-    if start_range[-1] < max_pos - w_size:
-        # add a tail window, if needed, to cover the entire sequence
-        np.append(start_range, max_pos - w_size)
-    end_range = start_range + w_size
-    w_coords = np.array([start_range, end_range]).T
-
-    # k & sites ranges
-    k_range = np.arange(1, max_k, step_k)
-    site_range = np.arange(5, max_sites, step_sites)
-    
-    # begin calibration
-    calibration_result = pd.DataFrame(columns=['rank',
-                                               'taxon',
-                                               'w_start',
-                                               'w_end',
-                                               'K',
-                                               'n_sites',
-                                               'accuracy',
-                                               'precision',
-                                               'recall',
-                                               'F1_score'])
-    calibration_maj = calibration_result.copy()
-    calibration_wknn = calibration_result.copy()
-    calibration_dwknn = calibration_result.copy()
-
-    for idx, (start, end) in enumerate(w_coords[10:]):
-        print(f'Window {start} - {end}')
-        window = loader.get_window(start, end, row_thresh, col_thresh)
-        if len(window.cons_mat) == 0:
-            continue
-        selector = fsele.Selector(window.cons_mat, window.cons_tax)
-        selector.select_taxons(minseqs = min_seqs)
-        selector.generate_diff_tab()
-        
-        # flip loops (n_sites is the outer loop)
-        for n_sites in site_range:
-            # post collapse, generates the final data matrix and taxonomy table
-            x,y, super_c = preproc.preprocess(selector, row_thresh, col_thresh, minseqs=min_seqs, nsites=n_sites)
-            print(f'\t{n_sites} sites')
-            loo_classif = pd.DataFrame(columns = y.columns)
-            loo_classif['K'] = 0
-            
-            loo_maj = loo_classif.copy()
-            loo_wknn = loo_classif.copy()
-            loo_dwknn = loo_classif.copy()
-            # iterate trough the data
-            if x.shape[1] == 0:
-                continue
-            
-            idx_gen = loo_generator(x.shape[0])
-            row_idx = 0
-            n_seqs = x.shape[0]
-            quintile = int(n_seqs / 5)
-            for train_idx, test_idx in idx_gen:
-                if test_idx % quintile == 0:
-                    print(f'\t\tCalibrated {test_idx} of {n_seqs} ({(test_idx/n_seqs) * 100:.2f}%)')
-                query = x[test_idx]
-                train_data = x[train_idx]
-                train_tax = y.iloc[train_idx]
-
-                results_maj = classification.calibration_classify(query, k_range, train_data, train_tax, dist_mat, q_name=test_idx, mode='majority', support_func=None)
-                results_wknn = classification.calibration_classify(query, k_range, train_data, train_tax, dist_mat, q_name=test_idx, mode='weighted', support_func=classification.wknn)
-                results_dwknn = classification.calibration_classify(query, k_range, train_data, train_tax, dist_mat, q_name=test_idx, mode='weighted', support_func=classification.dwknn)
-
-                for res_tab, loo_tab, mode in [(results_maj, loo_maj, 'majority'),
-                                                 (results_wknn, loo_wknn, 'weighted'),
-                                                 (results_dwknn, loo_dwknn, 'weighted')]:
-                    for k, tab in zip(k_range, res_tab):
-                        classif = classification.get_classif(tab, mode)
-                        classif['K'] = k
-                        loo_tab.at[row_idx] = classif
-                        row_idx += 1
-            
-            for loo_tab, result_tab in [(loo_maj, calibration_maj),
-                                        (loo_wknn, calibration_wknn),
-                                        (loo_dwknn, calibration_dwknn)]:
-                for k, subtab in loo_tab.groupby('K'):
-                    calib_tab = build_cal_tab(subtab, y)
-                    calib_tab['w_start'] = start
-                    calib_tab['w_end'] = end
-                    calib_tab['K'] = k
-                    calib_tab['n_sites'] = n_sites
-                    result_tab = pd.concat([result_tab, calib_tab], ignore_index=True)
-        break

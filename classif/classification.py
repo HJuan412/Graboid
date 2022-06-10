@@ -183,13 +183,21 @@ def get_classif(results, mode='majority'):
     elif mode == 'weighted':
         return get_classif_weighted(results)
 
-def get_classif_majoriy(results):
+def get_classif_majoriy(results, n_ranks=6):
+    # get single classification for each rank from the results table
+    # n_ranks 6 by default (phylum, class, order, family, genus, species), could be modifyed to include less/more (should be done automatically)
     # for each rank, assigned taxon is the most populated (if there is a draw), classification is left None
-    classif = pd.Series()
-    for rank, rk_tab in results.groupby('rank'):
-        classif[rank] = None
-        if rk_tab.shape[0] == 1:
-            classif[rank] = rk_tab['taxon'].iloc[0]
+    
+    # initalize classification array
+    classif = np.empty(n_ranks)
+    classif[:] = np.NaN
+    # get classification for each rank
+    for rank in np.unique(results[:,1]):
+        # only classify if it is unambiguous, if there are multiple winners for the current taxon, classification is left empty
+        rank_mat = results[results[:,1] == rank]
+        if rank_mat.shape[0] == 1:
+            classif[rank] = rank_mat[0,2]
+    
     return classif
 
 def get_classif_weighted(results):

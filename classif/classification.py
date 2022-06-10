@@ -200,9 +200,21 @@ def get_classif_majoriy(results, n_ranks=6):
     
     return classif
 
-def get_classif_weighted(results):
+def get_classif_weighted(results, n_ranks=6):
+    # get single classification for each rank from the weighted results table
     # classification is based on highest total support
-    classif = pd.Series()
-    for rank, rk_tab in results.groupby('rank'):
-        classif[rank] = rk_tab.sort_values('support', ascending=False)['taxon'].iloc[0]
+    # n_ranks 6 by default (phylum, class, order, family, genus, species), could be modifyed to include less/more (should be done automatically)
+    
+    # initialize classification array
+    classif = np.empty(n_ranks)
+    classif[:] = np.NaN
+    # get classification for each rank
+    for rank in np.unique(results[:,1].astype(int)):
+        rank_mat = results[results[:,1] == rank]
+        # classification is assigned to the taxon with the highest support
+        # if classification is ambiguous leave it empty
+        max_supp = rank_mat[:, 5].max()
+        winner = rank_mat[rank_mat[:,5] == max_supp]
+        if winner.shape[0] == 1:
+            classif[rank] = winner[0,2]
     return classif

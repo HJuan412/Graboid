@@ -127,7 +127,6 @@ def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0, mode='ma
     return results
 
 def classify_majority(neighs, tax_tab, dist_mat, q_name=0, total_k=1):
-    # classify the query for each rank
     # neighs: list of neighbours to consider in the classification
     # tax_tab: taxonomic dataframe of the training set
     # TODO: can remove dist_mat?
@@ -136,9 +135,9 @@ def classify_majority(neighs, tax_tab, dist_mat, q_name=0, total_k=1):
     # q_name: query name
     # total_k: k neighbours considered
     
+    result = []
     # select neighbour taxonomies
     sub_tax = tax_tab.iloc[neighs].to_numpy().T
-    result = []
     for rank, row in enumerate(sub_tax):
         # count reperesentatives of each taxon amongst the k neighbours
         taxs, counts = np.unique(row, return_counts = True)
@@ -150,28 +149,33 @@ def classify_majority(neighs, tax_tab, dist_mat, q_name=0, total_k=1):
             result.append([q_name, rank, taxs[winn][0], max_val, total_k])
     return np.array(result)
 
-def classify_weighted(neighs, supports, tax_tab):
-    result_tab = pd.DataFrame(columns = ['query', 'rank', 'taxon', 'K', 'support', 'mean_support', 'std_support'])
-
-    sub_tax = tax_tab.iloc[neighs]
-    for rank in tax_tab.columns:
-        rank_tab = pd.DataFrame(columns = ['query', 'rank', 'taxon', 'K', 'support', 'mean_support', 'std_support'])
-        taxes = sub_tax[rank].unique()
-        for tax in taxes:
-            # calculate the total, mean and std support of each represented taxon 
-            tax_neighs = np.argwhere(sub_tax[rank].to_numpy() == tax)
-            tax_supports = supports[tax_neighs]
-            row = pd.DataFrame({'rank':rank,
-                                'taxon':tax,
-                                'K':len(tax_neighs),
-                                'support':tax_supports.sum(),
-                                'mean_support':tax_supports.mean(),
-                                'std_support':tax_supports.std()},
-                               index = [0])
-            rank_tab = pd.concat([rank_tab, row], ignore_index=True)
-        result_tab = pd.concat([result_tab, rank_tab], ignore_index=True)
+def classify_weighted(neighs, supports, tax_tab, q_name=0, total_k=1):
+    # neighs: list of neighbours to consider in the classification
+    # tax_tab: taxonomic dataframe of the training set
+    # dist_mat: unused
+    # TODO: these too could be handled outside the function
+    # q_name: query name
+    # total_k: k neighbours considered
     
-    return result_tab
+    result = []
+    # select neighbour taxonomies
+    sub_tax = tax_tab.iloc[neighs].to_numpy().T
+    
+    for rank, row in enumerate(sub_tax):
+        taxes, counts = np.unique(row, return_counts=True)
+        for tax, count in zip(taxes, counts):
+            # calculate the total, mean and std support of each represented taxon 
+            tax_supports = supports[row == tax]
+            report = [q_name,
+                      rank,
+                      tax,
+                      count,
+                      total_k,
+                      tax_supports.sum(),
+                      tax_supports.mean(),
+                      tax_supports.std()]
+            result.append(report)
+    return np.array(result)
 
 def get_classif(results, mode='majority'):
     # reads the classification table, used to generate the confusion table during

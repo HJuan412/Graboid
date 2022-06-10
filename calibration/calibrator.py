@@ -115,22 +115,11 @@ def loo_calibrate(garrus, w_size, w_step, max_k, step_k, max_sites, step_sites, 
     k_range = np.arange(1, max_k, step_k)
     site_range = np.arange(5, max_sites, step_sites)
     
-    # set up results table
-    calibration_result = pd.DataFrame(columns=['rank',
-                                               'taxon',
-                                               'w_start',
-                                               'w_end',
-                                               'K',
-                                               'n_sites',
-                                               'accuracy',
-                                               'precision',
-                                               'recall',
-                                               'F1_score',
-                                               'mode']) # do all three modes in a single table
+    results = []
     
     # begin calibration
     for idx, (start, end) in enumerate(w_coords):
-        print(f'Window {start} - {end} ({idx + 1} of len(w_coords))')
+        print(f'Window {start} - {end} ({idx + 1} of {len(w_coords)})')
         # extract window and select atributes
         window = garrus.loader.get_window(start, end, garrus.row_thresh, garrus.col_thresh)
         if len(window.cons_mat) == 0:
@@ -206,34 +195,35 @@ def loo_calibrate(garrus, w_size, w_step, max_k, step_k, max_sites, step_sites, 
                     cal_tab = np.append(cal_tab, np.ones((len(cal_tab), 1))*mode, axis=1)
                     cal_res.append(cal_tab)
             
-            # build results subtable
+            # update results
             cal_res = np.concatenate(cal_res)
-            cal_res_tab = pd.DataFrame(cal_res, columns=['rank',
-                                                            'taxon',
-                                                            'w_start',
-                                                            'w_end',
-                                                            'K',
-                                                            'n_sites',
-                                                            'accuracy',
-                                                            'precision',
-                                                            'recall',
-                                                            'F1_score',
-                                                            'mode'])
-            # translate numeric codes
-            cal_res_tab['rank'].replace({0:'phylum',
-                                         1:'class',
-                                         2:'order',
-                                         3:'family',
-                                         4:'genus',
-                                         5:'species'},
-                                        inplace=True)
-            cal_res_tab['mode'].replace({0:'maj',
-                                         1:'wknn',
-                                         2:'dwknn'},
-                                        inplace=True)
-            
-            # update results table
-            calibration_result = pd.concat([calibration_result, cal_res_tab], ignore_index=True)
+            results.append(cal_res)
+    
+    # build results table
+    calibration_result = pd.DataFrame(np.concatenate(results),
+                                      columns=['rank',
+                                               'taxon',
+                                               'w_start',
+                                               'w_end',
+                                               'K',
+                                               'n_sites',
+                                               'accuracy',
+                                               'precision',
+                                               'recall',
+                                               'F1_score',
+                                               'mode']) # do all three modes in a single table
+    # translate numeric codes
+    calibration_result['rank'].replace({0:'phylum',
+                                        1:'class',
+                                        2:'order',
+                                        3:'family',
+                                        4:'genus',
+                                        5:'species'},
+                                       inplace=True)
+    calibration_result['mode'].replace({0:'maj',
+                                        1:'wknn',
+                                        2:'dwknn'},
+                                       inplace=True)
     return calibration_result
 #%% classes
 class Calibrator():

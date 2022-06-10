@@ -115,7 +115,7 @@ def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0):
         k_neighs = neighs[:k]
         k_dists = dists[:k]
         # calib majority
-        maj_results.append(classify_majority(k_neighs, tax_tab, dist_mat, q_name, k))
+        maj_results.append(classify_majority(k_neighs, tax_tab, q_name, k))
         # calib wknn
         supports_wknn = wknn(k_dists)
         wknn_results.append(classify_weighted(k_neighs, supports_wknn, tax_tab, q_name, k))
@@ -124,12 +124,9 @@ def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0):
         dwknn_results.append(classify_weighted(k_neighs, supports_dwknn, tax_tab, q_name, k))
     return maj_results, wknn_results, dwknn_results
 
-def classify_majority(neighs, tax_tab, dist_mat, q_name=0, total_k=1):
+def classify_majority(neighs, tax_tab, q_name=0, total_k=1):
     # neighs: list of neighbours to consider in the classification
     # tax_tab: taxonomic dataframe of the training set
-    # TODO: can remove dist_mat?
-    # dist_mat: unused
-    # TODO: these too could be handled outside the function
     # q_name: query name
     # total_k: k neighbours considered
     
@@ -151,7 +148,6 @@ def classify_weighted(neighs, supports, tax_tab, q_name=0, total_k=1):
     # neighs: list of neighbours to consider in the classification
     # tax_tab: taxonomic dataframe of the training set
     # dist_mat: unused
-    # TODO: these too could be handled outside the function
     # q_name: query name
     # total_k: k neighbours considered
     

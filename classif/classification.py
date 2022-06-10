@@ -88,7 +88,7 @@ def classify(q, k, data, tax_tab, dist_mat, q_name=0, mode='majority', support_f
     results['query'] = q_name
     return results
 
-def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0, mode='majority', support_func=wknn):
+def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0):
     # classification function used in calibration, generates a prediction for multiple values of K
     # q : query sequence
     # k_range : possible numbers of neighbours
@@ -96,18 +96,17 @@ def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0, mode='ma
     # tax_tab : reference taxonomy table
     # dist_mat : distance matrix to be used
     # q_name : name of the query (defaults to 0)
-    # mode : "majority" for majority vote or "weighted" for distance weighted
-    # support_func : wknn or dwknn, used to calculate neighbour support in "weighted" mode
+    
     # classification director, handles distance & support calculation, & neighbour selection
     # k defaults to all neighbours (this kills the majority vote)
     
     # TODO: use multiple queries, q is a 2d array, q_name is an array/list
+        
+    maj_results = []
+    wknn_results = []
+    dwknn_results = []
 
-    # TODO: make it so that it can use multiple classification criteria (majority/weighted + wknn/weighted + dwknn) in a single run
-    # TODO: (cont) should return a list of result tables or a single table?
-    
-    results = []
-    # get the data
+    # get distances and sorted neighbours
     neighs, dists = get_neighs(q, data, dist_mat)
     
     # generate the result tables
@@ -115,16 +114,15 @@ def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0, mode='ma
     for k in k_range:
         k_neighs = neighs[:k]
         k_dists = dists[:k]
-        if mode == 'majority':
-            k_results = classify_majority(k_neighs, tax_tab, dist_mat)
-            k_results['total_K'] = k
-        elif mode == 'weighted':
-            supports = support_func(k_dists)
-            k_results = classify_weighted(k_neighs, supports, tax_tab)
-        k_results['query'] = q_name
-        results.append(k_results)
-
-    return results
+        # calib majority
+        maj_results.append(classify_majority(k_neighs, tax_tab, dist_mat, q_name, k))
+        # calib wknn
+        supports_wknn = wknn(k_dists)
+        wknn_results.append(classify_weighted(k_neighs, supports_wknn, tax_tab, q_name, k))
+        # calib dwknn
+        supports_dwknn = dwknn(k_dists)
+        dwknn_results.append(classify_weighted(k_neighs, supports_dwknn, tax_tab, q_name, k))
+    return maj_results, wknn_results, dwknn_results
 
 def classify_majority(neighs, tax_tab, dist_mat, q_name=0, total_k=1):
     # neighs: list of neighbours to consider in the classification

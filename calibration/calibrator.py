@@ -133,7 +133,8 @@ def loo_calibrate(garrus, w_size, w_step, max_k, step_k, max_sites, step_sites, 
         print(f'Window {start} - {end}')
         # extract window and select atributes
         window = garrus.loader.get_window(start, end, garrus.row_thresh, garrus.col_thresh)
-        
+        if len(window.cons_mat) == 0:
+            continue
         # TODO: tune up selector
         selector = fsele.Selector(window.cons_mat, window.cons_tax)
         selector.select_taxons(minseqs = garrus.min_seqs)
@@ -524,5 +525,17 @@ def run(taxon, marker):
     t0 = time.time()
     cal = Calibrator(taxon, marker, in_dir, out_dir, tmp_dir, warn_dir)
     results = loo_calibrate(cal, w_size, w_step, max_k, step_k, max_sites, step_sites, dist_mat)
+    t1 = time.time()
+    return t1 - t0, results
+
+def run2(taxon, marker):
+    in_dir = f'{base_dir}/{taxon}_{marker}/out_dir'
+    out_dir = f'{base_dir}/{taxon}_{marker}/out_dir'
+    tmp_dir = f'{base_dir}/{taxon}_{marker}/tmp_dir'
+    warn_dir = f'{base_dir}/{taxon}_{marker}/warn_dir'
+
+    t0 = time.time()
+    cal = Calibrator(taxon, marker, in_dir, out_dir, tmp_dir, warn_dir)
+    results = cal.loo_calibrate3(w_size, w_step, max_k, step_k, max_sites, step_sites, dist_mat)
     t1 = time.time()
     return t1 - t0, results

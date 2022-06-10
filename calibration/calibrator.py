@@ -79,24 +79,20 @@ def build_confusion(pred, real):
             confusion.at[r,p] += 1
     return confusion
     
-def build_cal_tab(pred_tax, real_tax):
-    cal_tab = pd.DataFrame(columns=['rank',
-                                    'taxon',
-                                    'w_start',
-                                    'w_end',
-                                    'K',
-                                    'n_sites',
-                                    'accuracy',
-                                    'precision',
-                                    'recall',
-                                    'F1_score'])
+def build_cal_tab(pred_tax, real_tax, n_ranks=6):
+    # build the calibration table from the given results
     
-    for rank in real_tax.columns:
-        rank_confusion = build_confusion(pred_tax[rank].to_numpy(), real_tax[rank].to_numpy())
-        rank_metrics = get_metrics(rank_confusion)
-        rank_metrics['rank'] = rank
-        cal_tab = pd.concat([cal_tab, rank_metrics], ignore_index=True)
-    return cal_tab
+    results = []
+    # remove first(query name) and last (K) columns from predicted taxons
+    pred_cropped = pred_tax[:,1:-1]
+    
+    for rank in np.arange(n_ranks):
+        # build a confusion matrix and get results from there, update results table
+        rank_confusion, taxons = build_confusion(pred_cropped[:,rank], real_tax.iloc[:,rank].to_numpy())
+        rank_metrics = get_metrics(rank_confusion, taxons)
+        rank_metrics = np.insert(rank_metrics, 0, rank, axis=1)
+        results.append(rank_metrics)
+    return np.concatenate(results)
     
 #%% classes
 class Calibrator():

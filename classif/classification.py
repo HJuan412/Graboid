@@ -126,23 +126,29 @@ def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0, mode='ma
 
     return results
 
-def classify_majority(neighs, tax_tab, dist_mat):
-    result_tab = pd.DataFrame(columns = ['query', 'rank', 'taxon', 'K', 'total_K'])
+def classify_majority(neighs, tax_tab, dist_mat, q_name=0, total_k=1):
+    # classify the query for each rank
+    # neighs: list of neighbours to consider in the classification
+    # tax_tab: taxonomic dataframe of the training set
+    # TODO: can remove dist_mat?
+    # dist_mat: unused
+    # TODO: these too could be handled outside the function
+    # q_name: query name
+    # total_k: k neighbours considered
     
-    sub_tax = tax_tab.iloc[neighs]
-    for rank in tax_tab.columns:
+    # select neighbour taxonomies
+    sub_tax = tax_tab.iloc[neighs].to_numpy().T
+    result = []
+    for rank, row in enumerate(sub_tax):
         # count reperesentatives of each taxon amongst the k neighbours
-        tax_counts = sub_tax[rank].value_counts(ascending = False)
+        taxs, counts = np.unique(row, return_counts = True)
         # select winners as those with the maximum detected number of neighbours
         # this handles the eventuality of a draw
-        max_val = tax_counts.max()
-        winners = tax_counts.loc[tax_counts == max_val].index
-        for wn in winners:
-            row = pd.Series({'rank':rank,
-                             'taxon':wn,
-                             'K':max_val})
-            result_tab = result_tab.append(row, ignore_index=True)
-    return result_tab
+        max_val = np.max(counts)
+        winn_idx = np.argwhere(counts == max_val)
+        for winn in winn_idx:
+            result.append([q_name, rank, taxs[winn][0], max_val, total_k])
+    return np.array(result)
 
 def classify_weighted(neighs, supports, tax_tab):
     result_tab = pd.DataFrame(columns = ['query', 'rank', 'taxon', 'K', 'support', 'mean_support', 'std_support'])

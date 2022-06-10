@@ -130,7 +130,7 @@ def loo_calibrate(garrus, w_size, w_step, max_k, step_k, max_sites, step_sites, 
     
     # begin calibration
     for idx, (start, end) in enumerate(w_coords):
-        print(f'Window {start} - {end}')
+        print(f'Window {start} - {end} ({idx + 1} of len(w_coords))')
         # extract window and select atributes
         window = garrus.loader.get_window(start, end, garrus.row_thresh, garrus.col_thresh)
         if len(window.cons_mat) == 0:

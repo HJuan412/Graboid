@@ -70,17 +70,32 @@ def loo_generator(nrecs):
 
 def build_confusion(pred, real):
     # build the confusion matrix (for a given RANK)
+    # pred: array of PREDICTED taxon for each training sample
+    # pred: array of REAL taxon for each training sample
+
+    confusion = []
+    # rows: REAL taxons
+    # columns: PREDICTED taxons
+
+    # list & count taxes
     uniq_taxes = np.unique(real)
-    confusion = pd.DataFrame(data=0, index=uniq_taxes, columns=uniq_taxes, dtype=int)
-    for p,r in zip(pred, real):
-        # rows: real value
-        # cols: predicted value
-        if p in uniq_taxes:
-            confusion.at[r,p] += 1
-    return confusion
+    n_taxes = len(uniq_taxes)
+    
+    for tax in uniq_taxes:
+        pred_counts = np.zeros(n_taxes)
+        # from the predicted array, get those elements that SHOULD BE tax
+        real_pred = pred[real == tax]
+        rp, rp_count = np.unique(real_pred, return_counts  = True)
+        for idx, tax1 in enumerate(uniq_taxes):
+            tax_count = np.append(rp_count[rp == tax1], 0)
+            pred_counts[idx] += tax_count[0]
+        confusion.append(pred_counts)
+    # return taxon index as well as the confusion matrix
+    return np.array(confusion), uniq_taxes
     
 def build_cal_tab(pred_tax, real_tax, n_ranks=6):
     # build the calibration table from the given results
+    # n_ranks 6 by default (phylum, class, order, family, genus, species), could be modifyed to include less/more (should be done automatically)
     
     results = []
     # remove first(query name) and last (K) columns from predicted taxons

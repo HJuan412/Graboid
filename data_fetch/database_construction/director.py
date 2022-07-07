@@ -9,18 +9,15 @@ Director for database creation and updating
 
 #%% libraries
 from datetime import datetime
+import logging
 import os
+import shutil
 
 import surveyor as surv
 import lister as lstr
 import fetcher as ftch
 import taxonomist as txnm
 
-# TODO: these all go away
-# import db_surveyor as surv
-# import db_lister as lstr
-# import db_fetcher as ftch
-# import db_BOLD_postproc as bdpp
 import db_merger as mrgr
 
 import tax_director as txdr
@@ -130,45 +127,56 @@ class Director():
         print('Comparing and merging...')
         self.direct_merging()
 
-#TODO: once Director class is tested, remove this shit funcition
-def make_database(taxons, markers, bold, ena, ncbi, dirname = None):
-    # generate directories
-    if dirname is None:
-        summ_dir, seq_dir, tax_dir, acc_dir, warn_dir = new_directories()
-    else:
-        # TODO: en este caso, el directorio ya existe, qué hacer con archivos preexistentes?
-        summ_dir, seq_dir, tax_dir, acc_dir, warn_dir = generate_subdirnames(dirname)
-    
-    # TODO: handle old directory
-    # set email and api key
-    ftch.set_entrez()
-    
-    # select survey tools
-    t1, t2 = get_surv_tools(bold, ena, ncbi)
+#%%
+def setup_loggers(warn_dir):
+    # create logger
+    logger = logging.getLogger('database_logger')
+    logger.setLevel(logging.DEBUG)
+    # set handlers
+    warn_handler = logging.FileHandler(warn_dir)
+    warn_handler.setLevel(logging.WARNING)
+    log_handler = logging.StreamHandler()
+    log_handler.setLevel(logging.DEBUG)
+    # create formatter
+    fmtr = logging.Formatter('%(asctime) - %(levelname)s: %(message)s')
+    warn_handler.setFormatter(fmtr)
+    log_handler.setFormatter(fmtr)
+    # add handlers
+    logger.addHandler(warn_handler)
+    logger.addHandler(log_handler)
+    return logger
 
-    # instance classes
-    surveyor = surv.Surveyor(taxons, markers, t1, t2, summ_dir, warn_dir)
-    lister = lstr.Lister(summ_dir, acc_dir, warn_dir, old_accs)
-    fetcher = ftch.Fetcher(acc_dir, seq_dir, warn_dir)
-    bold_postprocessor = bdpp.BOLDPostProcessor(seq_dir, seq_dir, warn_dir)
-    merger = mrgr.Merger(seq_dir, seq_dir, warn_dir, db_order = ['NCBI', 'BOLD', 'ENA'])
+def fasta_name(fasta):
+    return fasta.split('/')[-1].split('.')[0]
+
+def move_file(file, dest, mv=False):
+    if mv:
+        shutil.move(file, dest)
+    else:
+        shutil.copy(file, dest)
     
+
+def main(seq_dir, tax_dir, tmp_dir, warn_dir, taxon=None, marker=None, databases=['NCBI'], fasta=None, mv = False):
+    logger = setup_loggers(warn_dir)
     
-    # Survey databases
-    print('Surveying databases...')
-    surveyor.survey()
-    # Build accession lists
-    print('Building accession lists...')
-    lister.build_lists()
-    # Reconstruct taxonomies
-    txdr.TaxDirector(tax_dir, summ_dir, acc_dir)
-    txdr.tax_reconstruct()
-    # # Fetch sequences
-    print('Fetching sequences...')
-    fetcher.fetch(chunk_size)
-    # # Postprocess BOLD data
-    print('Processing BOLD files...')
-    bold_postprocessor.process(markers)
-    # # Compare and merge
-    print('Comparing and merging...')
-    merger.merge()
+    if not fasta is None:
+        # input is fasta file
+        seq_path = f'{seq_dir}/{fasta_name(fasta)}.fasta'
+        tax_path = f'{tax_dir}/{fasta_name(fasta)}.csv'
+        # move or copy to out_dir/seqs/fasta
+        move_file(fasta, seq_path)
+        
+        # check that file is fasta (if not, warning and abort)
+        ## build acc_list -> save to tmp_dir
+        ## dl taxonomies -> save to out_dir/tax/csv
+    else:
+        # input is taxon, marker, databases
+        seq_path = f'{seq_dir}/{taxon}_{marker}.fasta'
+        tax_path = f'{tax_dir}/{taxon}_{marker}.csv'
+        # build accession lists
+        surv.build_acc_lists(taxon, marker, databases, tmp_dir)
+        ## dl sequences -> save to tmp_dir
+        ## postproc bold sequences -> save to tmp_dir
+        ## merge sequence files -> save to out_dir/seqs/fasta
+        ## dl taxonomies -> save to out_dir/tax/csv
+    pass

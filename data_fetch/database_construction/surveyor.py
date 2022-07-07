@@ -9,12 +9,16 @@ Created on Fri Oct 29 14:12:47 2021
 #%% libraries
 from Bio import Entrez
 import lister
+import logging
 import pandas as pd
 import urllib3
 
+#%% setup logger
+logger = logging.getLogger('database_logger.surveyor')
+
 #%% classes
 # survey tools
-class SurveyTool():
+class SurveyTool:
     # Template for Survey tool, each instance will handle a signle taxon - marker - database trio
     # Count download attempts and register success
     def __init__(self, taxon, marker, out_dir):
@@ -37,9 +41,9 @@ class SurveyTool():
         print(f'Surveying {dbase} for {self.taxon} {self.marker}')
         self.attempt_dl()
         if self.done:
-            print(f'Done getting summary from {dbase} in {self.attempt} attempts.')
+            self.logger.info(f'Done getting summary from {dbase} in {self.attempt} attempts.')
         else:
-            print(f'Failed to get summary from {dbase} after {ntries} attempts.')
+            self.logger.warning(f'Failed to get summary from {dbase} after {ntries} attempts.')
             self.warn = True
 
 class SurveyWAPI(SurveyTool):
@@ -64,12 +68,16 @@ class SurveyWAPI(SurveyTool):
             except:
                 # update attempt count
                 self.attempt += 1
+                self.logget.warning(f'Download interrupted, {self.ntries - self.attempt} remaining')
 
 # Specific survey tools
 # each of these uses a survey method to attempt to download a summary
 class SurveyBOLD(SurveyWAPI):
     # TODO: BOLD downloads take too long regardless of mode (summary or sequence), furthermore, the api used to build the summary doesn't allow filtering by marker
     # consider using the full data retrieval API
+    def get_logger(self):
+        self.logger = logging.getLogger('database_logger.surveyor.BOLD')
+    
     def get_dbase(self):
         return 'BOLD'
 
@@ -78,6 +86,8 @@ class SurveyBOLD(SurveyWAPI):
         return apiurl
 
 class SurveyENA(SurveyWAPI):
+    def get_logger(self):
+        self.logger = logging.getLogger('database_logger.surveyor.ENA')
     def get_dbase(self):
         return 'ENA'
 
@@ -87,6 +97,9 @@ class SurveyENA(SurveyWAPI):
 
 class SurveyNCBI(SurveyTool):
     # This surveyor uses the Entrez package instead of an API, defines its own survey method
+    def get_logger(self):
+        self.logger = logging.getLogger('database_logger.surveyor.NCBI')
+    
     def get_dbase(self):
         return 'NCBI'
 
@@ -165,3 +178,13 @@ class Surveyor():
         
         # prelister compares the summary with the old_file (if present) and generates the acc_file
         self.prelister.pre_list()
+
+#%% functions
+def build_acc_lists(taxon, marker, databases, out_dir, ntries = 3):
+    surveyors = {'BOLD':SurveyBOLD(taxon, marker, out_dir),
+                 'ENA':SurveyENA(taxon, marker, out_dir),
+                 'NCBI':SurveyNCBI(taxon, marker, out_dir)}
+
+    for database in databases:
+        logging.info(f'Surveying database {database} for {taxon} {marker}')
+        surveyors[database].survey(ntries)

@@ -68,7 +68,7 @@ class SurveyWAPI(SurveyTool):
             except:
                 # update attempt count
                 self.attempt += 1
-                self.logget.warning(f'Download interrupted, {self.ntries - self.attempt} remaining')
+                self.logger.warning(f'Download interrupted, {self.ntries - self.attempt} remaining')
 
 # Specific survey tools
 # each of these uses a survey method to attempt to download a summary
@@ -188,3 +188,6 @@ def build_acc_lists(taxon, marker, databases, out_dir, ntries = 3):
     for database in databases:
         logging.info(f'Surveying database {database} for {taxon} {marker}')
         surveyors[database].survey(ntries)
+    
+    out_files = {database:surveyors[database].out_file for database in databases}
+    return out_files

@@ -28,6 +28,9 @@ def read_NCBI_summ(summ_file):
     accs = ncbi_tab.iloc[:,0].tolist()
     return accs
 
+# use this dictionary to use the correct read function
+readfuncs = {'NCBI':read_NCBI_summ,
+             'BOLD':read_BOLD_summ}
 #%% classes
 class SummProcessor():
     def __init__(self, taxon, marker, database, in_file, out_dir):
@@ -390,3 +393,8 @@ class PostLister():
         self.__bold_old()
         self.__bold_ncbi()
         # TODO: compare ncbi_with old (see if any sequence must be updated)
+
+#%% main function
+def build_list(out_dir, ncbi_file=None, bold_file=None, ena_file=None):
+    files = {database:file for database, file in zip(['NCBI', 'BOLD', 'ENA'], [ncbi_file, bold_file, ena_file]) if not file is None}
+    return files

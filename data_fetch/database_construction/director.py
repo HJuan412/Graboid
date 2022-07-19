@@ -175,6 +175,7 @@ def main(seq_dir, tax_dir, tmp_dir, warn_dir, taxon=None, marker=None, databases
         tax_path = f'{tax_dir}/{taxon}_{marker}.csv'
         # build accession lists
         summ_files = surv.build_acc_lists(taxon, marker, databases, tmp_dir)
+        acc_file = lstr.build_list(summ_files, tmp_dir)
         ## dl sequences -> save to tmp_dir
         ## postproc bold sequences -> save to tmp_dir
         ## merge sequence files -> save to out_dir/seqs/fasta

@@ -10,6 +10,7 @@ Created on Fri Oct 29 14:12:47 2021
 from Bio import Entrez
 import lister
 import logging
+import os
 import pandas as pd
 import urllib3
 
@@ -24,33 +25,30 @@ class SurveyTool:
     def __init__(self, taxon, marker, out_dir):
         self.taxon = taxon
         self.marker = marker
+        self.database = self.get_dbase()
         self.generate_outfile(out_dir)
-        self.attempt = 0
-        self.ntries = 3
+        self.attempt = 1
+        self.max_attempts = 3
         self.done = False
-        self.warn = False
     
     def generate_outfile(self, out_dir):
-        # This generates the output file for the downloaded summary
-        dbase = self.get_dbase()
-        self.out_file = f'{out_dir}/{self.taxon}_{self.marker}_{dbase}.summ'
+        self.out_file = f'{out_dir}/{self.taxon}_{self.marker}_{self.database}.summ'
     
-    def survey(self, ntries = 3):
-        self.ntries = ntries
-        dbase = self.get_dbase()
-        print(f'Surveying {dbase} for {self.taxon} {self.marker}')
+    def survey(self, max_attempts=3):
+        self.max_attempts = max_attempts
         self.attempt_dl()
         if self.done:
-            self.logger.info(f'Done getting summary from {dbase} in {self.attempt} attempts.')
+            self.logger.info(f'Done getting summary from {self.database} in {self.attempt} attempts.')
         else:
-            self.logger.warning(f'Failed to get summary from {dbase} after {ntries} attempts.')
-            self.warn = True
+            # surveyor was unable to download a summary, generate a warning, delete incomplete file
+            self.logger.warning(f'Failed to get summary from {self.database} after {self.max_attempts} attempts.')
+            os.remove(self.out_file)
 
 class SurveyWAPI(SurveyTool):
     # Survey tool using an API
     def attempt_dl(self):
-        self.attempt = 0
-        while self.attempt < self.ntries:
+        self.attempt = 1
+        while self.attempt <= self.max_attempts:
             # connect to server & send request
             http = urllib3.PoolManager()
             apiurl = self.get_url()
@@ -58,7 +56,7 @@ class SurveyWAPI(SurveyTool):
 
             # stream request and store in outfile
             try:
-                with open(self.out_file, 'wb') as handle: # changed to 'wb' from 'ab', see if it still works
+                with open(self.out_file, 'wb') as handle:
                     for chunk in r.stream():
                         handle.write(chunk)
                 # close connection
@@ -68,7 +66,7 @@ class SurveyWAPI(SurveyTool):
             except:
                 # update attempt count
                 self.attempt += 1
-                self.logger.warning(f'Download interrupted, {self.ntries - self.attempt} remaining')
+                self.logger.warning(f'Download of {self.taxon} {self.marker} interrupted, {self.ntries - self.attempt} attempts remaining')
 
 # Specific survey tools
 # each of these uses a survey method to attempt to download a summary
@@ -104,8 +102,9 @@ class SurveyNCBI(SurveyTool):
         return 'NCBI'
 
     def attempt_dl(self):
-        self.attempt = 0
-        while self.attempt < self.ntries:
+        self.attempt = 1
+        while self.attempt <= self.max_attempts:
+            # use entrez API to download summary
             try:
                 search = Entrez.esearch(db='nucleotide', term = f'{self.taxon}[Organism] AND {self.marker}[all fields]', idtype = 'acc', retmax="100000")
                 search_record = Entrez.read(search)
@@ -116,78 +115,30 @@ class SurveyNCBI(SurveyTool):
             except:
                 self.attempt += 1
 
-class Surveyor():
+class Surveyor:
     # This class manages the download process for all taxon - marker - database trio
-    def __init__(self, taxon, marker, out_dir, warn_dir, old_file = None, databases = ['NCBI']):
-        """
-        Parameters
-        ----------
-        taxon : str
-            Taxon to survey for.
-        marker : str
-            Marker to survey for.
-        out_dir : str
-            Path to the output directory.
-        warn_dir : str
-            Path to the warning directory.
-        databases : list. Optionañ
-            Public databases in which to survey for. Currently, surveyor only looks in NCBI.
+    
+    # tooldict is a class attribute used to identify the survey tool to be used
+    tooldict = {'BOLD':SurveyBOLD,
+                'ENA':SurveyENA,
+                'NCBI':SurveyNCBI}
 
-        Returns
-        -------
-        None.
-
-        """
+    def __init__(self, taxon, marker, out_dir):
         self.taxon = taxon
         self.marker = marker
-        self.databases = databases
         self.out_dir = out_dir
-        self.warn_dir = warn_dir
-        self.warn_report = pd.Series(name = 'Attempts')
-        self.__get_surv_tools()
-        # prelister must be defined AFTER the survey tools
-        self.prelister = lister.PreLister(self.taxon, self.marker, self.survey_tools['NCBI'].out_file, self.out_dir, self.warn_dir, old_file)
-    
-    def __get_surv_tools(self):
-        # set up the tools to survey the specified databases
-        # BOLD is currently deactivated, records are downloaded via the Fetcher module. Kept just in case
-        self.survey_tools = {}
-        tooldict = {'BOLD':SurveyBOLD,
-                    'ENA':SurveyENA,
-                    'NCBI':SurveyNCBI}
+        self.out_files = []
 
-        for db in self.databases:
-            if db in tooldict.keys():
-                tool = tooldict[db]
-                self.survey_tools[db] = tool(self.taxon, self.marker, self.out_dir)
-
-    def save_warn(self):
-        # Generate a warning file if a taxon - marker - database can't be downloaded.
-        if len(self.warn_report) > 0:
-            self.warn_report.to_csv(f'{self.warn_dir}/warnings.surv')
-
-    def survey(self, ntries = 3):
+    def survey(self, database, ntries=3):
         # Survey each given database for the taxon / marker duo.
         # ntries determines the number of attempts
-        for tool in self.survey_tools.values():
-            tool.survey(ntries)
-            if tool.warn:
-                self.warn_report.at[tool.get_dbase()] = tool.attempt
+        if not database in Surveyor.tooldict.keys():
+            logger.error(f'Database name {database} is not valid')
+            return
         
-        self.save_warn()
+        tool = Surveyor.tooldict[database](self.taxon, self.marker, self.out_dir)
+        logging.info(f'Surveying database {database} for {self.taxon} {self.marker}')
         
-        # prelister compares the summary with the old_file (if present) and generates the acc_file
-        self.prelister.pre_list()
-
-#%% functions
-def build_acc_lists(taxon, marker, databases, out_dir, ntries = 3):
-    surveyors = {'BOLD':SurveyBOLD(taxon, marker, out_dir),
-                 'ENA':SurveyENA(taxon, marker, out_dir),
-                 'NCBI':SurveyNCBI(taxon, marker, out_dir)}
-
-    for database in databases:
-        logging.info(f'Surveying database {database} for {taxon} {marker}')
-        surveyors[database].survey(ntries)
-    
-    out_files = {database:surveyors[database].out_file for database in databases}
-    return out_files
+        tool.survey(ntries)
+        if tool.done:
+            self.out_files.append(tool.out_file)

@@ -8,10 +8,8 @@ Created on Fri Oct 29 14:12:47 2021
 
 #%% libraries
 from Bio import Entrez
-import lister
 import logging
 import os
-import pandas as pd
 import urllib3
 
 #%% setup logger

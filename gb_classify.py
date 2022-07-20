@@ -45,6 +45,7 @@ class DistByCost(DistCalculator):
                 self.dists[idx0, idx1] = q_cost
 
 #%% weight functions
+# TODO: should be a class
 def weight_1(dist, a = 1.0, b = 1.0):
     """
     Calculate weight as a function of distance

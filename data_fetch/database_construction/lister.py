@@ -32,6 +32,7 @@ def read_NCBI_summ(summ_file):
     return accs
 
 def read_summ(summ_file, database):
+    # single read function
     if database == 'NCBI':
         ncbi_tab = pd.read_csv(summ_file, sep = '\t')
         accs = ncbi_tab.iloc[:,0].tolist()
@@ -456,21 +457,28 @@ def build_acc_subtab(acc_list, database):
     return acc_subtab
 
 def clear_repeats(merged_tab):
+    # locates and clears repeated records in the merged table, prioritizing NCBI records when possible
+    # locate repeated indexes
     rep_idx = merged_tab.index[merged_tab.index.duplicated()]
     nbases = merged_tab['Database'].nunique()
     if len(rep_idx) == 0:
+        # no repeats, continue with original table
         return merged_tab
     
     logger.info(f'Found {len(rep_idx)} repeated records between {nbases} databases')
     
+    # handle repeats
     to_keep = []
     for idx in rep_idx:
+        # filter repeated entries for the same record
         sub_merged = merged_tab.loc[idx]
+        # try to use an NCBI record if available, otherwise pick a substitute
         lead = 'NCBI'
         if not 'NCBI' in sub_merged['Database'].values:
             lead = sub_merged['Database'].values[0]
-        to_keep = sub_merged.loc[sub_merged['Database'] == lead].iloc[[0]]
+        to_keep = sub_merged.loc[sub_merged['Database'] == lead].iloc[[0]] # double bracket lets iloc extract a single row as a dataframe
     
+    # generate final table
     cropped_merged = merged_tab.drop(index = rep_idx)
     clear_merged = pd.concat([cropped_merged, pd.DataFrame(to_keep)])
     

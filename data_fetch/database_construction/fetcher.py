@@ -11,14 +11,14 @@ from Bio import Entrez
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
-from glob import glob
-from math import ceil
 
+import logging
 import numpy as np
-import os
 import pandas as pd
 import urllib3
 
+#%% setup logger
+logger = logging.getLogger('database_logger.fetcher')
 #%% functions
 # Entrez
 # TODO: remove mail and apikey
@@ -33,7 +33,8 @@ def acc_slicer(acc_list, chunksize):
     for i in np.arange(0, n_seqs, chunksize):
         yield acc_list[i:i+chunksize]
 
-# fetch functions
+# fetch functions (OBSOLETE: MAY DELETE LATER)
+###############################################################################
 def fetch_ncbi(acc_list, out_seqs, out_taxs):
     # download sequences from NCBI, generates a temporal fasta and am acc:taxID list
     seq_handle = Entrez.efetch(db = 'nucleotide', id = acc_list, rettype = 'fasta', retmode = 'xml')
@@ -60,114 +61,77 @@ def fetch_api(apiurl, out_handle):
     r.release_conn()
     return
 
-# def fetch_ena(acc_list, out_seqs, out_taxs = None): # out_taxs kept for compatibility
-#     accstring = '%2C'.join(acc_list)
-#     apiurl = f'https://www.ebi.ac.uk/ena/browser/api/fasta/{accstring}?lineLimit=0'
-#     with open(out_seqs, 'ab') as out_handle:
-#         fetch_api(apiurl, out_handle)
-#     return apiurl
-
-# def fetch_bold(acc_list, out_seqs, out_taxs = None):
-#     accstring = '|'.join(acc_list)
-#     apiurl = f'http://www.boldsystems.org/index.php/API_Public/sequence?ids={accstring}'
-#     with open(out_seqs, 'ab') as out_handle:
-#         fetch_api(apiurl, out_handle)
-#     return
-
 def fetch_bold(taxon, marker, out_seqs, out_taxs = None):
     # downloads sequence AND summary
     apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={taxon}&marker={marker}&format=tsv'
     with open(out_seqs, 'ab') as out_handle:
         fetch_api(apiurl, out_handle)
     return
-
+###############################################################################
+def fetch_seqs(acc_list, database, out_header, chunk_size=500, max_attempts=3):
+    # this performs a single pass over the given acc_list
+    # chunks that can't be downloaded are returned in the failed list
+    failed = []
+    
+    # select the corresponding fetcher
+    fetcher = fetch_dict[database](out_header)
+    # split acc_list
+    chunks = acc_slicer(acc_list, chunk_size)
+    
+    # try to download each chunk of records
+    for chunk_n, chunk in enumerate(chunks):
+        done = fetcher.fetch(chunk, chunk_n, max_attempts)
+        if not done:
+            failed += chunk
+    return failed
 #%% classes
-class DbFetcher():
-    def __init__(self, taxon, marker, acc_tab, database, prefix):
-        self.taxon = taxon
-        self.marker = marker
-        self.acc_tab = acc_tab
-        self.database = database
-        self.__set_fetchfunc(database)
-        self.out_seqs = f'{prefix}_{database}.tmp'
-        self.out_taxs = f'{prefix}_{database}.tax'
-        self.warnings = []
-    
-    def __set_fetchfunc(self, database):
-        if database == 'BOLD':
-            self.fetch_func = fetch_bold
-        # elif database == 'ENA':
-        #     self.fetch_func = fetch_ena
-        elif database == 'NCBI':
-            self.fetch_func = fetch_ncbi
+class NCBIFetcher:
+    # This class handles record download from NCBI
+    def __init__(self, out_header):
+        # out_header is used to generate the names for the output files
+        self.out_seqs = f'{out_header}.seqtmp'
+        self.out_taxs = f'{out_header}.taxtmp'
+        self.logger = logging.getLogger('database_logger.fetcher.NCBI')
 
-    def fetch(self, chunk_size = 500):
-        chunks = acc_slicer(self.acc_tab['Accession'], chunk_size)
-        nchunks = ceil(len(self.acc_tab)/chunk_size)
-
-        for idx, chunk in enumerate(chunks):
-            print(f'{self.database}, {self.taxon} {self.marker}. Chunk {idx + 1} of {nchunks}')
+    def fetch(self, acc_list, chunk_n=0, max_attempts=3):
+        # download acc_list sequences from NCBI to a fasta file and tax ids to an acc:taxID list
+        # return True if successful
+        chunksize = len(acc_list)
+        attempt = 1
+        while attempt <= max_attempts:
             try:
-                self.fetch_func(chunk, self.out_seqs, self.out_taxs)
-            except:
-                self.warnings += chunk
-    # TODO: add method to extract taxonomy from BOLD
-
-# Each database gets its own fetcher
-class DBFetcher2():
-    def __init__(self, database, taxon, marker, out_dir, warn_dir, chunk_size = 500):
-        self.database = database
-        self.taxon = taxon
-        self.marker = marker
-        self.out_dir = out_dir
-        self.warn_dir = warn_dir
-        self.chunk_size = chunk_size
-        
-        self.warnings = []
-    
-    # def __set_outfiles(self):
-    #     pass
-
-class NCBIFetcher(DBFetcher2):
-    def __set_outfiles(self):
-        self.out_seqs = f'{self.out_dir}/{self.taxon}_{self.marker}_{self.database}.seqtmp'
-        self.out_taxs = f'{self.out_dir}/{self.taxon}_{self.marker}_{self.database}.taxtmp'
-
-    def set_acc_list(self, acc_list):
-        self.acc_list = acc_list
-
-    def fetch(self):
-        # download sequences from NCBI to fasta and a acc:taxID list
-        self.__set_outfiles()
-        if self.acc_list is None:
-            return
-
-        chunks = acc_slicer(self.acc_list, self.chunk_size)
-        for chunk in chunks:
-            try:
-                seq_handle = Entrez.efetch(db = 'nucleotide', id = chunk, rettype = 'fasta', retmode = 'xml')
+                # contact NCBI and attempt download
+                seq_handle = Entrez.efetch(db = 'nucleotide', id = acc_list, rettype = 'fasta', retmode = 'xml')
                 seqs_recs = Entrez.read(seq_handle)
                 
                 seqs = []
                 taxs = []
-        
-                for acc, seq in zip(chunk, seqs_recs):
-                    seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
-                    taxs.append(','.join([acc, seq['TSeq_taxid']]))
                 
+                # generate seq records and acc:taxid series
+                for acc, seq in zip(acc_list, seqs_recs):
+                    seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
+                    taxs.append(pd.Series({'Accession':acc, 'TaxID':seq['TSeq_taxid']}))
+                
+                # save seq recods to fasta
                 with open(self.out_seqs, 'a') as out_handle0:
                     SeqIO.write(seqs, out_handle0, 'fasta')
-        
-                with open(self.out_taxs, 'a') as out_handle1:
-                    out_handle1.write('\n'.join(taxs + ['']))
+                # save tax table to csv
+                taxs = pd.DataFrame(taxs)
+                taxs.to_csv(self.out_taxs, header = False, index = False, mode='a')
+                return True
             except:
-                self.warnings += chunk.tolist()
+                self.logger.warning(f'Chunk {chunk_n} download interrupted at {len(seqs)} of {chunksize}. {max_attempts - attempt} attempts remaining')
+                attempt += 1
+        return False
 
-class BOLDFetcher(DBFetcher2):
-    def __set_outfiles(self):
-        self.out_seqs = f'{self.out_dir}/{self.taxon}_{self.marker}_{self.database}.tmp'
+class BOLDFetcher:
+    def __init__(self, out_header):
+        self.out_seqs = f'{out_header}.seqtmp'
+        self.out_taxs = f'{out_header}.taxtmp'
+        self.logger = logging.getLogger('database_logger.fetcher.BOLD')
 
-    def fetch(self):
+    def fetch(self, acc_list, chunk_n=0, max_attempts=3):
+        # TODO: Rework this function to work on full records downloaded by surveyor (do bold postproc's job)
         # downloads sequence AND summary
         self.__set_outfiles()
         apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={self.taxon}&marker={self.marker}&format=tsv'
@@ -175,85 +139,59 @@ class BOLDFetcher(DBFetcher2):
             fetch_api(apiurl, out_handle)
         return
 
-class Fetcher2():
-    def __init__(self, taxon, marker, acc_file, out_dir, warn_dir):
-        self.taxon = taxon
-        self.marker = marker
-        self.out_dir = out_dir
-        self.warn_dir = warn_dir
-        self.prefix = f'{out_dir}/{taxon}_{marker}'
-        self.warnings = []
-        self.__set_fetchers()
-    
-    def __set_fetchers(self):
-        fetchers = {'NCBI':NCBIFetcher('NCBI', self.taxon, self.marker, self.out_dir, self.warn_dir),
-                    'BOLD':BOLDFetcher('BOLD', self.taxon, self.marker, self.out_dir, self.warn_dir)}
-        fetchers['NCBI'].set_acc_list(None)
-        self.fetchers = fetchers
-
-    def read_acclist(self, acc_file):
-        if os.path.isfile(acc_file) is None:
-            self.warnings.append(f'WARNING: File {acc_file} not found')
-            self.acc_tab = None
-            return
-
-        self.acc_tab = pd.read_csv(acc_file)
-        if len(self.acc_tab) == 0:
-            self.warnings.append(f'WARNING: Accession table {acc_file} is empty')
-            return
-        self.fetchers['NCBI'].set_acc_list(self.acc_tab['Accession'])
-    
-    def fetch(self, databases = ['NCBI', 'BOLD']):
-        for db in databases:
-            self.fetchers[db].fetch()
+fetch_dict = {'BOLD':BOLDFetcher,
+              'NCBI':NCBIFetcher}
 
 class Fetcher():
-    # TODO: fetch sequences stored in warn_dir
-    def __init__(self, taxon, marker, acc_file, out_dir, warn_dir):
-        self.taxon = taxon
-        self.marker = marker
+    # TODO: fetch failed sequences
+    def __init__(self, acc_file, out_dir):
+        self.load_accfile(acc_file)
+        self.out_header = ''
         self.out_dir = out_dir
-        self.warn_dir = warn_dir
-        self.prefix = f'{out_dir}/{taxon}_{marker}'
-        self.warnings = []
-
-    def __check_acclists(self, acc_file):
-        # make sure acc_tab is not empty
-        self.accs = True
-        if len(self.acc_tab) == 0:
-            self.warnings.append(f'WARNING: Accession table {acc_file} is empty') # TODO: get acc_file from Lister
-            self.accs = False
-
-    def __set_fetchers(self):
-        # prepare the fetcher objects needed for each database
-        fetchers = []
-        if self.accs:
-            for dbase, acc_subtab in self.acc_tab.groupby('Database'):
-                fetchers.append(DbFetcher(self.taxon, self.marker, acc_subtab, dbase, self.prefix))
-        
-        self.fetchers = fetchers
     
     def load_accfile(self, acc_file):
-        self.acc_tab = pd.read_csv(acc_file)
-        self.__check_acclists(acc_file)
-        self.__set_fetchers()
-
-    def fetch(self, chunk_size = 500): # TODO: add attempt counter
-        for ftch in self.fetchers:
-            ftch.fetch(chunk_size)
+        self.acc_file = acc_file
+        self.acc_tab = pd.read_csv(acc_file, index_col = 0)
         
-        self.check_fetch_warnings()
-        self.save_warnings()
+        # generate header for output files
+        out_header = acc_file.split('/')[-1].split('.')[0]
+        self.out_header = f'{self.out_dir}/{out_header}'
+        failed_file = acc_file.split('.')[0]
+        self.failed_file = f'{failed_file}_failed.acc'
     
-    def check_fetch_warnings(self):
-        for ftch in self.fetchers:
-            n_warns = len(ftch.warnings)
-            total_recs = len(ftch.acc_tab)
-            if n_warns > 0:
-                self.warnings.append(f'WARNING: Failed to download {n_warns} of {total_recs} sequences from {ftch.database}:')
-                self.warnings += ftch.warnings
-    
-    def save_warnings(self):
-        if len(self.warnings) > 0:
-            with open(f'{self.warn_dir}/warnings.ftch', 'w') as handle:
-                handle.write('\n'.join(self.warnings))
+    def check_accs(self):
+        if len(self.acc_tab) == 0:
+            logger.warning(f'Accession table from {self.acc_file} is empty')
+            return False
+        return True
+
+    def fetch(self, chunk_size=500, max_attempts=3):
+        # Fetches sequences and taxonomies, splits acc lists into chunks of chunk_size elements
+        # for each chunk, try to download up to max_attempts times
+
+        if not self.check_accs():
+            # acc_table is empty
+            return
+        
+        failed = [] # here we store accessions that failed to download
+        
+        # split the acc_table by database
+        for database, sub_tab in self.acc_tab.groupby('Database'):
+            acc_list = sub_tab['Accession'].to_list()
+            out_header = f'{self.out_header}_{database}'
+            # first pass
+            failed0 = fetch_seqs(acc_list, database, out_header, chunk_size, max_attempts)
+            # do a second pass if some sequences couldn't be downloaded
+            if len(failed0) == 0:
+                continue
+            failed0 = fetch_seqs(failed0, database, out_header, chunk_size, max_attempts)
+            
+            if len(failed0) > 0:
+                # failed to download sequences after two passes
+                logger.warning(f'Failed to download {len(failed0)} of {len(acc_list)} records from {database}. Failed accessions saved to {self.failed_file}')
+                failed += failed0
+        
+        # generate a sub table containing the failed sequences (if any)
+        if len(failed) > 0:
+            failed_tab = self.acc_tab.loc[failed]
+            failed_tab.to_csv(self.failed_file)

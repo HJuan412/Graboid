@@ -69,7 +69,6 @@ class SurveyWAPI(SurveyTool):
 # Specific survey tools
 # each of these uses a survey method to attempt to download a summary
 class SurveyBOLD(SurveyWAPI):
-    # TODO: BOLD downloads take too long regardless of mode (summary or sequence), furthermore, the api used to build the summary doesn't allow filtering by marker
     # consider using the full data retrieval API
     def get_logger(self):
         self.logger = logging.getLogger('database_logger.surveyor.BOLD')
@@ -79,6 +78,8 @@ class SurveyBOLD(SurveyWAPI):
 
     def get_url(self):
         apiurl = f'http://www.boldsystems.org/index.php/API_Public/specimen?taxon={self.taxon}&format=tsv'
+        # TODO: BOLD downloads take too long regardless of mode (summary or sequence), furthermore, the api used to build the summary doesn't allow filtering by marker
+        apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={self.taxon}&marker={self.marker}&format=tsv' # this line downloads sequences and taxonomies
         return apiurl
 
 class SurveyENA(SurveyWAPI):

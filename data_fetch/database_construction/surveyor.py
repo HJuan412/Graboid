@@ -125,7 +125,7 @@ class Surveyor:
         self.taxon = taxon
         self.marker = marker
         self.out_dir = out_dir
-        self.out_files = []
+        self.out_files = {}
 
     def survey(self, database, ntries=3):
         # Survey each given database for the taxon / marker duo.
@@ -139,4 +139,4 @@ class Surveyor:
         
         tool.survey(ntries)
         if tool.done:
-            self.out_files.append(tool.out_file)
+            self.out_files[database] = tool.out_file

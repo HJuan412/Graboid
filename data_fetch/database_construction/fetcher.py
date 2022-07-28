@@ -10,6 +10,7 @@ Created on Mon Sep 20 14:21:22 2021
 from Bio import Entrez
 from Bio import SeqIO
 from Bio.Seq import Seq
+from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 from Bio.SeqRecord import SeqRecord
 
 import logging
@@ -84,6 +85,14 @@ def fetch_seqs(acc_list, database, out_header, chunk_size=500, max_attempts=3):
         if not done:
             failed += chunk
     return failed
+
+def get_accs_from_fasta(fasta_file):
+    # this function is used to retrieve accessions when a fasta file is already provided
+    accs = []
+    with open(fasta_file, 'r') as fasta_handle:
+        for acc, seq in sfp(fasta_handle):
+            accs.append(acc)
+    return accs
 #%% classes
 class NCBIFetcher:
     # This class handles record download from NCBI
@@ -105,12 +114,13 @@ class NCBIFetcher:
                 seqs_recs = Entrez.read(seq_handle)
                 
                 seqs = []
-                taxs = []
+                taxs = {'Accession':[], 'TaxID':[]}
                 
                 # generate seq records and acc:taxid series
                 for acc, seq in zip(acc_list, seqs_recs):
                     seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
-                    taxs.append(pd.Series({'Accession':acc, 'TaxID':seq['TSeq_taxid']}))
+                    taxs['Accession'].append(acc)
+                    taxs['TaxID'].append(seq['TSeq_taxid'])
                 
                 # save seq recods to fasta
                 with open(self.out_seqs, 'a') as out_handle0:
@@ -143,11 +153,11 @@ fetch_dict = {'BOLD':BOLDFetcher,
               'NCBI':NCBIFetcher}
 
 class Fetcher():
-    # TODO: fetch failed sequences
-    def __init__(self, acc_file, out_dir):
-        self.load_accfile(acc_file)
+    def __init__(self, out_dir):
         self.out_header = ''
         self.out_dir = out_dir
+        self.seq_files = {}
+        self.tax_files = {}
     
     def load_accfile(self, acc_file):
         self.acc_file = acc_file
@@ -165,9 +175,11 @@ class Fetcher():
             return False
         return True
 
-    def fetch(self, chunk_size=500, max_attempts=3):
+    def fetch(self, acc_file, chunk_size=500, max_attempts=3):
         # Fetches sequences and taxonomies, splits acc lists into chunks of chunk_size elements
         # for each chunk, try to download up to max_attempts times
+        
+        self.load_accfile(acc_file)
 
         if not self.check_accs():
             # acc_table is empty
@@ -179,6 +191,10 @@ class Fetcher():
         for database, sub_tab in self.acc_tab.groupby('Database'):
             acc_list = sub_tab['Accession'].to_list()
             out_header = f'{self.out_header}_{database}'
+            # update out file containers
+            self.seq_files[database] = f'{out_header}.seqtmp'
+            self.tax_files[database] = f'{out_header}.taxtmp'
+            
             # first pass
             failed0 = fetch_seqs(acc_list, database, out_header, chunk_size, max_attempts)
             # do a second pass if some sequences couldn't be downloaded
@@ -195,3 +211,25 @@ class Fetcher():
         if len(failed) > 0:
             failed_tab = self.acc_tab.loc[failed]
             failed_tab.to_csv(self.failed_file)
+    
+    def fetch_tax_from_fasta(self, fasta_file):
+        # generate output file
+        header = fasta_file.split('/')[-1].split('.fasta')[0]
+        out_file = f'{self.out_dir}/{header}.taxtmp'
+        self.tax_files['NCBI'] = out_file
+        
+        # get list of accessions
+        acc_list = get_accs_from_fasta(fasta_file)
+        
+        # retrieve taxIDs and build TaxID tab
+        taxs = {'Accession':[], 'TaxID':[]}
+        summ_handle = Entrez.esummary(db='nucleotide', id=acc_list, retmode='xml')
+        summ_recs = Entrez.read(summ_handle)
+        
+        for acc, summ in zip(acc_list, summ_recs):
+            taxs['Accession'].append(acc)
+            taxs['TaxID'].append(int(summ['TaxId']))
+        
+        # save tax table to csv
+        taxs = pd.DataFrame(taxs)
+        taxs.to_csv(out_file, header = False, index = False)

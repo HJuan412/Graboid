@@ -209,7 +209,7 @@ class TaxonomistBOLD(Taxer):
         bold_tab = pd.read_csv(self.in_file, sep = '\t', encoding = 'latin-1', index_col = 0, low_memory = False) # latin-1 to parse BOLD files
 
         if len(bold_tab) == 0:
-            self.logger(f'Summary file {self.in_file} is empty')
+            self.logger.warning(f'Summary file {self.in_file} is empty')
             self.bold_tab = None
             return
         # TODO: NOTE have to change this.
@@ -261,24 +261,20 @@ class Taxonomist:
         if isinstance(self.taxid_files, list):
             self.taxid_files = detect_taxidfiles(taxid_files)
     
-    def check_taxidfiles(self):
-        # check that summ_file container is not empty
-        if len(self.taxid_files) == 0:
-            logger.warning('No valid taxid files detected')
-            return False
-        return True
-    
     def set_ranks(self, ranklist=['phylum', 'class', 'order', 'family', 'genus', 'species']):
         self.ranks = ranklist
         # for taxr in self.taxers.values():
         #     taxr.set_ranks(ranklist)
     
-    def taxing(self, chunksize=500, max_attempts=3):
-        if not self.check_taxidfiles():
+    def taxing(self, taxid_files, chunksize=500, max_attempts=3):
+        # taxid_files dict with {database:taxid_file}
+        # check that summ_file container is not empty
+        if len(taxid_files) == 0:
+            logger.warning('No valid taxid files detected')
             return
         
         out_files = []
-        for database, taxid_file in self.taxid_files.items():
+        for database, taxid_file in taxid_files.items():
             taxer = taxer_dict[database](taxid_file, self.ranks, self.out_dir)
             taxer.taxing(chunksize, max_attempts)
             out_files.append(taxer.tax_out)

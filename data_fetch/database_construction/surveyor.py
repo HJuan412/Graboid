@@ -79,7 +79,7 @@ class SurveyBOLD(SurveyWAPI):
     def get_url(self):
         apiurl = f'http://www.boldsystems.org/index.php/API_Public/specimen?taxon={self.taxon}&format=tsv'
         # TODO: BOLD downloads take too long regardless of mode (summary or sequence), furthermore, the api used to build the summary doesn't allow filtering by marker
-        apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={self.taxon}&marker={self.marker}&format=tsv' # this line downloads sequences and taxonomies
+        apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={self.taxon}&marker={self.marker}&format=tsv' # this line downloads sequences AND taxonomies
         return apiurl
 
 class SurveyENA(SurveyWAPI):
@@ -122,22 +122,20 @@ class Surveyor:
                 'ENA':SurveyENA,
                 'NCBI':SurveyNCBI}
 
-    def __init__(self, taxon, marker, out_dir):
-        self.taxon = taxon
-        self.marker = marker
+    def __init__(self, out_dir):
         self.out_dir = out_dir
         self.out_files = {}
 
-    def survey(self, database, ntries=3):
+    def survey(self, taxon, marker, database, max_attempts=3):
         # Survey each given database for the taxon / marker duo.
         # ntries determines the number of attempts
         if not database in Surveyor.tooldict.keys():
             logger.error(f'Database name {database} is not valid')
             return
         
-        tool = Surveyor.tooldict[database](self.taxon, self.marker, self.out_dir)
+        tool = Surveyor.tooldict[database](taxon, marker, self.out_dir)
         logging.info(f'Surveying database {database} for {self.taxon} {self.marker}')
         
-        tool.survey(ntries)
+        tool.survey(max_attempts)
         if tool.done:
             self.out_files[database] = tool.out_file

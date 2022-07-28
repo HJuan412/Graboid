@@ -115,13 +115,6 @@ class Lister:
         # check that summaries are a list 
         if isinstance(self.summ_files, list):
             self.summ_files = detect_summ(summ_files)
-        
-    def check_summaries(self):
-        # check that summ_file container is not empty
-        if len(self.summ_files) == 0:
-            logger.warning('No valid summaries detected')
-            return False
-        return True
     
     def generate_outfile(self):
         # generates a file name of the form out_dir/taxon_marker.acc
@@ -131,15 +124,17 @@ class Lister:
             self.out_file = f'{self.out_dir}/{header}.acc'
             break
     
-    def build_list(self):
+    def build_list(self, summ_files):
+        # summ_files dict with {database:summ_file}
         # generates a consensus list of accession codes from the summary files
-        if not self.check_summaries():
+        if len(summ_files) == 0:
+            logger.warning('No valid summaries detected')
             return
         
         self.generate_outfile()
         # read summ_files
         acc_tabs = []
-        for db, file in self.summ_files.items():
+        for db, file in summ_files.items():
             db_accs = read_summ(file, db)
             acc_subtab = build_acc_subtab(db_accs, db)
             acc_tabs.append(acc_subtab)

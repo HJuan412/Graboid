@@ -253,7 +253,7 @@ class Taxonomist:
         self.set_ranks()
         self.out_dir = out_dir
         
-        self.out_files = []
+        self.out_files = {}
     
     def get_taxidfiles(self, taxid_files):
         self.taxid_files = taxid_files
@@ -273,10 +273,7 @@ class Taxonomist:
             logger.warning('No valid taxid files detected')
             return
         
-        out_files = []
         for database, taxid_file in taxid_files.items():
             taxer = taxer_dict[database](taxid_file, self.ranks, self.out_dir)
             taxer.taxing(chunksize, max_attempts)
-            out_files.append(taxer.tax_out)
-        
-        self.out_files = out_files
+            self.out_files[database] = taxer.tax_out

@@ -10,6 +10,7 @@ Compare and merge temporal sequence files
 
 #%% libraries
 from Bio import SeqIO
+from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 import bold_marker_vars
 import logging
 import lister
@@ -63,6 +64,10 @@ def flatten_taxtab(tax_tab):
 class Merger():
     def __init__(self, out_dir):
         self.out_dir = out_dir
+        self.seq_out = None
+        self.acc_out = None
+        self.tax_out = None
+        self.taxguide_out = None
     
     def get_files(self, seqfiles, taxfiles):
         self.seqfiles = seqfiles
@@ -81,8 +86,8 @@ class Merger():
             header = '_'.join(header)
             self.seq_out = f'{self.out_dir}/{header}.fasta'
             self.acc_out = f'{self.out_dir}/{header}.acclist'
-            self.tax_out = f'{self.out_dir}/header.tax'
-            self.taxguide_out = f'{self.out_dir}/header.taxguide'
+            self.tax_out = f'{self.out_dir}/{header}.tax'
+            self.taxguide_out = f'{self.out_dir}/{header}.taxguide'
             break
     
     def merge_seqs(self):
@@ -111,62 +116,35 @@ class Merger():
         with open(self.seq_out, 'w') as seq_handle:
             SeqIO.write(records, seq_handle, 'fasta')
         acc_tab.to_csv(self.acc_out)
-
-    # def __get_files(self):
-    #     seqfiles = {}
-    #     taxfiles = {}
-    #     taxidfiles = {}
-        
-    #     for db in self.databases:
-    #         seqfiles[db] = f'{self.in_dir}/{self.taxon}_{self.marker}_{db}.seqtmp'
-    #         taxfiles[db] = f'{self.in_dir}/{self.taxon}_{self.marker}_{db}.tax'
-    #         taxidfiles[db] = f'{self.in_dir}/{self.taxon}_{self.marker}_{db}.taxid'
-        
-    #     self.seqfiles = seqfiles
-    #     self.taxfiles = taxfiles
-    #     self.taxidfiles = taxidfiles
-    
-    # def __set_marker_vars(self, marker_vars):
-    #     # BOLD records may have variations of the marker name (18S/18s, COI-3P/COI-5P)
-    #     self.marker_vars = list(marker_vars)
-
-    # def build_list(self):
-    #     post_lister = lister.PostLister(self.taxon, self.marker, self.in_dir, self.in_dir, self.warn_dir)
-    #     post_lister.detect()
-    #     post_lister.compare()
-    #     self.acc_tab = post_lister.filtered
-        
-    #     if len(post_lister.warnings) > 0:
-    #         self.warnings.append('Post Lister warnings:')
-    #         self.warnings += post_lister.warnings
-    #         self.warnings.append('---')
-        
-    #     if self.acc_tab is None:
-    #         self.warnings.append('WARNING: Failed to create accession list, check Post Lister warnings')
-    
-    # def build_seqfile(self):
-    #     records = []
-
-    #     for db in self.databases:
-    #         acclist = set(self.acc_tab.loc[self.acc_tab['Database'] == db, 'Accession'].tolist())
-    #         with open(self.seqfiles[db], 'r') as handle:
-    #             for record in SeqIO.parse(handle, 'fasta'):
-    #                 if record.id in acclist:
-    #                     records.append(record)
-        
-    #     with open(self.out_file, 'w') as out_handle:
-    #         SeqIO.write(records, out_handle, 'fasta')
-        
-    #     #TODO: handle old files
     
     def merge_taxons(self):
         mtax = MergerTax(self.taxfiles)
         mtax.merge_taxons(self.tax_out, self.taxguide_out)
     
     def merge(self, seqfiles, taxfiles):
+        self.get_files(seqfiles, taxfiles)
         self.generate_outfiles()
         self.merge_seqs()
         self.merge_taxons()
+    
+    def merge_from_fasta(self, seqfile, taxfile):
+        # Used when a fasta file was provided, generate acclist and taxguide
+        header = seqfile.split('/')[-1].split('.')[0]
+        self.acc_out = f'{self.out_dir}/{header}.acclist'
+        self.taxguide_out = f'{self.out_dir}/{header}.taxguide'
+        # generate acc list
+        acc_list = []
+        with open(seqfile, 'r') as seq_handle:
+            for acc, seq in sfp(seq_handle):
+                acc_list.append(acc)
+        
+        acc_tab = pd.DataFrame(acc_list, columns = ['Accession'])
+        acc_tab['Database'] = 'NCBI'
+        acc_tab.to_csv(self.acc_out)
+        # generate taxguide
+        tax_tab = pd.read_csv(taxfile, index_col = 0)
+        guide_tab = flatten_taxtab(tax_tab)
+        guide_tab.to_csv(self.taxguide_out)
 
 class MergerTax():
     def __init__(self, tax_files):
@@ -227,84 +205,3 @@ class MergerTax():
         
         merged_taxons.to_csv(tax_out)
         self.guide_tab.to_csv(taxguide_out)
-        
-    # def __load_files(self):
-    #     self.ncbi_tax = pd.read_csv(self.taxfiles['NCBI'], index_col = 0)
-    #     self.ncbi_taxid = pd.read_csv(self.taxidfiles['NCBI'], index_col = 0)
-    #     self.bold_tax = pd.read_csv(self.taxfiles['BOLD'], index_col = 0)
-    #     self.bold_taxid = pd.read_csv(self.taxidfiles['BOLD'], index_col = 0)
-    #     self.ranks = self.ncbi_tax.columns.tolist()
-    #     self.__adjust_headers()
-
-    # def __adjust_headers(self):
-    #     rank_name = {f'{rk}_name':rk for rk in self.ranks}
-    #     rank_taxID = {f'{rk}_taxID':f'{rk}_id' for rk in self.ranks}
-    #     ncbi_taxid = {rk:f'{rk}_id' for rk in self.ranks}
-    #     self.bold_tax.rename(columns = rank_name, inplace = True)
-    #     self.bold_taxid.rename(columns = rank_taxID, inplace = True)
-    #     self.ncbi_taxid.rename(columns = ncbi_taxid, inplace = True)
-    
-    # def build_taxid_flats(self):
-    #     ncbi_taxid_flat = pd.DataFrame(columns = ['Taxid', 'Rank'])
-    #     bold_taxid_flat = pd.DataFrame(columns = ['Taxid', 'Rank'])
-        
-    #     for rk in self.ranks[::-1]:
-    #         rk_id = f'{rk}_id'
-    #         merged_ncbi = pd.concat([self.ncbi_tax[rk], self.ncbi_taxid[rk_id]], axis = 1)
-    #         merged_bold = pd.concat([self.bold_tax[rk], self.bold_taxid[rk_id]], axis = 1)
-            
-    #         for taxon, subtab in merged_ncbi.groupby(rk):
-    #             tax_id = subtab.iloc[0, 1]
-    #             ncbi_taxid_flat.at[taxon] = [tax_id, rk]
-    #         for taxon, subtab in merged_bold.groupby(rk):
-    #             tax_id = subtab.iloc[0, 1]
-    #             bold_taxid_flat.at[taxon] = [tax_id, rk]
-        
-    #     self.ncbi_flat = ncbi_taxid_flat
-    #     self.bold_flat = bold_taxid_flat
-
-    # def correct_BOLD(self):
-    #     bold_corrected = self.bold_taxid.copy()
-    #     for rk in self.ranks:
-    #         ncbi_flat_sub = self.ncbi_flat.loc[self.ncbi_flat['Rank'] == rk]
-    #         bold_flat_sub = self.bold_flat.loc[self.bold_flat['Rank'] == rk]
-    #         intersection = ncbi_flat_sub.index.intersection(bold_flat_sub.index)
-    #         to_correct = self.ncbi_flat.loc[intersection]
-    
-    #         for tax, row in to_correct.iterrows():
-    #             rank = row['Rank']
-    #             tax_id = row['Taxid']
-    #             idx = self.bold_tax.loc[self.bold_tax[rank] == tax].index
-    #             bold_corrected.at[idx, f'{rank}_id'] = tax_id
-    #     self.bold_taxid = bold_corrected
-    
-    # def build_taxid_guide(self, tax_tab, taxid_tab):
-    #     taxid_guide = pd.DataFrame(columns = ['TaxName', 'Rank', 'ParentTaxId'])
-        
-    #     for parent_idx, rk in enumerate(self.ranks[1:]):
-    #         parent_rk = self.ranks[parent_idx]
-    #         for tax, subtab in tax_tab.groupby(rk):
-    #             idx = subtab.index[0]
-    #             taxid = taxid_tab.loc[idx, f'{rk}_id']
-    #             parent_taxid = taxid_tab.loc[idx, f'{parent_rk}_id']
-    #             taxid_guide.at[taxid] = [tax, rk, parent_taxid]
-    #     taxid_guide.to_csv(self.taxid_guidefile)
-        
-    # def build_taxfiles(self, acc_tab):
-    #     # NCBI
-    #     ncbi_accs = set(acc_tab.loc[acc_tab['Database'] == 'NCBI', 'Accession'].tolist())
-    #     intersect_accs = ncbi_accs.intersection(set(self.ncbi_tax.index)) # some of the accessions in acc_tab may not be in ncbi_tax
-    #     ncbi_tax_subtab = self.ncbi_tax.loc[intersect_accs]
-    #     ncbi_taxid_subtab = self.ncbi_taxid.loc[intersect_accs]
-        
-    #     # BOLD
-    #     bold_accs = set(acc_tab.loc[acc_tab['Database'] == 'BOLD', 'Accession'].tolist())
-    #     bold_tax_subtab = self.bold_tax.loc[bold_accs]
-    #     bold_taxid_subtab = self.bold_taxid.loc[bold_accs]
-        
-    #     tax_file = pd.concat([ncbi_tax_subtab, bold_tax_subtab])
-    #     taxid_file = pd.concat([ncbi_taxid_subtab, bold_taxid_subtab])
-        
-    #     self.build_taxid_guide(tax_file, taxid_file)
-    #     tax_file.to_csv(self.tax_outfile)
-    #     taxid_file.to_csv(self.taxid_outfile)

@@ -65,6 +65,14 @@ class Director():
         self.taxonmoist = txnm.Taxonomist(tmp_dir)
         self.merger = mrgr.Merger(out_dir)
     
+    def clear_tmp(self):
+        for tmp_file in os.listdir(self.tmp_dir):
+            os.remove(tmp_file)
+    
+    def set_ranks(self, ranks):
+        fmt_ranks = [rk.lower() for rk in ranks]
+        self.taxonomist.set_ranks(fmt_ranks)
+
     def direct_fasta(self, fasta_file, chunksize=500, max_attempts=3, mv = False):
         seq_path = f'{self.out_dir}/{fasta_name(fasta_file)}.fasta'
         if mv:
@@ -77,7 +85,11 @@ class Director():
         self.fetcher.fetch_tax_from_fasta(fasta_file)
         
         print('Reconstructing taxonomies...')
+        self.taxonomist.out_dir = self.out_dir # dump tax table to out_dir
         self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
+        
+        print('Building output files...')
+        self.merger.merge_from_fasta(seq_path, self.taxonomist.out_files)
     
     def direct(self, taxon, marker, databases, chunksize=500, max_attempts=3):
         print('Surveying databases...')
@@ -91,4 +103,4 @@ class Director():
         print('Reconstructing taxonomies...')
         self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
         print('Merging sequences...')
-        self.merger.merge_seqs()
+        self.merger.merge(self.fetcher.seq_files, self.taxonomist.out_files)

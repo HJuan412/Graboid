@@ -41,7 +41,7 @@ def move_file(file, dest, mv=False):
         shutil.copy(file, dest)
 
 #%% Main
-class Director():
+class Director:
     def __init__(self, out_dir, tmp_dir, warn_dir):
         self.out_dir = out_dir
         self.tmp_dir = tmp_dir
@@ -64,6 +64,9 @@ class Director():
         self.fetcher = ftch.Fetcher(tmp_dir)
         self.taxonmoist = txnm.Taxonomist(tmp_dir)
         self.merger = mrgr.Merger(out_dir)
+        
+        # get outfiles
+        self.get_out_files()
     
     def clear_tmp(self):
         for tmp_file in os.listdir(self.tmp_dir):
@@ -90,6 +93,7 @@ class Director():
         
         print('Building output files...')
         self.merger.merge_from_fasta(seq_path, self.taxonomist.out_files)
+        self.get_out_files()
     
     def direct(self, taxon, marker, databases, chunksize=500, max_attempts=3):
         print('Surveying databases...')
@@ -104,3 +108,10 @@ class Director():
         self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
         print('Merging sequences...')
         self.merger.merge(self.fetcher.seq_files, self.taxonomist.out_files)
+        self.get_out_files()
+    
+    def get_out_files(self):
+        self.seq_file = self.merger.seq_out
+        self.acc_file = self.merger.acc_out
+        self.tax_file = self.merger.tax_out
+        self.taxguide_file = self.merger.taxguide_out

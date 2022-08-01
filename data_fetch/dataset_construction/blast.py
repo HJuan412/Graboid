@@ -48,31 +48,30 @@ def check_db_dir(db_dir):
 #%% classes
 class Blaster:
     def __init__(self):
-        self.db = None
         self.report = None
-        
+
     def make_ref_db(self, ref_file, db_dir, clear=False):
         check, db_files = check_db_dir(db_dir)
-        self.db = f'{db_dir}/ref'
         if clear or not check:
             # found db files are incomplete or option 'clear' is enabled
             # delete previous files and create new databases
             for file in db_files:
                 os.remove(file)
-            makeblastdb(ref_file, self.db)
+            makeblastdb(ref_file, f'{db_dir}/ref')
             return
-        logger.warning(f'Directory {db_dir} already contains a database. Ignoring.')
+        logger.info(f'Directory {db_dir} already contains a database. Set \'clear\' to False if you wish to replace it.')
     
-    def blast(self, fasta_file, out_file, threads=1):
-        if self.db is None:
-            logger.warning('No database detected. Aborting')
+    def blast(self, fasta_file, out_file, db_dir, threads=1):
+        check, db_files = check_db_dir(db_dir)
+        if not check:
+            logger.warning('Incomplete BLAST database ({len(db_files)} files found). Aborting')
             return
+        db_prefix = db_files[0].split('.n')[0]
         
         print(f'Blasting {fasta_file}')
         try:
-            blast(fasta_file, self.db, out_file, threads)
-            return out_file
+            blast(fasta_file, db_prefix, out_file, threads)
+            self.report = out_file
         except:
             # TODO develop warning
             logger.warning(f'Unable to blast {fasta_file}')
-        return None

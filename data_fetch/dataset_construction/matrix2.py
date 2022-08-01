@@ -13,7 +13,6 @@ import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import string
 
 #%% set logger
 logger = logging.getLogger('mapping_logger.Matrix')
@@ -31,11 +30,10 @@ def make_transdict():
 # read blast file
 def read_blast(blast_file, evalue = 0.005):
     colnames = 'qseqid pident length qstart qend sstart send evalue'.split(' ')
-    columns = {idx:col for idx,col in enumerate(colnames)}
     blast_tab = pd.read_csv(blast_file,
                             sep = '\t',
                             header = None,
-                            names = columns)
+                            names = colnames)
     # blast_tab.rename(columns = columns, inplace = True)
     blast_tab = blast_tab.loc[blast_tab['evalue'] <= evalue]
     return blast_tab
@@ -111,70 +109,32 @@ def build_row(acc, seq, seq_coords, mat_coords, rowlen, transdict):
         row[mat_coor[0]:mat_coor[1]+1] = numseq    
     return row.astype(np.int64)
 
-# plotting functions
-# def get_coverage_data(in_file):
-#     blast_tab = read_blast(in_file)
-#     rows, cols, offset = get_mat_dims(blast_tab)
-#     coords = build_coords(blast_tab[['qstart', 'qend', 'sstart', 'send']], offset)[1]
-#     cov_data = np.zeros(cols)
-#     for coo in coords:
-#         cov_data[coo[0]:coo[1]] += 1
-#     return cov_data, cov_data / rows
-
 def plot_coverage_data(blast_file, evalue = 0.005, figsize=(12,7)):
+    # TODO: save plot to file
     # get coverage matrix
     blast_tab = read_blast(blast_file, evalue)
     blast_tab.set_index('qseqid', inplace = True)
     extent = blast_tab[['sstart', 'send']].max().max()
     coords = []
-    for acc in blast_tab.index.unique():
-        coord_mat = blast_tab.loc[acc, ['sstart', 'send']].to_numpy().reshape((-1,2))
+    for acc, subtab in blast_tab.groupby('qseqid'):
+        coord_mat = subtab[['sstart', 'send']].to_numpy().reshape((-1,2))
         coords.append(np.sort(coord_mat, axis=1))
     # plot
     x = np.arange(extent)
-    fig, ax = plt.subplots(figsize)
+    fig, ax = plt.subplots(figsize = figsize)
     for idx, coor in enumerate(coords):
-        cov = np.empty(extent)
+        cov = np.zeros(extent)
         cov[:] = np.nan
         for coo in coor:
             cov[coo[0]:coo[1]] = idx+1
         ax.plot(x, cov, c='r')
     
-    ax.set_yticks(np.arange(1, len(coords) + 1))
+    ax.set_xlabel('Coordinates')
+    ax.set_ylabel('Sequences')
+    ax.set_title(f'Sequence coverage of {blast_file}')
 
-    # # mode 'perc' plot is given in percentage
-    # tot_data = cov_data[0]
-    # perc_data = cov_data[1]
-
-    # view = len(tot_data)
-    # xticklen = int(view/10)
-    # xticks = np.arange(0, view + 1, xticklen)
-    # xlabs = np.arange(0, len(tot_data)+1, xticklen)
-
-    # # generate plot information
-    # # per base coverage data
-    # cov = tot_data
-    # ylabel = 'Coverabe (bases)'
-    # if mode == 'perc':
-    #     # use percentages instead
-    #     cov = perc_data
-    #     ylabel = 'Coverage (%)'
-
-    # x = np.arange(len(cov))
-
-    # # plot
-    # fig, ax = plt.subplots(figsize = (12,7))
-    # ax.margins(x=0.005, y = 0.01)
-    # ax.set_xticks(xticks)
-    # ax.set_xticklabels(xlabs)
-    # ax.set_xlabel('Position')
-    # ax.set_ylabel(ylabel)
-    # ax.set_title(f'{taxon}, {marker}\nPer base coverage')
-    # ax.plot(x, cov, color = 'r', label = 'Per base coverage')
-    # # ax.legend()
-    # return
 #%% classes
-class MatBuilder():
+class MatBuilder:
     def __init__(self, out_dir):
         self.out_dir = out_dir
         
@@ -188,9 +148,9 @@ class MatBuilder():
         if not out_name is None:
             self.mat_file = f'{self.out_dir}/{out_name}.npy'
             self.acc_file = f'{self.out_dir}/{out_name}.acclist'
-            return
-        self.mat_file = f'{self.out_dir}/{file_name}.npy'
-        self.acc_file = f'{self.out_dir}/{file_name}.acclist'
+        else:
+            self.mat_file = f'{self.out_dir}/{file_name}.npy'
+            self.acc_file = f'{self.out_dir}/{file_name}.acclist'
         
     def build(self, blast_file, seq_file, out_name=None, evalue=0.005):
         # load blast report
@@ -222,10 +182,9 @@ class MatBuilder():
             self.acclist.append(acc)
         
         # generate out_files
-        self.generate_outnames(seq_file, out_name, allow_pickle=False)
+        self.generate_outnames(seq_file, out_name)
         
         # store output
-        np.save(self.mat_file, matrix)
+        np.save(self.mat_file, matrix, allow_pickle=False)
         with open(self.acc_file, 'w') as list_handle:
             list_handle.write('\n'.join(self.acclist))
-        

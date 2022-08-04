@@ -19,19 +19,18 @@ import windows
 #%% vars
 cost = cost_matrix.cost_matrix()
 #%% functions
-def build_tax_clusters(matrix, tax_tab, rank, dist_matrix = cost):
+def build_tax_clusters(matrix, tax_tab, rank, dist_matrix=cost):
     # generates a dictionary of the form taxid:TaxCluster, also returns a list of the unique taxids
     clusters = {}
-    taxes = tax_tab[f'{rank}_id'].dropna().reset_index(drop = True) # select appropiate column from the tax_tab
-    uniques = taxes.unique()
-    for uniq_tax in uniques: # build clusters
-        tax_idxs = taxes.loc[taxes == uniq_tax].index
-        sub_matrix = matrix[tax_idxs]
-        clusters[uniq_tax] = TaxCluster(sub_matrix, uniq_tax, rank, dist_matrix)
+    taxes = tax_tab[rank].to_numpy()
+    # build clusters
+    for tax in np.unique(taxes):
+        sub_matrix = matrix[taxes == tax]
+        clusters[tax] = TaxCluster(sub_matrix, tax, rank, dist_matrix)
     
-    return clusters, uniques
+    return clusters
 
-def get_paired_dists(matrix, dist_matrix = cost):
+def get_paired_dists(matrix, dist_matrix=cost):
     # constructs a paired distance matrix of the given matrix using a distance matrix
     # distance data is located on the top right of the matrix
     nseqs = matrix.shape[0]
@@ -57,7 +56,7 @@ def get_rowcol(mat, idx):
     return np.concatenate((col, row))
 
 #%% classes
-class clust_iterator():
+class clust_iterator:
     def __init__(self, cluster):
         self._cluster = cluster
         self._tax_list = cluster.tax_list
@@ -71,66 +70,31 @@ class clust_iterator():
             return result
         raise StopIteration
 
-class SuperCluster():
+class SuperCluster:
     # This class contains all the taxon clusters of selected data
-    def __init__(self, matrix, tax_tab, rank, dist_matrix = cost):
-        self.clusters, self.tax_list = build_tax_clusters(matrix, tax_tab, rank, cost)
-        self.centroids = np.array([self.clusters[tax].centroid for tax in self.tax_list])
+    def __init__(self, matrix, tax_tab, rank, dist_matrix=cost):
+        self.clusters = build_tax_clusters(matrix, tax_tab, rank, cost)
+        self.tax_list = list(self.clusters)
+        self.centroids = {tax:cluster.centroid for tax, cluster in self.clusters.items()}
         self.centroid_dists = get_paired_dists(self.centroids, dist_matrix)
         self.get_collisions()
     
     def __getitem__(self, item):
         return self.clusters[item]
-
-    def get_collisions(self):
-        collisions = np.argwhere(self.centroid_dists == 0)
-        collisions = collisions[np.argwhere(collisions[:,0]<collisions[:,1])].reshape((-1,2))
-        self.collisions = [(self.tax_list[col[0]], self.tax_list[col[1]]) for col in collisions]
-    
-    def get_collapsed_data(self):
-        # this method returns the matrix of unique sequences in each taxon
-        tax_collapsed = []
-        seq_collapsed = []
-        
-        for tax in self.tax_list:
-            for seq in self.clusters[tax].collapsed:
-                tax_collapsed.append(tax)
-                seq_collapsed.append(seq)
-        
-        collapsed_data = np.array(seq_collapsed)
-        # collapse after building the matrix (in case of repeated sequences between taxons), remove repeats
-        post_collapsed_idx = windows.get_effective_seqs(collapsed_data)
-        seq_postcollapsed = []
-        tax_postcollapsed = []
-        
-        for pci in post_collapsed_idx:
-            if len(pci) == 1:
-                idx = pci[0]
-                seq_postcollapsed.append(seq_collapsed[idx])
-                tax_postcollapsed.append(tax_collapsed[idx])
-        return tax_postcollapsed, np.array(seq_postcollapsed)
     
     def __iter__(self):
         return clust_iterator(self)
 
-class TaxCluster():
+class TaxCluster:
     # this class holds the sequences of a unique taxon
     # used to generate relevant data (paired distance, dispersion, centroids) and collapse unique sequences at the taxon level
-    def __init__(self, matrix, taxid, rank, dist_matrix = cost):
+    def __init__(self, matrix, taxid, rank='genus', dist_matrix=cost):
         self.matrix = matrix
         self.paired = get_paired_dists(matrix, dist_matrix)
-        self.get_collapsed()
         self.taxid = taxid
         self.rank = rank
         self.nseqs = matrix.shape[0]
-        self.bases = matrix.shape[1]
         self.get_params()
-    
-    def get_collapsed(self):
-        uniq_idxs = windows.get_effective_seqs(self.matrix)
-        collapsed_idxs = [u[0] for u in uniq_idxs]
-        self.collapsed = self.matrix[collapsed_idxs]
-        self.nseqs_collapsed = self.collapsed.shape[0]
     
     def get_mean_dists(self):
         means = []

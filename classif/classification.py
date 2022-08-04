@@ -6,17 +6,23 @@ Created on Mon May  2 10:21:15 2022
 @author: hernan
 """
 #%% libraries
-from . import distance
 import numba as nb
 import numpy as np
-import pandas as pd
 
 #%% functions
+@nb.njit
+def calc_distance(seq1, seq2, dist_mat):
+    dist = 0
+    for x1, x2 in zip(seq1, seq2):
+        dist += dist_mat[x1, x2]
+    
+    return dist
+
 @nb.njit
 def get_dists(query, data, dist_mat):
     dist = np.zeros(data.shape[0])
     for idx, ref in enumerate(data):
-        dist[idx] = distance.calc_distance(query, ref, dist_mat)
+        dist[idx] = calc_distance(query, ref, dist_mat)
     return dist
 
 def get_neighs(q, data, dist_mat):
@@ -52,6 +58,10 @@ def dwknn(dists):
         supps = term1 * term2
         # equals an array of ((dk - di) / (dk - d1)) * ((dk + d1) / (dk + di))
     return supps
+
+def softmax(supports):
+    div = np.exp(supports).sum()
+    return np.exp(supports) / div
 
 # classification functions
 def classify(q, k, data, tax_tab, dist_mat, q_name=0, mode='majority', support_func=wknn):
@@ -100,8 +110,6 @@ def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0):
     # classification director, handles distance & support calculation, & neighbour selection
     # k defaults to all neighbours (this kills the majority vote)
     
-    # TODO: use multiple queries, q is a 2d array, q_name is an array/list
-        
     maj_results = []
     wknn_results = []
     dwknn_results = []

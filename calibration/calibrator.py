@@ -10,13 +10,21 @@ import sys
 sys.path.append('preprocess')
 sys.path.append('classif')
 #%% libraries
+import logging
 import numpy as np
 import pandas as pd
 from classif import classification
 from classif import cost_matrix
 from preprocess import feature_selection as fsele
 from preprocess import preproc
+from preprocess import taxon_study as tstud
 from preprocess import windows
+
+#%% set
+logger = logging.getLogger('Calibrator')
+logger.setLevel(logging.DEBUG)
+# set formatter
+fmtr = logging.Formatter('%(asctime) - %(levelname)s: %(message)s')
 
 #%% functions
 def get_metrics(confusion, taxons):
@@ -90,8 +98,18 @@ def build_cal_tab(pred_tax, real_tax, n_ranks=6):
     
     results = []
     # remove first(query name) and last (K) columns from predicted taxons
-    pred_cropped = pred_tax[:,1:-1]
+    pred_cropped = pred_tax[:,1:-1].T
+    real_mat = real_tax.to_numpy().T
+    ranks = real_tax.columns
     
+    for rank, pred, real in zip(ranks, pred_cropped, real_mat):
+        # build a confusion matrix and get results from there, update results table
+        rank_confusion, taxons = build_confusion(pred, real)
+        rank_metrics = get_metrics(rank_confusion, taxons)
+        rank_metrics = np.insert(rank_metrics, 0, rank, axis=1)
+        results.append(rank_metrics)
+    return np.concatenate(results)
+
     for rank in np.arange(n_ranks):
         # build a confusion matrix and get results from there, update results table
         rank_confusion, taxons = build_confusion(pred_cropped[:,rank], real_tax.iloc[:,rank].to_numpy())
@@ -124,7 +142,6 @@ def loo_calibrate(garrus, w_size, w_step, max_k, step_k, max_sites, step_sites, 
         window = garrus.loader.get_window(start, end, garrus.row_thresh, garrus.col_thresh)
         if len(window.cons_mat) == 0:
             continue
-        # TODO: tune up selector
         selector = fsele.Selector(window.cons_mat, window.cons_tax)
         selector.select_taxons(minseqs = garrus.min_seqs)
         selector.generate_diff_tab()
@@ -226,6 +243,184 @@ def loo_calibrate(garrus, w_size, w_step, max_k, step_k, max_sites, step_sites, 
                                        inplace=True)
     return calibration_result
 #%% classes
+class Calibrator0:
+    def __init__(self, out_dir, warn_dir):
+        self.out_dir = out_dir
+        self.warn_dir = warn_dir
+
+        # set handlers
+        self.warn_handler = logging.FileHandler(warn_dir)
+        self.warn_handler.setLevel(logging.WARNING)
+        self.log_handler = logging.StreamHandler()
+        self.log_handler.setLevel(logging.DEBUG)
+        # create formatter
+        self.warn_handler.setFormatter(fmtr)
+        self.log_handler.setFormatter(fmtr)
+        # add handlers
+        logger.addHandler(self.warn_handler)
+        logger.addHandler(self.log_handler)
+        
+        self.loader = None
+        self.set_row_thresh()
+        self.set_col_thresh()
+        self.set_min_seqs()
+        self.set_rank()
+        self.set_cost_mat()
+        self.report = None
+    
+    def set_database(self, mat_file, acc_file, tax_file):
+        self.loader = windows.WindowLoader('Calibrator.WindowLoader')
+        self.loader.set_files(mat_file, acc_file, tax_file)
+    
+    def set_row_thresh(self, thresh=0.2):
+        self.row_thresh = thresh
+        
+    def set_col_thresh(self, thresh=0.2):
+        self.col_thresh = thresh
+    
+    def set_min_seqs(self, min_seqs=10):
+        self.min_seqs = min_seqs
+    
+    def set_rank(self, rank='genus'):
+        self.rank = rank
+    
+    def set_cost_mat(self, transition=1, transversion=2, id=False):
+        if id:
+            self.cost_mat = cost_matrix.id_matrix()
+        else:
+            self.cost_mat = cost_matrix.cost_matrix(transition, transversion)
+    
+    def grid_search(self, w_size, w_step, max_k, step_k, max_n, step_n, min_k=1, min_n=5):
+        if self.loader is None:
+            return
+        # set calibration parameters
+        # set coordinate ranges for the sliding window
+        max_pos = self.loader.dims[1]
+        start_range = np.arange(0, max_pos - w_size, w_step)
+        if start_range[-1] < max_pos - w_size:
+            # add a tail window, if needed, to cover the entire sequence
+            np.append(start_range, max_pos - w_size)
+        end_range = start_range + w_size
+        w_coords = np.array([start_range, end_range]).T
+        
+        # k & n ranges
+        k_range = np.arange(min_k, max_k, step_k)
+        n_range = np.arange(min_n, max_sites, step_sites)
+        
+        # begin calibration
+        results = []
+        
+        for idx, (start, end) in enumerate(w_coords):
+            print(f'Window {start} - {end} ({idx + 1} of {len(w_coords)})')
+            # extract window and select atributes
+            window = self.loader.get_window(start, end, self.row_thresh, self.col_thresh)
+            if len(window.eff_mat) == 0:
+                continue
+            selector = fsele.Selector(window.cons_mat, window.cons_tax)
+            selector.select_taxons(minseqs = self.min_seqs)
+            selector.build_diff_tab()
+            
+            # preprocess
+            for n_sites in n_range:
+                print(f'\t{n_sites} sites')
+                # post collapse, generates the final data matrix and taxonomy table
+                x, y = selector.select_sites(n_sites, self.rank)
+                x, y = windows.collapse_window(x, y)
+                super_c = tstud.SuperCluster(x, y, self.rank, self.cost_mat)
+                
+                # loo_result tables are plain lists, later to be converted into np.arrays
+                # these store the classifications for each query
+                loo_maj = []
+                loo_wknn = []
+                loo_dwknn = []
+                
+                # iterate trought the data
+                idx_gen = loo_generator(x.shape[0])
+                n_seqs = x.shape[0]
+                quintile = int(n_seqs / 5)
+                
+                # outer loop
+                for train_idx, test_idx in idx_gen:
+                    if len(train_idx) == 0:
+                        # no training sequences (only 1 sequence passed the filters)
+                        continue
+                    if test_idx % quintile == 0:
+                        print(f'\t\tCalibrated {test_idx} of {n_seqs} ({(test_idx/n_seqs) * 100:.2f}%)')
+                    
+                    # build the datasets
+                    query = x[test_idx]
+                    train_data = x[train_idx]
+                    train_tax = y.iloc[train_idx]
+                    
+                    # get classifications using each method
+                    results_maj, results_wknn, results_dwknn = classification.calibration_classify(query, k_range, train_data, train_tax, self.cost_mat, q_name=test_idx)
+                    
+                    # update classification tables
+                    for res_tab, loo_tab, mode in [(results_maj, loo_maj, 'majority'),
+                                                     (results_wknn, loo_wknn, 'weighted'),
+                                                     (results_dwknn, loo_dwknn, 'weighted')]:
+                        for k, tab in zip(k_range, res_tab):
+                            # get classification for each k
+                            classif = classification.get_classif(tab, mode)
+                            # include the test idx and the used k (for the final report)
+                            classif = np.insert(classif, [0, len(classif)], [test_idx, k])
+                            loo_tab.append(classif)
+                
+                if len(loo_maj) == 0:
+                    # no reports generated for the current window
+                    continue
+                
+                # combine classification tables into np.arrays
+                loo_maj = np.array(loo_maj)
+                loo_wknn = np.array(loo_wknn)
+                loo_dwknn = np.array(loo_dwknn)
+                
+                # get classification metrics
+                cal_res = []
+                # get metrics for each mode,K,n_sites combination
+                for mode, loo_tab in enumerate((loo_maj, loo_wknn, loo_dwknn)):
+                    for k in k_range:
+                        # select the results submatrix for the current K and get the metrics for each rank
+                        k_submat = loo_tab[loo_tab[:,-1] == k]
+                        cal_tab = build_cal_tab(k_submat, y)
+                        # add remaining columns
+                        add_cols = np.tile([start, end, k, n_sites, mode], (cal_tab.shape[0], 1))
+                        cal_tab = np.concatenate((cal_tab, add_cols), axis=1)
+                        # add to results
+                        cal_res.append(cal_tab)
+                
+                # update results
+                cal_res = np.concatenate(cal_res)
+                results.append(cal_res)
+        
+        # build results table
+        calibration_result = pd.DataFrame(np.concatenate(results),
+                                          columns=['rank',
+                                                   'taxon',
+                                                   'accuracy',
+                                                   'precision',
+                                                   'recall',
+                                                   'F1_score',
+                                                   'w_start',
+                                                   'w_end',
+                                                   'K',
+                                                   'n_sites',
+                                                   'mode']) # do all three modes in a single table
+        # translate numeric codes
+        numcode_dict = {idx:rank for idx, rank in enumerate(self.loader.tax_tab.columns)}
+        calibration_result['rank'].replace(numcode_dict,
+                                           inplace=True)
+        calibration_result['mode'].replace({0:'maj',
+                                            1:'wknn',
+                                            2:'dwknn'},
+                                           inplace=True)
+        self.report = calibration_result
+    
+    def save_report(self, filename):
+        out_file = f'{self.out_dir}/{filename}'
+        if not self.report is None:
+            self.report.to_csv(out_file)
+        
 class Calibrator():
     def __init__(self, taxon, marker, in_dir, out_dir, tmp_dir, warn_dir, row_thresh=0.2, col_thresh=0.2, min_seqs=10):
         self.taxon = taxon

@@ -8,121 +8,31 @@ This script retrieves windows from a given data matrix and calculates entropy & 
 """
 
 #%% libraries
-import copy
+import logging
 import numba as nb
 import numpy as np
-import os
 import pandas as pd
 from classif import cost_matrix
+
 #%%
 # filter matrix
 def filter_matrix(matrix, thresh = 1, axis = 0):
-    # filter rows (axis = 0) or columns (axis = 1) according to a maximum number of empty values
-    n_lines = matrix.shape[axis]
-    n_places = matrix.shape[[1,0][axis]]
-    filtered_idx = []
-    max_empty = thresh * n_places
-
-    for idx in np.arange(n_lines):
-        if axis == 0:
-            line = matrix[idx, :]
-        else:
-            line = matrix[:, idx]
-
-        vals, counts = np.unique(line, return_counts = True)
-        if not 16 in vals:
-            filtered_idx.append(idx)
-            continue
-        empty_idx = np.argwhere(vals == 16)
-        if counts[empty_idx] < max_empty:
-            filtered_idx.append(idx)
+    # filter columns (axis = 0) or rows (axis = 1) according to a maximum number of empty values
+    # return filtered indexes
+    empty_cells = matrix == 0
+    n_empty = np.sum(empty_cells, axis = axis)
     
-    return np.array(filtered_idx).astype(int)
+    max_empty = thresh * matrix.shape[axis]
+    filtered = np.argwhere(n_empty <= max_empty)
+        
+    return filtered
 
-def filter_rows(matrix):
-    # keeps the index of all non empty rows
-    filtered_idx = []
-    n_rows, n_cols = matrix.shape
-
-    for idx, row in enumerate(matrix):
-        vals, counts = np.unique(row, return_counts = True)
-        if len(vals) == 1 and vals[0] == 16:
-            continue
-        filtered_idx.append(idx)
-    return filtered_idx
-
-def filter_cols(matrix, thresh = 0.2):
-    # filter columns by a minimum of empty rows (given as a percentage by thresh)
-    filtered_idx = []
-    n_rows, n_cols = matrix.shape
-    max_empty = n_rows * thresh
-
-    for i in range(n_cols):
-        vals, counts = np.unique(matrix[:,i], return_counts = True)
-        if not 16 in vals:
-            filtered_idx.append(i)
-            continue
-        empty_idx = np.argwhere(vals == 16)
-        if counts[empty_idx] <= max_empty:
-            filtered_idx.append(i)
-    
-    return filtered_idx
-
+#%% Old collapsing functions
+# TODO: delete this entire cell once the new one is tested
 # collapse unique rows
-#%%
-@nb.njit
-def get_slice(arr, idx):
-    # this function slices a 2d array in numba (numba can't handle regular slicing)
-    n = len(idx)
-    k = arr[0].shape[0]
-    sliced = np.zeros((n,k), dtype = np.int32)
-
-    for iidx, i in enumerate(idx):
-        sliced[iidx] = arr[i]
-
-    return sliced
-
-@nb.njit
-def get_val_idx(col):
-    # get the indexes for each unique value in the column
-    col_values = np.unique(col)
-    col_values = col_values[col_values != 16]
-    # generate at least one index array (this step is needed for the case in shich the entire column is unknown)
-    n_values = range(max(1, len(col_values)))
-    indexes = [np.empty(0, dtype = np.int64) for val in n_values]
-    # every index array will include the indexes of the missing values
-    missing = np.argwhere(col == 16).flatten()
-    for idx, value in enumerate(col_values):
-        val_idxs = np.argwhere(col == value).flatten()
-        indexes[idx] = val_idxs
-    for idx, index in enumerate(indexes):
-        indexes[idx] = np.concatenate((index, missing))
-    return indexes
-
-@nb.njit
-def get_effective_seqs(matrix=np.array([[]]), row_idx=None, col_idx=0):
-    # returns a list of indexes from each cluster of unique sequences
-    # set initial rows
-    if row_idx is None:
-        row_idx = np.arange(matrix.shape[0])
-    uniq_seqs = [[0]] # this is used to define the datatype (lists of integers) to be used in uniq_seqs (keeps numba from bitching)
-    sub_mat = get_slice(matrix, row_idx)
-    uniq_val_idxs = get_val_idx(sub_mat[:, col_idx])
-    
-    for val_idx in uniq_val_idxs:
-        row_idx1 = row_idx[val_idx].flatten()
-        # stop conditions: last column reached or only one row remaining
-        if len(row_idx1) == 1 or col_idx + 1 == matrix.shape[1]:
-            uniq_seqs.append(list(row_idx1))
-            continue
-        uniq_seqs += get_effective_seqs(matrix, row_idx1, col_idx + 1)
-    return uniq_seqs[1:] # slice result to omit the initial 0 when defining uniq_seqs
-# run the function to pre-compile it
-TEST = np.array([[1,2,3],[1,2,3],[1,2,4]])
-get_effective_seqs(TEST)
-
 def build_cons_tax(subtab):
     # recieves a taxonomc subtable of all the integrants of a sequence cluster
+    # TODO: NOTE: curent confilciting values are left as 0
     cols = subtab.columns[1:] # drop accession column
     cons_tax = pd.Series(index=cols, dtype = int)
     for idx, rk in enumerate(cols):
@@ -133,93 +43,7 @@ def build_cons_tax(subtab):
             cons_tax.iloc[idx:] = uniq_vals[0]
     return cons_tax
 
-def get_reps(array):
-    # generates a dictionary of representatives for each cluster of effective sequences
-    reps = {}
-    for uq in array:
-        if len(uq) == 1:
-            reps[uq[0]] = uq
-        else:
-            reps[uq[0]] = uq
-    return reps
-
-def get_shared_seqs(reps_dict):
-    # generates a dictionary with shared sequences and their respective owners
-    owners = {}
-    for rep, seqs in reps_dict.items():
-        for seq in seqs:
-            if seq in owners.keys():
-                owners[seq].append(rep)
-            else:
-                owners[seq] = [rep]
-    shared = {seq:owns for seq, owns in owners.items() if len(owns) > 1}
-    return shared
-
-def clear_reps(reps_dict, shared_dict):
-    # uses the reps and shared dicts to remove shared sequences
-    clear_dict = copy.deepcopy(reps_dict)
-    for seq, owns in shared_dict.items():
-        for owner in owns:
-            clear_dict[owner].remove(seq)
-    clear_dict = {k:v for k,v in clear_dict.items() if len(v) > 0}
-    rename_reps(clear_dict, set(shared_dict.keys()))
-    return clear_dict
-
-def rename_reps(reps_dict, shared_seqs):
-    # use this on the clear_dict, shared_seqs is a set of the shared_dict keys
-    # if a given cluster's representative is a shared sequence, replace it with another sequence from the cluster
-    to_rename = shared_seqs.intersection(reps_dict.keys())
-    for rep in to_rename:
-        new_name = reps_dict[rep][0]
-        reps_dict[new_name] = reps_dict.pop(rep)
-
-def make_effective_seq(matrix, repidx=0):
-    # gets the effective sequence of a cluster, taking the known value over the unknown when possible
-    # all sites are unknown by default
-    effective_seq = np.ones(matrix.shape[1], dtype = int) * 16
-    # transpose the matrix to traverse each column as a row
-    if matrix.shape[0] == 1:
-        # single row in matrix, effective_seq already known
-        effective_seq = matrix[0]
-        return effective_seq
-
-    for idx, row in enumerate(matrix.T):
-        vals = np.unique(row)
-        effective_seq[idx] = min(vals)
-        # contingency: more than one known value in the cluster (THIS SHOULD NEVER HAPPEN)
-        if len(vals) > 1:
-            if not 16 in vals:
-                print(f'{repidx} site {idx} is has conflicts')
-                effective_seq[idx] = -1
-    return effective_seq
-
-def collapse(matrix, tax_tab):
-    # directs construction of the collapsed matrix and taxonomy table
-    effective_seqs = get_effective_seqs(matrix)
-    reps = get_reps(effective_seqs)
-    shared = get_shared_seqs(reps)
-    clear = clear_reps(reps, shared)
-    rename_reps(clear, set(shared.keys()))
-
-    effective_rows = []
-    for rep, cluster in clear.items():
-        clear_submat = matrix[cluster]
-        effective_rows.append(make_effective_seq(clear_submat, rep))
-    collapsed_mat = np.array(effective_rows)
-    collapsed_tax = pd.DataFrame(index = clear.keys(), columns = tax_tab.columns[1:], dtype = int)
-    
-    for rep, clust in clear.items():
-        if len(clust) == 1:
-            collapsed_tax.at[rep] = tax_tab.loc[rep] # add the representative's taxonomy to the consensus tab (if it is the only member of the group)
-        else:
-            # build consensus taxonomy for all the integrants of the cluster
-            subtab = tax_tab.loc[clust]
-            collapsed_tax.at[rep] = build_cons_tax(subtab)
-    
-    collapsed_tax.reset_index(drop=True, inplace=True)
-    return collapsed_mat, collapsed_tax.astype(int)
-
-#%% new function to get effective seqs better, stronger faster
+# new function to get effective seqs better, stronger faster
 ID_MAT = cost_matrix.id_matrix()
 ID_MAT[-1]=0
 ID_MAT[:,-1]=0
@@ -231,40 +55,7 @@ def get_ident(seq0, seq1):
             return False
     return True
 
-def get_effective_seqs_3(matrix):
-    # uses the numba get_ident function for distance calculation
-    # removes clustered sequences from the search
-    seqs = set(np.arange(matrix.shape[0]))
-    repeated = set()
-    for idx0, seq0 in enumerate(matrix):
-        if idx0 in repeated:
-            continue
-        for idx1, seq1 in enumerate(matrix[idx0+1:]):
-            if (idx1 + idx0 + 1) in repeated:
-                continue
-            ident = get_ident(seq0, seq1)
-            if ident:
-                repeated.add(idx0)
-                repeated.add(idx1 + idx0 + 1)
-    effective_seqs = np.array(list(seqs.difference(repeated)))
-    return effective_seqs
-
-def get_effective_clusters(matrix):
-    # cluster all rows with no differences in the KNOWN (!= 16) sequence
-    eff_clusts = {}
-    unassigned = np.arange(matrix.shape[0])
-    while len(unassigned) > 0:
-        rep = unassigned[0]
-        members = []
-        to_remove = []
-        for idx0, (idx1, seq) in enumerate(zip(unassigned, matrix[unassigned])):
-            if get_ident(rep, seq):
-                members.append(idx1)
-                to_remove.append(idx0)
-        eff_clusts[rep] = members
-        unassigned = np.delete(unassigned, to_remove)
-    return eff_clusts
-#%%
+#
 SH_MAT = np.zeros((17,17), dtype = int)
 SH_MAT[-1,:-1] = -1
 SH_MAT[:-1,-1] = 1
@@ -376,112 +167,176 @@ def collapse_1(matrix, tax_tab):
     
     collapsed_tax.reset_index(drop=True, inplace=True)
     return cropped_seqs, collapsed_tax.astype(int)
+
+#%% New collapsing functions
+# TODO: Test these
+def build_effective_matrix(eff_idxs, matrix):
+    # construct the effective sequence for each given custer
+    effective_matrix = np.zeros((len(eff_idxs), matrix.shape[1]))
+    for idx, cluster in enumerate(eff_idxs):
+        # since unknown values are 0 and each column can have AT MOST two values
+        # effective sequence is the maximum value for each column
+        effective_matrix[idx] = np.max(matrix[cluster], axis = 0)
+    return effective_matrix
+
+def build_effective_taxonomy(eff_idxs, tax_tab):
+    # construct the effective taxonomy for each cluster
+    n_ranks = tax_tab.shape[1]
+    effective_taxes = np.zeros((len(eff_idxs), n_ranks))
+    # turn table to array, easier to handle
+    tax_mat = tax_tab.to_numpy()
+    for idx0, cluster in enumerate(eff_idxs):
+        # prepare consensus taxonomy
+        clust_tax = np.zeros(n_ranks)
+        # transpose sub_mat to iterate trough columns
+        sub_mat = tax_mat[cluster].T
+        # previous unconflicting taxon, starts as 0
+        p_tax = 0
+        for idx, rank in enumerate(sub_mat):
+            uniq_vals = np.unique(rank)
+            if len(uniq_vals) > 1:
+                # rank contains multiple taxon. Conflict, set this and all subsequent positions as last unconflicting taxon and break
+                clust_tax[idx:] = p_tax
+                break
+            # no conflict, set taxon and update p_tax
+            clust_tax[idx] = uniq_vals
+            p_tax = uniq_vals
+        # add completed taxonomy
+        effective_taxes[idx0] = clust_tax
+    effective_taxes = pd.DataFrame(effective_taxes, columns = tax_tab.columns)
+    return effective_taxes
+
+def collapse_window(matrix, tax_tab):
+    tree = Tree()
+    tree.build(matrix)
+    
+    eff_idxs = [lv[0] for lv in tree.leaves]
+    eff_mat = build_effective_matrix(eff_idxs, matrix)
+    eff_tax = build_effective_taxonomy(eff_idxs, tax_tab)
+    return eff_mat, eff_tax
 #%% classes
-class WindowLoader():
-    def __init__(self, taxon, marker, in_dir, out_dir, tmp_dir, warn_dir):
-        self.taxon = taxon
-        self.marker = marker
-        self.in_dir = in_dir
-        self.out_dir = out_dir
-        self.tmp_dir = tmp_dir
-        self.warn_dir = warn_dir
-        self.warnings = []
-        self.prefix = f'{in_dir}/{taxon}_{marker}'
-        self.__get_files()
-        self.__load_metafiles()
-        self.__set_matfile()
-        self.window = np.empty(0)
-    
-    def __get_files(self):
-        suffixes = ['.npy', '.dims', '.acclist', '.taxid']
-        
-        files = [None, None, None, None]
-        
-        for idx, sfx in enumerate(suffixes):
-            filename = f'{self.prefix}{sfx}'
-            if not os.path.isfile(filename):
-                self.warnings.append(f'WARNING: file {filename} not found in {self.in_dir}')
-                continue
-            files[idx] = filename
-
-        self.mat_file = files[0]
-        self.dim_file = files[1]
-        self.acc_file = files[2]
-        self.tax_file = files[3]
-    
-    def __load_metafiles(self):
+class WindowLoader:
+    def __init__(self, logger = 'WindowLoader'):
+        # logger set at initialization (because this class may be used by multiple modules)
+        self.logger = logging.getLogger(logger)
+        self.mat_file = None
+        self.acc_file = None
+        self.tax_file = None
+        self.matrix = None
         self.dims = None
-        self.accs = None
-
-        if not self.dim_file is None:
-            self.dims = tuple(pd.read_csv(self.dim_file, sep = '\t', header = None).iloc[0])
-
-        if not self.acc_file is None:
-            with open(self.acc_file, 'r') as handle:
-                self.accs = handle.read().splitlines()
+        self.acclist = None
+        self.tax_tab = None
+        
+    def set_files(self, mat_file, acc_file, tax_file):
+        self.mat_file = mat_file
+        self.acc_file = acc_file
+        self.tax_file = tax_file
+        # load matrix
+        self.matrix = np.load(mat_file)
+        self.dims = self.matrix.shape
+        # load acclist
+        with open(acc_file, 'r') as acc_handle:
+            self.acclist = acc_handle.read().splitlines()
+        # load tax tab
+        self.tax_tab = pd.read_csv(tax_file, index_col=0)
     
-    def __set_matfile(self):
-        if not self.mat_file is None:
-            self.matrix = np.memmap(self.mat_file, dtype = np.int64, mode = 'r', shape = self.dims)
-    
-    def get_window(self, wstart, wend, row_thresh = 0.2, col_thresh = 0.2):
-        self.window = np.empty(0)
+    def get_window(self, start, end, row_thresh=0.2, col_thresh=0.2):
         self.rows = []
         
         if self.dims is None:
             return
 
-        if wstart < 0 or wend > self.dims[1]:
-            print(f'Invalid window dimensions: start:{wstart}, end:{wend}.\nMust be between 0 and {self.dims[1]}')
+        if start < 0 or end > self.dims[1]:
+            self.logger.warning(f'Invalid window dimensions: start: {start}, end: {end}. Must be between 0 and {self.dims[1]}')
             return
 
-        window = np.array(self.matrix[:, wstart:wend])
+        window = np.array(self.matrix[:, start:end])
         # Windows are handled as a different class
-        out_window = Window(window, wstart, wend, row_thresh, col_thresh, self)
+        out_window = Window(window, start, end, row_thresh, col_thresh, self)
         return out_window
-    
-    def load_acctab(self, row_list):
-        filtered_accs = [self.accs[row] for row in row_list]
-        tab = pd.read_csv(self.tax_file, index_col = 0)
-        return tab.loc[filtered_accs].reset_index()
 
-class Window():
-    def __init__(self, matrix, wstart, wend, row_thresh = 0.2, col_thresh = 0.2, loader = None):
+class Window:
+    def __init__(self, matrix, start, end, row_thresh = 0.2, col_thresh = 0.2, loader = None):
         self.matrix = matrix
-        self.wstart = wstart
-        self.wend = wend
-        self.width = wend - wstart
+        self.start = start
+        self.end = end
         self.loader = loader
         self.shape = (0,0)
         self.process_window(row_thresh, col_thresh)
+        self.window = None
+        self.cons_mat = None
+        self.cons_tax = None
     
+    @property
+    def window(self):
+        return self.matrix[self.rows][:, self.cols]
+    
+    @property
+    def tax_tab(self):
+        if self.loader is None:
+            return None
+        return self.loader.tax_tab.iloc[self.rows]
+    
+    @property
+    def col_idxs(self):
+        return self.cols + self.start
+
     def process_window(self, row_thresh, col_thresh):
         # run this method every time you want to change the column threshold
         self.row_thresh = row_thresh
         self.col_thresh = col_thresh
         
         # fitler rows first
-        rows = filter_matrix(self.matrix, row_thresh, axis = 0)
-        cols = filter_matrix(self.matrix[rows], col_thresh, axis = 1)
-        window = self.matrix[rows][:, cols]
-        # TODO: delete these 2 attrs (fool)
-        # self.min_seqs = window.shape[0] * (1-col_thresh)
-        # self.min_sites = window.shape[1] * (1-row_thresh)
-        self.cols = cols
+        rows = filter_matrix(self.matrix, row_thresh, axis = 1)
+        cols = filter_matrix(self.matrix[rows], col_thresh, axis = 0)
+        
         self.rows = rows
-        self.shape = window.shape
-        self.window = window
-        self.get_taxtab()
+        self.cols = cols
+        self.shape = (len(rows), len(cols))
+        # self.window = window
+        
         # collapse windows
-        # self.cons_mat, self.cons_tax = collapse(self.window, self.tax_tab)
-        self.cons_mat, self.cons_tax = collapse_1(self.window, self.tax_tab)
-
-    def get_taxtab(self):
-        # load the accession table for the current window (depends on the window loader existing)
-        self.tax_tab = None
-        if self.loader is None:
-            return
-        self.tax_tab = self.loader.load_acctab(self.rows)
+        # self.cons_mat, self.cons_tax = collapse_1(self.window, self.tax_tab)
+        self.collapse_window()
     
-    def get_col_idxs(self):
-        return np.array(self.cols) + self.wstart
+    def collapse_window(self):
+        tree = Tree()
+        tree.build(self.window)
+        
+        self.eff_idxs = [lv[0] for lv in tree.leaves]
+        self.eff_mat = build_effective_matrix(self.eff_idxs, self.window)
+        self.eff_tax = build_effective_taxonomy(self.eff_idxs, self.tax_tab)
+        
+
+#%%
+# TODO: test these
+# TODO: maybe coud be changed into a numba function
+class Tree:
+    def build(self, matrix):
+        self.leaves = []
+        t_matrix = matrix.T
+        Node(0, None, t_matrix[0], np.arange(t_matrix.shape[1]), t_matrix, self)
+
+class Node:
+    def __init__(self, lvl, value, row, indexes, matrix, tree):
+        self.lvl = lvl
+        self.row = row
+        self.indexes = indexes
+        self.matrix = matrix
+        self.tree
+        self.children = []
+        if lvl + 1 < len(matrix):
+            self.get_children()
+        else:
+            tree.leaves.append(indexes)
+    
+    def get_children(self):
+        vals = np.unique(self.row)
+        vals = vals[vals != 0]
+        zeros = np.argwhere(self.row == 0).flatten()
+        for val in vals:
+            indexes = np.argwhere(self.row == val).flatten()
+            indexes = np.concatenate((zeros, indexes))
+            indexes = self.indexes[indexes]
+            row = self.matrix[self.lvl + 1, indexes]
+            self.children.append(Node(self.lvl + 1, self, val, row, indexes, self.matrix, self.tree))

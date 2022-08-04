@@ -18,8 +18,9 @@ import pandas as pd
 logger = logging.getLogger('mapping_logger.Matrix')
 
 #%% vars
-bases = '-acgturykmswbdhvn'
+bases = 'nacgturykmswbdhv'
 tr_dict = {base:idx for idx, base in enumerate(bases)} | {base:idx for idx, base in enumerate(bases.upper())}
+tr_dict['-'] = 0
 #%% functions
 def make_transdict():
     translation_dict = {}

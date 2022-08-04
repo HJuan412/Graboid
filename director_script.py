@@ -114,15 +114,82 @@ mp_parser.add_argument('-t', '--threads',
 #%% calibrate parser
 cb_parser = argparse.ArgumentParser(prog='Graboid CALIBRATE',
                                     usage='%(prog)s MODE_ARGS [-h]',
-                                    description='Graboid CALIBRATE generates a training report for the sequence database')
+                                    description='Graboid CALIBRATE performs a grid search of the given ranges of K and n along a sliding window over the alignment matrix')
 cb_parser.add_argument('mode')
-cb_parser.add_argument('-i', '--in_dir')
-cb_parser.add_argument('-wl', '--window_length')
-cb_parser.add_argument('-ws', '--window_step')
-cb_parser.add_argument('-k', '--k_range')
-cb_parser.add_argument('-ks', '--k_step')
-cb_parser.add_argument('-s', '--sites_range')
-cb_parser.add_argument('-ss', '--sites_step')
+cb_parser.add_argument('-o', '--out_dir',
+                       help='Output directory for the generated files',
+                       type=str)
+cb_parser.add_argument('-mat', '--mat_file',
+                       help='File containing the alignment matrix',
+                       type=str)
+cb_parser.add_argument('-acc', '--acc_file',
+                       help='File containing the accession list for the alignment matrix',
+                       type=str)
+cb_parser.add_argument('-tax', '--tax_file',
+                       help='File containing the taxonomy data for the alignment matrix',
+                       type=str)
+cb_parser.add_argument('-rt', '--row_thresh',
+                       help='Empty row threshold',
+                       type=float,
+                       default=0.2)
+cb_parser.add_argument('-ct', '--col_thresh',
+                       help='Empty column threshold',
+                       type=float,
+                       default=0.2)
+cb_parser.add_argument('-ms', '--min_seqs',
+                       help='Minimum number of sequences allowed per taxon',
+                       type=int,
+                       default=10)
+cb_parser.add_argument('-rk', '--rank',
+                       help='Rank to be used for feature selection',
+                       type=str,
+                       default='genus')
+cb_parser.add_argument('-ts', '--transition',
+                       help='Transition penalization in the distance matrix',
+                       type=float,
+                       default=1)
+cb_parser.add_argument('-tv', '--transversion',
+                       help='Transversion penalization in the distance matrix',
+                       type=float,
+                       default=1)
+cb_parser.add_argument('--id',
+                       help='Use the identity matrix for distance calculation',
+                       action='store_true')
+cb_parser.add_argument('-wz', '--w_size',
+                       help='Sliding window size',
+                       type=int,
+                       default=200)
+cb_parser.add_argument('-wt', '--w_step',
+                       help='Sliding window displacement',
+                       type=int,
+                       default=15)
+cb_parser.add_argument('-mk', '--max_k',
+                       help='Max value of K',
+                       type=int,
+                       default=15)
+cb_parser.add_argument('-sk', '--step_k',
+                       help='Rate of increase of K',
+                       type=int,
+                       default=2)
+cb_parser.add_argument('-mn', '--max_n',
+                       help='Max value of n',
+                       type=int,
+                       default=30)
+cb_parser.add_argument('-sn', '--step_n',
+                       help='Rate of increase of n',
+                       type=int,
+                       default=5)
+cb_parser.add_argument('-nk', '--min_k',
+                       help='Min value of K',
+                       type=int,
+                       default=1)
+cb_parser.add_argument('-nn', '--min_n',
+                       help='Min value of n',
+                       type=int,
+                       default=5)
+cb_parser.add_argument('-f', '--out_file',
+                       help='File name for the generated report (Will save into the given out_file)',
+                       type=str)
 
 #%% design parser
 ds_parser = argparse.ArgumentParser(prog='Graboid DESIGN',
@@ -177,6 +244,7 @@ print(args)
 def main(mode, args):
     from data_fetch.database_construction import director as db
     from data_fetch.dataset_construction import director as mp
+    from calibration import calibrator as cb
     if mode == 'DATABASE':
         if (args.taxon is None or args.marker is None) and args.fasta is None:
             sys.argv.append('--help')
@@ -223,3 +291,33 @@ def main(mode, args):
         
         # Perform BLAST and build matrix
         mp_director.direct(args.fasta, args.out_name, args.evalue, args.threads)
+    
+    elif mode == 'CALIBRATE':
+        cb_out, cb_warn = cb.make_dirs(args.out_dir)
+        calibrator = cb.Calibrator(cb_out, cb_warn)
+        
+        # set parameters
+        calibrator.set_row_thresh(args.row_thresh)
+        calibrator.set_col_thresh(args.col_thresh)
+        calibrator.set_min_seqs(args.min_seqs)
+        calibrator.set_rank(args.rank)
+        calibrator.set_cost_mat(args.transition, args.transversion, args.id)
+        
+        # load data
+        if args.mat_file is None or args.acc_file is None or args.tax_file is None:
+            print('One of the necesary files for calibration (mat_file, acc_file or tax_file) is missing')
+            return
+        if args.out_file is None:
+            print('Missing argument for the output file (out_file)')
+            return
+        calibrator.set_database(args.mat_file, args.acc_file, args.tax_file)
+        # calibration
+        calibrator.grid_search(args.w_size,
+                               args.w_step,
+                               args.max_k,
+                               args.step_k,
+                               args.max_n,
+                               args.step_n,
+                               args.min_k,
+                               args.min_n)
+        calibrator.save_report(args.out_file)

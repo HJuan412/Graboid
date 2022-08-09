@@ -24,6 +24,7 @@ class SurveyTool:
         self.taxon = taxon
         self.marker = marker
         self.database = self.get_dbase()
+        self.get_logger()
         self.generate_outfile(out_dir)
         self.attempt = 1
         self.max_attempts = 3
@@ -77,7 +78,7 @@ class SurveyBOLD(SurveyWAPI):
         return 'BOLD'
 
     def get_url(self):
-        apiurl = f'http://www.boldsystems.org/index.php/API_Public/specimen?taxon={self.taxon}&format=tsv'
+        # apiurl = f'http://www.boldsystems.org/index.php/API_Public/specimen?taxon={self.taxon}&format=tsv'
         # TODO: BOLD downloads take too long regardless of mode (summary or sequence), furthermore, the api used to build the summary doesn't allow filtering by marker
         apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={self.taxon}&marker={self.marker}&format=tsv' # this line downloads sequences AND taxonomies
         return apiurl
@@ -134,7 +135,7 @@ class Surveyor:
             return
         
         tool = Surveyor.tooldict[database](taxon, marker, self.out_dir)
-        logging.info(f'Surveying database {database} for {self.taxon} {self.marker}')
+        logging.info(f'Surveying database {database} for {taxon} {marker}')
         
         tool.survey(max_attempts)
         if tool.done:

@@ -47,7 +47,7 @@ class Director:
         self.tmp_dir = tmp_dir
         self.warn_dir = warn_dir
         # set handlers
-        self.warn_handler = logging.FileHandler(warn_dir)
+        self.warn_handler = logging.FileHandler(warn_dir + '/database.warnings')
         self.warn_handler.setLevel(logging.WARNING)
         self.log_handler = logging.StreamHandler()
         self.log_handler.setLevel(logging.DEBUG)

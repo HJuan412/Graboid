@@ -97,7 +97,7 @@ def build_coords(subtab, offset):
 def build_row0(seq, seq_coords, mat_coords, rowlen):
     row = np.zeros(rowlen, dtype = int)
     for seq_coor, mat_coor in zip(seq_coords, mat_coords):
-        subseq = subseq = seq[seq_coor[0]:seq_coor[1]+1]
+        subseq = seq[seq_coor[0]:seq_coor[1]+1]
         numseq = np.array([tr_dict[base] for base in subseq], dtype = 'int64')
         row[mat_coor[0]:mat_coor[1]+1] = numseq
     return row
@@ -109,6 +109,30 @@ def build_row(acc, seq, seq_coords, mat_coords, rowlen, transdict):
         numseq = np.array([transdict[base] for base in subseq], dtype = 'int64')
         row[mat_coor[0]:mat_coor[1]+1] = numseq    
     return row.astype(np.int64)
+
+def build_query_window(query_blast, seq_file, w_start=None, w_end=None, w_dict=None):
+    # TODO: need to keep track of the offset of the reference alignment matrix
+    blast_tab = read_blast(query_blast)
+    
+    # get aligned sequences
+    sequences = get_seqs(seq_file, blast_tab)
+    rows = []
+    acclist = []
+    for qid, subtab in blast_tab.groupby('qseqid'):
+        coord_mat = subtab[['qstart', 'qend', 'sstart', 'send']].to_numpy()
+        # coord_mat[:, 2:] -= offset
+        seq_coords, mat_coords = build_coords0(coord_mat)
+        rowlen = mat_coords[:, 3].max()
+        row = build_row0(sequences[qid], seq_coords, mat_coords, rowlen)
+        rows.append(row)
+        acclist.append(qid)
+    
+    if not w_dict is None:
+        rows = np.array([rows[w_dict[acc][0]:w_dict[acc][1] + 1] for acc in acclist])
+    else:
+        rows = np.array(rows)
+        rows = rows[:, w_start:w_end + 1]
+    return np.array(rows), acclist
 
 def plot_coverage_data(blast_file, evalue = 0.005, figsize=(12,7)):
     # TODO: save plot to file
@@ -177,7 +201,7 @@ class MatBuilder:
             coord_submat = coord_mat[blast_tab['qseqid'] == acc]
             # seq_coords, mat_coords = build_coords(subtab[['qstart', 'qend', 'sstart', 'send']], self.offset)
             seq_coords, mat_coords = build_coords0(coord_submat)
-            row = build_row0(acc, seq, seq_coords, mat_coords, self.dims[1], self.transdict)
+            row = build_row0(seq, seq_coords, mat_coords, self.dims[1])
             
             matrix[accnum,:] = row
             self.acclist.append(acc)

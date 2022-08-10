@@ -69,7 +69,7 @@ def fetch_bold(taxon, marker, out_seqs, out_taxs = None):
         fetch_api(apiurl, out_handle)
     return
 ###############################################################################
-def fetch_seqs(acc_list, database, out_header, chunk_size=500, max_attempts=3):
+def fetch_seqs(acc_list, database, out_header, bold_file=None, chunk_size=500, max_attempts=3):
     # this performs a single pass over the given acc_list
     # chunks that can't be downloaded are returned in the failed list
     failed = []
@@ -96,58 +96,78 @@ def get_accs_from_fasta(fasta_file):
 #%% classes
 class NCBIFetcher:
     # This class handles record download from NCBI
-    def __init__(self, out_header):
+    def __init__(self, out_header, bold_file=None):
         # out_header is used to generate the names for the output files
         self.out_seqs = f'{out_header}.seqtmp'
         self.out_taxs = f'{out_header}.taxtmp'
         self.logger = logging.getLogger('database_logger.fetcher.NCBI')
 
-    def fetch(self, acc_list, chunk_n=0, max_attempts=3):
+    def fetch(self, acc_list, chunk_size=500, max_attempts=3):
         # download acc_list sequences from NCBI to a fasta file and tax ids to an acc:taxID list
-        # return True if successful
-        chunksize = len(acc_list)
-        attempt = 1
-        while attempt <= max_attempts:
-            try:
-                # contact NCBI and attempt download
-                seq_handle = Entrez.efetch(db = 'nucleotide', id = acc_list, rettype = 'fasta', retmode = 'xml')
-                seqs_recs = Entrez.read(seq_handle)
-                
+        # chunks that can't be downloaded are returned in the failed list
+        failed = []
+        # split acc_list
+        chunks = acc_slicer(acc_list, chunk_size)
+        n_chunks = int(np.ceil(len(acc_list)/chunk_size))
+        
+        for chunk_n, chunk in enumerate(chunks):
+            print(f'Downloading chunk {chunk_n + 1} of {n_chunks}')
+            attempt = 1
+            while attempt <= max_attempts:
                 seqs = []
-                taxs = {'Accession':[], 'TaxID':[]}
-                
-                # generate seq records and acc:taxid series
-                for acc, seq in zip(acc_list, seqs_recs):
-                    seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
-                    taxs['Accession'].append(acc)
-                    taxs['TaxID'].append(seq['TSeq_taxid'])
-                
-                # save seq recods to fasta
-                with open(self.out_seqs, 'a') as out_handle0:
-                    SeqIO.write(seqs, out_handle0, 'fasta')
-                # save tax table to csv
-                taxs = pd.DataFrame(taxs)
-                taxs.to_csv(self.out_taxs, header = False, index = False, mode='a')
-                return True
-            except:
-                self.logger.warning(f'Chunk {chunk_n} download interrupted at {len(seqs)} of {chunksize}. {max_attempts - attempt} attempts remaining')
-                attempt += 1
-        return False
+                try:
+                    # contact NCBI and attempt download
+                    seq_handle = Entrez.efetch(db = 'nucleotide', id = chunk, rettype = 'fasta', retmode = 'xml')
+                    seqs_recs = Entrez.read(seq_handle)
+                    
+                    seqs = []
+                    taxs = {'Accession':[], 'TaxID':[]}
+                    
+                    # generate seq records and acc:taxid series
+                    for acc, seq in zip(chunk, seqs_recs):
+                        seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
+                        taxs['Accession'].append(acc)
+                        taxs['TaxID'].append(seq['TSeq_taxid'])
+                        
+                    # save seq recods to fasta
+                    with open(self.out_seqs, 'a') as out_handle0:
+                        SeqIO.write(seqs, out_handle0, 'fasta')
+                    # save tax table to csv
+                    taxs = pd.DataFrame(taxs)
+                    taxs.to_csv(self.out_taxs, header = False, index = False, mode='a')
+                    break
+                except:
+                    self.logger.warning(f'Chunk {chunk_n} download interrupted at {len(seqs)} of {chunk_size}. {max_attempts - attempt} attempts remaining')
+                    attempt += 1
+                    failed += chunk
+        
+        return failed
 
 class BOLDFetcher:
-    def __init__(self, out_header):
+    def __init__(self, out_header, bold_file):
         self.out_seqs = f'{out_header}.seqtmp'
         self.out_taxs = f'{out_header}.taxtmp'
+        self.bold_file = bold_file
         self.logger = logging.getLogger('database_logger.fetcher.BOLD')
 
-    def fetch(self, acc_list, chunk_n=0, max_attempts=3):
-        # TODO: Rework this function to work on full records downloaded by surveyor (do bold postproc's job)
-        # downloads sequence AND summary
-        self.__set_outfiles()
-        apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={self.taxon}&marker={self.marker}&format=tsv'
-        with open(self.out_seqs, 'ab') as out_handle:
-            fetch_api(apiurl, out_handle)
-        return
+    def fetch(self, acc_list, chunk_size=0, max_attempts=3):
+        # read table and get records in acc_list
+        bold_tab = pd.read_csv(self.bold_file, sep = '\t', encoding = 'latin-1', dtype = str) # latin-1 to parse BOLD files
+        bold_tab = bold_tab.loc[bold_tab['sampleid'].isin(acc_list)]
+        bold_tab.set_index('sampleid', inplace=True)
+        # get sequences and taxonomy table
+        seq_subtab = bold_tab['nucleotides']
+        tax_subtab = bold_tab.loc[:, 'phylum_taxID':'subspecies_name']
+        # save results
+        records = []
+        for acc, seq in seq_subtab.iteritems():
+            records.append(SeqRecord(id=acc, seq = Seq(seq.replace('-', '')), description = ''))
+        
+        with open(self.out_seqs, 'a') as out_handle:
+            SeqIO.write(records, out_handle, 'fasta')
+        tax_subtab.to_csv(self.out_taxs)
+        
+        return []
 
 fetch_dict = {'BOLD':BOLDFetcher,
               'NCBI':NCBIFetcher}
@@ -158,6 +178,7 @@ class Fetcher():
         self.out_dir = out_dir
         self.seq_files = {}
         self.tax_files = {}
+        self.bold_file = None
     
     def load_accfile(self, acc_file):
         self.acc_file = acc_file
@@ -166,13 +187,20 @@ class Fetcher():
         # generate header for output files
         out_header = acc_file.split('/')[-1].split('.')[0]
         self.out_header = f'{self.out_dir}/{out_header}'
-        failed_file = acc_file.split('.')[0]
-        self.failed_file = f'{failed_file}_failed.acc'
+        self.failed_file = f'{self.out_dir}/{out_header}_failed.acc'
     
+    def set_bold_file(self, bold_file):
+        # Bold summary file needed to extract sequences and taxonomic data from
+        self.bold_file = bold_file
+        
     def check_accs(self):
         if len(self.acc_tab) == 0:
             logger.warning(f'Accession table from {self.acc_file} is empty')
             return False
+        if 'BOLD' in self.acc_tab['Database']:
+            if self.bold_file is None:
+                logger.warning(f'BOLD records detected in {self.acc_file} but no BOLD.summ file was provided')
+                return False
         return True
 
     def fetch(self, acc_file, chunk_size=500, max_attempts=3):
@@ -191,16 +219,17 @@ class Fetcher():
         for database, sub_tab in self.acc_tab.groupby('Database'):
             acc_list = sub_tab['Accession'].to_list()
             out_header = f'{self.out_header}_{database}'
+            # set fetcher
+            fetcher = fetch_dict[database](out_header, self.bold_file)
             # update out file containers
-            self.seq_files[database] = f'{out_header}.seqtmp'
-            self.tax_files[database] = f'{out_header}.taxtmp'
-            
+            self.seq_files[database] = fetcher.out_seqs
+            self.tax_files[database] = fetcher.out_taxs
             # first pass
-            failed0 = fetch_seqs(acc_list, database, out_header, chunk_size, max_attempts)
+            failed0 = fetcher.fetch(acc_list, chunk_size, max_attempts)
             # do a second pass if some sequences couldn't be downloaded
             if len(failed0) == 0:
                 continue
-            failed0 = fetch_seqs(failed0, database, out_header, chunk_size, max_attempts)
+            failed0 = fetcher.fetch(failed0, chunk_size, max_attempts)
             
             if len(failed0) > 0:
                 # failed to download sequences after two passes

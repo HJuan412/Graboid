@@ -8,16 +8,15 @@ Director for database creation and updating
 """
 
 #%% libraries
-from datetime import datetime
 import logging
 import os
 import shutil
 
-import surveyor as surv
-import lister as lstr
-import fetcher as ftch
-import taxonomist as txnm
-import merger as mrgr
+from data_fetch.database_construction import surveyor as surv
+from data_fetch.database_construction import lister as lstr
+from data_fetch.database_construction import fetcher as ftch
+from data_fetch.database_construction import taxonomist as txnm
+from data_fetch.database_construction import merger as mrgr
 
 #%% set logger
 logger = logging.getLogger('database_logger')
@@ -75,6 +74,7 @@ class Director:
     def set_ranks(self, ranks):
         fmt_ranks = [rk.lower() for rk in ranks]
         self.taxonomist.set_ranks(fmt_ranks)
+        self.merger.set_ranks(fmt_ranks)
 
     def direct_fasta(self, fasta_file, chunksize=500, max_attempts=3, mv = False):
         seq_path = f'{self.out_dir}/{fasta_name(fasta_file)}.fasta'
@@ -102,7 +102,7 @@ class Director:
         print('Building accession lists...')
         self.lister.build_list(self.surveyor.out_files)
         print('Fetching sequences...')
-        # TODO: create method to fetch failed sequences (if any)
+        self.fetcher.set_bold_file(self.surveyor.out_files['BOLD'])
         self.fetcher.fetch(self.lister.out_file, chunksize, max_attempts)
         print('Reconstructing taxonomies...')
         self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
@@ -115,3 +115,24 @@ class Director:
         self.acc_file = self.merger.acc_out
         self.tax_file = self.merger.tax_out
         self.taxguide_file = self.merger.taxguide_out
+
+#%%
+ftch.set_entrez()
+#%%
+out = 'nematoda_18s/data'
+tmp = 'nematoda_18s/tmp'
+wrn = 'nematoda_18s/warnings'
+
+dr = Director(out, tmp, wrn)
+#%%
+taxon = 'nematoda'
+marker = '18s'
+databases = ['NCBI', 'BOLD']
+
+seq_files = {'BOLD':'nematoda_18s/tmp/nematoda_18s_BOLD.seqtmp',
+             'NCBI':'nematoda_18s/tmp/nematoda_18s_NCBI.seqtmp'}
+tax_files = {'BOLD':'nematoda_18s/tmp/nematoda_18s_BOLD.tax',
+             'NCBI':'nematoda_18s/tmp/nematoda_18s_NCBI.tax'}
+from data_fetch.database_construction import merger as mrgr
+merger = mrgr.Merger('nematoda_18s/data')
+merger.merge(seq_files, tax_files)

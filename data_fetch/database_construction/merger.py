@@ -11,9 +11,7 @@ Compare and merge temporal sequence files
 #%% libraries
 from Bio import SeqIO
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
-import bold_marker_vars
 import logging
-import lister
 import pandas as pd
 
 #%% setup logger
@@ -23,7 +21,7 @@ logger = logging.getLogger('database_logger.merger')
 valid_databases = ['BOLD', 'NCBI']
 #%% functions
 def detect_files(file_list):
-    # TODO: NOTE: this function behaves exactly like lister.detect_summ(), may need more analogs to it in the future, may define a generic one in a tools module
+    # NOTE: this function behaves exactly like lister.detect_summ(), may need more analogs to it in the future, may define a generic one in a tools module
     # given a list of taxID files, identify the database to which each belongs
     # works under the assumption that there is a single file per database
     files = {}
@@ -33,33 +31,28 @@ def detect_files(file_list):
             files[database] = file
     return files
 
-def flatten_taxtab(tax_tab):
+def flatten_taxtab(tax_tab, ranks=['phylum', 'class', 'order', 'family', 'genus', 'species']):
     # generates a two column tax from the tax tab, containing the taxID, rank and parent taxID of each taxon
     # tax name kept as index
-    # assumes the tax tab has 2*n_taxes columns
+    tax_tab = tax_tab.copy()
+    tax_tab[0] = 0
     
-    ncols = len(tax_tab.columns)
-    stripped_cols = []
-    # walk over the table, two columns at a time
-    for col in range(0, ncols, 2):
-        # extract scientific name and taxID columns for a given taxon
-        rank = tax_tab.columns[col]
-        lone_col = tax_tab.iloc[:,[col, col+1]]
-        lone_col.rename(columns = {colname:newname for colname, newname in zip(lone_col.columns, ('SciName', 'taxID'))})
-        # add rank column
-        lone_col['Rank'] = rank
+    flattened = []
+    parents = [0] + [rk+'_id' for rk in ranks[:-1]]
+    
+    for rank, parent in zip(ranks, parents):
+        stripped_cols = tax_tab[[rank, rank+'_id', parent]].copy()
+        stripped_cols.rename(columns = {rank:'SciName', rank+'_id':'taxID', parent:'parent_taxID'}, inplace=True)
+        stripped_cols['rank'] = rank
+        for taxid, subtab in stripped_cols.groupby('taxID'):
+            flattened.append(subtab.iloc[[0]])
+    flattened_tab = pd.concat(flattened)
+    flattened_tab.taxID = flattened_tab.taxID.astype(int)
+    flattened_tab.parent_taxID = flattened_tab.parent_taxID.astype(int)
+    flattened_tab = flattened_tab.loc[flattened_tab.taxID != flattened_tab.parent_taxID]
+    flattened_tab.set_index('SciName', inplace=True)
+    return flattened_tab
 
-        if col > 0:
-            # if we are not at the basal rank, get parent rank taxIDs
-            parent_col = tax_tab[col]
-            lone_col['Parent_TaxID'] = parent_col
-        else:
-            # set parent taxIDs as 0
-            lone_col['Parent_TaxID'] = 0
-        
-        lone_col.set_index(lone_col.columns[0], inplace=True)
-        stripped_cols.append(lone_col)
-    return pd.concat(stripped_cols)
 #%% classes
 class Merger():
     def __init__(self, out_dir):
@@ -68,6 +61,7 @@ class Merger():
         self.acc_out = None
         self.tax_out = None
         self.taxguide_out = None
+        self.set_ranks()
     
     def get_files(self, seqfiles, taxfiles):
         self.seqfiles = seqfiles
@@ -89,14 +83,17 @@ class Merger():
             self.tax_out = f'{self.out_dir}/{header}.tax'
             self.taxguide_out = f'{self.out_dir}/{header}.taxguide'
             break
-    
+        
+    def set_ranks(self, ranklist=['phylum', 'class', 'order', 'family', 'genus', 'species']):
+        self.ranks = ranklist
+        
     def merge_seqs(self):
         # reads given sequence files and extracts accessions
         # generates a merged fasta file and accession table
         records = []
         acc_tabs = []
         
-        for database, seqfile in self.seqfiles:
+        for database, seqfile in self.seqfiles.items():
             id_list = []
             with open(seqfile, 'r') as handle:
                 for record in SeqIO.parse(handle, 'fasta'):
@@ -118,7 +115,7 @@ class Merger():
         acc_tab.to_csv(self.acc_out)
     
     def merge_taxons(self):
-        mtax = MergerTax(self.taxfiles)
+        mtax = MergerTax(self.taxfiles, self.ranks)
         mtax.merge_taxons(self.tax_out, self.taxguide_out)
     
     def merge(self, seqfiles, taxfiles):
@@ -143,12 +140,13 @@ class Merger():
         acc_tab.to_csv(self.acc_out)
         # generate taxguide
         tax_tab = pd.read_csv(taxfile, index_col = 0)
-        guide_tab = flatten_taxtab(tax_tab)
+        guide_tab = flatten_taxtab(tax_tab, self.ranks)
         guide_tab.to_csv(self.taxguide_out)
 
 class MergerTax():
-    def __init__(self, tax_files):
+    def __init__(self, tax_files, ranks):
         self.tax_files = tax_files
+        self.ranks = ranks
         self.NCBI = 'NCBI' in tax_files.keys()
         self.load_files()
         self.build_tax_guides()
@@ -162,7 +160,7 @@ class MergerTax():
     def build_tax_guides(self):
         tax_guides = {}
         for database, tax_tab in self.tax_tabs.items():
-            tax_guides[database] = flatten_taxtab(tax_tab)
+            tax_guides[database] = flatten_taxtab(tax_tab, self.ranks)
         
         self.tax_guides = tax_guides
     
@@ -184,24 +182,30 @@ class MergerTax():
 
             if len(intersect) > 0:
                 # correct_tab indicates which taxids to replace and what to replace them with
-                correct_tab = pd.concat([guide_tab.loc[intersect, ['Rank', 'taxID']],
+                correct_tab = pd.concat([guide_tab.loc[intersect, ['rank', 'taxID']],
                                          tab.loc[intersect, 'taxID']], axis = 1)
-                correct_tab.columns = ['Rank', 'guide', 'tab']
+                correct_tab.columns = ['rank', 'guide', 'tab']
                 # tax_table to modify
                 tax_tab = self.tax_tabs[db]
                 # for each rank, look for the taxons to fix
-                for rk, rk_subtab in correct_tab.groupby('Rank'):
-                    for idx, row in rk_subtab.iterrows():
-                        # replace taxID values
-                        tax_tab.at[tax_tab[f'{rk}_id'] == row['tab']] = row['guide']
-                # incorporate non redundant taxons to the guide_tab
-                guide_tab = pd.concat([guide_tab, tab.loc[diff]])
+                for rk, rk_subtab in correct_tab.groupby('rank'):
+                    rk_vals = tax_tab[rk+'_id'].values
+                    correction_vals = rk_subtab[['guide', 'tab']].values
+                    for pair in correction_vals:
+                        rk_vals[rk_vals == pair[1]] = pair[0]
+                    tax_tab[rk+'_id'] = rk_vals
+                    # for idx, row in rk_subtab.iterrows():
+                    #     # replace taxID values
+                    #     tax_tab.at[tax_tab[rk+'_id'] == row['tab']] = row['guide']
+                        
+            # incorporate non redundant taxons to the guide_tab
+            guide_tab = pd.concat([guide_tab, tab.loc[diff]])
         
         self.guide_tab = guide_tab
     
     def merge_taxons(self, tax_out, taxguide_out):
         self.unify_taxids()
-        merged_taxons = pd.concat(self.tax_tabs.items())
+        merged_taxons = pd.concat(self.tax_tabs.values())
         
         merged_taxons.to_csv(tax_out)
         self.guide_tab.to_csv(taxguide_out)

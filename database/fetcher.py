@@ -240,6 +240,12 @@ class Fetcher():
         if len(failed) > 0:
             failed_tab = self.acc_tab.loc[failed]
             failed_tab.to_csv(self.failed_file)
+        
+        total_records = len(self.acc_tab)
+        failed_records = len(failed)
+        logger.info(f'Finished retrieving {total_records - failed_records} of {total_records} records.')
+        if failed_records > 0:
+            logger.info(f'{failed_records} saved to {self.failed_files}')
     
     def fetch_tax_from_fasta(self, fasta_file):
         # generate output file

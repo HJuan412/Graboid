@@ -12,17 +12,17 @@ import logging
 import os
 import shutil
 
-from data_fetch.database_construction import surveyor as surv
-from data_fetch.database_construction import lister as lstr
-from data_fetch.database_construction import fetcher as ftch
-from data_fetch.database_construction import taxonomist as txnm
-from data_fetch.database_construction import merger as mrgr
+from database import surveyor as surv
+from database import lister as lstr
+from database import fetcher as ftch
+from database import taxonomist as txnm
+from database import merger as mrgr
 
 #%% set logger
 logger = logging.getLogger('database_logger')
 logger.setLevel(logging.DEBUG)
 # set formatter
-fmtr = logging.Formatter('%(asctime) - %(levelname)s: %(message)s')
+fmtr = logging.Formatter('%(asctime)s - %(levelname)s: %(message)s')
 #%% Manage directories
 def make_dirs(base_dir):
     os.makedirs(f'{base_dir}/data', exist_ok=bool)
@@ -61,7 +61,7 @@ class Director:
         self.surveyor = surv.Surveyor(tmp_dir)
         self.lister = lstr.Lister(tmp_dir)
         self.fetcher = ftch.Fetcher(tmp_dir)
-        self.taxonmoist = txnm.Taxonomist(tmp_dir)
+        self.taxonomist = txnm.Taxonomist(tmp_dir)
         self.merger = mrgr.Merger(out_dir)
         
         # get outfiles
@@ -69,7 +69,7 @@ class Director:
     
     def clear_tmp(self):
         for tmp_file in os.listdir(self.tmp_dir):
-            os.remove(tmp_file)
+            os.remove(f'{self.tmp_dir}/{tmp_file}')
     
     def set_ranks(self, ranks):
         fmt_ranks = [rk.lower() for rk in ranks]
@@ -109,30 +109,10 @@ class Director:
         print('Merging sequences...')
         self.merger.merge(self.fetcher.seq_files, self.taxonomist.out_files)
         self.get_out_files()
+        print('Done!')
     
     def get_out_files(self):
         self.seq_file = self.merger.seq_out
         self.acc_file = self.merger.acc_out
         self.tax_file = self.merger.tax_out
         self.taxguide_file = self.merger.taxguide_out
-
-#%%
-ftch.set_entrez()
-#%%
-out = 'nematoda_18s/data'
-tmp = 'nematoda_18s/tmp'
-wrn = 'nematoda_18s/warnings'
-
-dr = Director(out, tmp, wrn)
-#%%
-taxon = 'nematoda'
-marker = '18s'
-databases = ['NCBI', 'BOLD']
-
-seq_files = {'BOLD':'nematoda_18s/tmp/nematoda_18s_BOLD.seqtmp',
-             'NCBI':'nematoda_18s/tmp/nematoda_18s_NCBI.seqtmp'}
-tax_files = {'BOLD':'nematoda_18s/tmp/nematoda_18s_BOLD.tax',
-             'NCBI':'nematoda_18s/tmp/nematoda_18s_NCBI.tax'}
-from data_fetch.database_construction import merger as mrgr
-merger = mrgr.Merger('nematoda_18s/data')
-merger.merge(seq_files, tax_files)

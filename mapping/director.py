@@ -11,7 +11,7 @@ Direct dataset_construction
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 import logging
 from data_fetch.dataset_construction import blast
-from data_fetch.dataset_construction import matrix2
+from data_fetch.dataset_construction import matrix
 import os
 
 #%% set logger
@@ -58,7 +58,7 @@ class Director:
         
         # workers
         self.blaster = blast.Blaster()
-        self.mapper = matrix2.MatBuilder(out_dir)
+        self.mapper = matrix.MatBuilder(out_dir)
         
     def set_blastdb(self, db_dir):
         # establish db_dir as the blast database (must contain 6 *.n* files)

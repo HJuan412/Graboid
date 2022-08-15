@@ -64,7 +64,7 @@ class Blaster:
     def blast(self, fasta_file, out_file, db_dir, threads=1):
         check, db_files = check_db_dir(db_dir)
         if not check:
-            logger.warning('Incomplete BLAST database ({len(db_files)} files found). Aborting')
+            logger.warning(f'Incomplete BLAST database ({len(db_files)} files found). Aborting')
             return
         db_prefix = db_files[0].split('.n')[0]
         

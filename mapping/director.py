@@ -10,15 +10,15 @@ Direct dataset_construction
 #%% Libraries
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 import logging
-import blast
-import matrix2
+from data_fetch.dataset_construction import blast
+from data_fetch.dataset_construction import matrix2
 import os
 
 #%% set logger
 logger = logging.getLogger('mapping_logger')
 logger.setLevel(logging.DEBUG)
 # set formatter
-fmtr = logging.Formatter('%(asctime) - %(levelname)s: %(message)s')
+fmtr = logging.Formatter('%(asctime)s - %(levelname)s: %(message)s')
 
 #%% functions
 def make_dirs(base_dir):
@@ -38,7 +38,7 @@ class Director:
         self.warn_dir = warn_dir
         
         # set handlers
-        self.warn_handler = logging.FileHandler(warn_dir)
+        self.warn_handler = logging.FileHandler(warn_dir + '/dataset.warnings')
         self.warn_handler.setLevel(logging.WARNING)
         self.log_handler = logging.StreamHandler()
         self.log_handler.setLevel(logging.DEBUG)
@@ -107,7 +107,7 @@ class Director:
         
         print(f'Performing blast alignment of {fasta_file}...')
         # perform BLAST
-        self.blaster.blast(fasta_file, blast_out, threads)
+        self.blaster.blast(fasta_file, blast_out, self.db_dir, threads)
         self.blast_report = self.blaster.report
         if self.blast_report is None:
             return
@@ -119,6 +119,7 @@ class Director:
         self.mapper.build(self.blast_report, fasta_file, out_name, evalue)
         self.mat_file = self.mapper.mat_file
         self.acc_file = self.mapper.acc_file
-        self.dims = self.mapper.dims
-        print('Done! Alignment matrix saved as {self.mapper.mat_file}. Accession list saved as {self.mapper.acc_file}')
+        print('Done!')
+        print(f'Alignment matrix saved as {self.mapper.mat_file}')
+        print(f'Accession list saved as {self.mapper.acc_file}')
         return        

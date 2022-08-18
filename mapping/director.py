@@ -88,7 +88,7 @@ class Director:
         self.db_dir = db_dir
         print(f'Generated blast reference databse at directory {self.db_dir}')
         
-    def direct(self, fasta_file, out_name=None, evalue=0.005, threads=1):
+    def direct(self, fasta_file, out_name=None, evalue=0.005, threads=1, keep=False):
         # fasta file is the file to be mapped
         # out_name, optional file name for the generated matrix, otherwise generated automatically
         # evalue is the max evalue threshold for the blast report
@@ -116,10 +116,11 @@ class Director:
         
         # generate matrix
         print('Building alignment matrix...')
-        self.mapper.build(self.blast_report, fasta_file, out_name, evalue)
+        # if keep == True, keep generated matrix, bounds and acclist in map_data, otherwise map_data is None
+        map_data = self.mapper.build(self.blast_report, fasta_file, out_name, evalue, keep)
         self.mat_file = self.mapper.mat_file
         self.acc_file = self.mapper.acc_file
         print('Done!')
         print(f'Alignment matrix saved as {self.mapper.mat_file}')
         print(f'Accession list saved as {self.mapper.acc_file}')
-        return        
+        return map_data

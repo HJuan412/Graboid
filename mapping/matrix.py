@@ -193,7 +193,7 @@ class MatBuilder:
             self.mat_file = f'{self.out_dir}/{file_name}.npz'
             self.acc_file = f'{self.out_dir}/{file_name}.acclist'
         
-    def build(self, blast_file, seq_file, out_name=None, evalue=0.005):
+    def build(self, blast_file, seq_file, out_name=None, evalue=0.005, keep=False):
         # load blast report
         print('Reading blast report...')
         blast_tab = read_blast(blast_file, evalue)
@@ -234,3 +234,8 @@ class MatBuilder:
         np.savez(self.mat_file, bounds=bounds, matrix=matrix) # save the matrix along with the bounds array
         with open(self.acc_file, 'w') as list_handle:
             list_handle.write('\n'.join(self.acclist))
+        
+        if keep:
+            # use this to retrieve generating directly from this method
+            return matrix, bounds, self.acclist
+        return None

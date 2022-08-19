@@ -12,6 +12,7 @@ Compare and merge temporal sequence files
 from Bio import SeqIO
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 import logging
+import numpy as np
 import pandas as pd
 
 #%% setup logger
@@ -208,4 +209,6 @@ class MergerTax():
         merged_taxons = pd.concat(self.tax_tabs.values())
         
         merged_taxons.to_csv(tax_out)
+        # drop duplicated records (if any)
+        merged_taxons.loc[np.invert(merged_taxons.index.duplicated())]
         self.guide_tab.to_csv(taxguide_out)

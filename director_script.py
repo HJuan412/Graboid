@@ -242,8 +242,8 @@ print(args)
 #%% execute
 # database
 def main(mode, args):
-    from data_fetch.database_construction import director as db
-    from data_fetch.dataset_construction import director as mp
+    from database import director as db
+    from mapping import director as mp
     from calibration import calibrator as cb
     if mode == 'DATABASE':
         if (args.taxon is None or args.marker is None) and args.fasta is None:

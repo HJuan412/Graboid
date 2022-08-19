@@ -216,13 +216,14 @@ def collapse_window(matrix, tax_tab):
     return eff_mat, eff_tax
 #%% classes
 class WindowLoader:
-    def __init__(self, logger = 'WindowLoader'):
+    def __init__(self, logger='WindowLoader'):
         # logger set at initialization (because this class may be used by multiple modules)
         self.logger = logging.getLogger(logger)
         self.mat_file = None
         self.acc_file = None
         self.tax_file = None
         self.matrix = None
+        self.bounds = None
         self.dims = None
         self.acclist = None
         self.tax_tab = None
@@ -232,7 +233,9 @@ class WindowLoader:
         self.acc_file = acc_file
         self.tax_file = tax_file
         # load matrix
-        self.matrix = np.load(mat_file)
+        matrix_data = np.load(mat_file)
+        self.matrix = matrix_data['matrix']
+        self.bounds = matrix_data['bounds']
         self.dims = self.matrix.shape
         # load acclist
         with open(acc_file, 'r') as acc_handle:
@@ -256,7 +259,7 @@ class WindowLoader:
         return out_window
 
 class Window:
-    def __init__(self, matrix, start, end, row_thresh = 0.2, col_thresh = 0.2, loader = None):
+    def __init__(self, matrix, start, end, row_thresh=0.2, col_thresh=0.2, loader=None):
         self.matrix = matrix
         self.start = start
         self.end = end

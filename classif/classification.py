@@ -20,16 +20,28 @@ def calc_distance(seq1, seq2, dist_mat):
 
 @nb.njit
 def get_dists(query, data, dist_mat):
-    dist = np.zeros(data.shape[0])
-    for idx, ref in enumerate(data):
-        dist[idx] = calc_distance(query, ref, dist_mat)
+    # new version, performs calculations for multiple queries
+    # single query vector should have dimensions (1, len(seq))
+    dist = np.zeros((query.shape[0], data.shape[0]), dtype = np.float32)
+    for idx0, q in enumerate(query):
+        for idx1, d in enumerate(data):
+            dist[idx0, idx1] = calc_distance(q, d, dist_mat)
     return dist
 
-def get_neighs(q, data, dist_mat):
+# @nb.njit
+# def get_dists(query, data, dist_mat):
+#     dist = np.zeros(data.shape[0], dtype = np.float32)
+#     for idx, ref in enumerate(data):
+#         dist[idx] = calc_distance(query, ref, dist_mat)
+#     return dist
+
+def get_neighs(query, data, dist_mat):
+    if len(query.shape) == 1:
+        query = query.reshape((1, -1))
     # get the neighbours to q sorted by distance
-    dists = get_dists(q, data, dist_mat)
+    dists = get_dists(query, data, dist_mat)
     neighs = np.argsort(dists)
-    neigh_dists = dists[neighs]
+    neigh_dists = np.array([d[n] for d,n in zip(dists, neighs)])
     
     return neighs, neigh_dists
 

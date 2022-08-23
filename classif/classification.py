@@ -28,13 +28,6 @@ def get_dists(query, data, dist_mat):
             dist[idx0, idx1] = calc_distance(q, d, dist_mat)
     return dist
 
-# @nb.njit
-# def get_dists(query, data, dist_mat):
-#     dist = np.zeros(data.shape[0], dtype = np.float32)
-#     for idx, ref in enumerate(data):
-#         dist[idx] = calc_distance(query, ref, dist_mat)
-#     return dist
-
 def get_neighs(query, data, dist_mat):
     if len(query.shape) == 1:
         query = query.reshape((1, -1))
@@ -46,29 +39,29 @@ def get_neighs(query, data, dist_mat):
     return neighs, neigh_dists
 
 # support functions
-# these take a vector of distances (dists) as input and return a vector of calculated supports (supps)
+# these take a matrix of distances (dists) as input and return a vector of calculated supports (supps)
 def wknn(dists):
     # weighted KNN, weight of an instance linearly decreases with distance along a range of [0, 1]
-    d1 = dists[0]
-    dk = dists[-1]
-    rang = dk - d1
-    supps = np.ones(len(dists))
-    if d1 != dk:
-        supps = (dk - dists) / rang
-        # equals an array of (dk - di) / (dk - d1), the distance function for wknn
+    d1 = dists.min(axis=1).reshape((len(dists), -1)) # axis=1 get the min/max value per row. Reshape to turn into a column vector
+    dk = dists.max(axis=1).reshape((len(dists), -1))
+    rang = dk - d1 # range of values
+    supps = np.ones(dists.shape) # default support values
+    valid = (rang != 0).flatten() # instances in which all neighbours overlap with the query are invalid, the range is 0
+    supps[valid] = (dk[valid] - dists[valid]) / rang[valid]
+    # equals an array of (dk - di) / (dk - d1), the distance function for wknn
     return supps
 
 def dwknn(dists):
     # double weighted KNN, weight of an instance decreases "exponentially" with distance
-    d1 = dists[0]
-    dk = dists[-1]
+    d1 = dists.min(axis=1).reshape((len(dists), -1))
+    dk = dists.max(axis=1).reshape((len(dists), -1))
     rang = dk + d1
-    supps = np.ones(len(dists))
-    if d1 != dk:
-        term1 = wknn(dists)
-        term2 = rang / (dk + dists)
-        supps = term1 * term2
-        # equals an array of ((dk - di) / (dk - d1)) * ((dk + d1) / (dk + di))
+    term1 = wknn(dists)
+    term2 = np.ones(dists.shape) # default support values
+    valid = (rang != 0).flatten() # instances in which all neighbours overlap with the query are invalid, the range is 0
+    term2[valid] = rang[valid] / (dk[valid] + dists[valid])
+    supps = term1 * term2
+    # equals an array of ((dk - di) / (dk - d1)) * ((dk + d1) / (dk + di))
     return supps
 
 def softmax(supports):
@@ -76,38 +69,35 @@ def softmax(supports):
     return np.exp(supports) / div
 
 # classification functions
-def classify(q, k, data, tax_tab, dist_mat, q_name=0, mode='majority', support_func=wknn):
-    # q : query sequence
-    # k : number of neighbours
+def classify(query, data, tax_tab, dist_mat, k=0, mode='mwd', prev_dists=None):
+    # query : query sequence
     # data : reference sequences
     # tax_tab : reference taxonomy table
     # dist_mat : distance matrix to be used
-    # q_name : name of the query (defaults to 0)
-    # mode : "majority" for majority vote or "weighted" for distance weighted
-    # support_func : wknn or dwknn, used to calculate neighbour support in "weighted" mode
+    # k : number of neighbours
+    # mode : 'm' : majority, 'w' : wKNN, 'd': dwKNN
+    # prev_dists : used when trying multiple n_sites
     # classification director, handles distance & support calculation, & neighbour selection
+    
     # k defaults to all neighbours (this kills the majority vote)
+    k = list(k)
+    if k[0] == 0:
+        k[0] = data.shape[0]
     
-    # TODO: use multiple queries, q is a 2d array, q_name is an array/list
-
-    # TODO: make it so that it can use multiple classification criteria (majority/weighted + wknn/weighted + dwknn) in a single run
-    # TODO: (cont) should return a list of result tables or a single table?
-    if k == 0:
-        k = data.shape[0]
+    # calculate distances
+    distances = get_dists(query, data, dist_mat)
+    # if prev_dists is not none, add previously calculated differences
+    if not prev_dists is None:
+        distances += prev_dists
     
-    # get the data
-    neighs, dists = get_neighs(q, data, dist_mat)
-    neighs = neighs[:k]
-    dists = dists[:k]
+    # sort neighbours
+    neighbours = np.argsort(distances)
+    neigh_dists = np.array([d[n] for d,n in zip(distances, neighbours)])
     
-    # generate the result tables
-    if mode == 'majority':
-        results = classify_majority(neighs, tax_tab, dist_mat)
-        results['total_K'] = k
-    elif mode == 'weighted':
-        supports = support_func(dists)
-        results = classify_majority(neighs, supports, tax_tab)
-    results['query'] = q_name
+    # classify
+    for _k in k:
+        # generate the result tables
+        results = {md:classifier(neighbours[:,:_k], tax_tab, _k, md, neigh_dists[:,:_k]) for md in mode}
     return results
 
 def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0):
@@ -144,6 +134,48 @@ def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0):
         dwknn_results.append(classify_weighted(k_neighs, supports_dwknn, tax_tab, q_name, k))
     return maj_results, wknn_results, dwknn_results
 
+def classifier(neighs, tax_tab, k, mode, dists=None):
+    # classify each row of neighs using the data in tax_tab
+    result = []
+    # compute support scores if needed
+    if mode == 'w':
+        supports = wknn(dists)
+    elif mode == 'd':
+        supports = dwknn(dists)
+    
+    # classify instances
+    for idx, n in enumerate(neighs):
+        # select neighbour taxonomies
+        sub_tax = tax_tab.iloc[n].to_numpy().T
+        # assign classification for each rank
+        for rk, row in enumerate(sub_tax):
+            # count reperesentatives of each taxon amongst the k neighbours
+            taxs, counts = np.unique(row, return_counts = True)
+            if mode == 'm':
+                # classify using majority vote (classic KNN)
+                # select winners as those with the maximum detected number of neighbours
+                # this handles the eventuality of a draw
+                max_val = np.max(counts)
+                winn_idx = np.argwhere(counts == max_val)
+                for winn in winn_idx:
+                    result.append([idx, rk, taxs[winn][0], max_val, k])
+            else:
+                # classify using a weighted KNN
+                for tax, count in zip(taxs, counts):
+                    # calculate the total, mean and std support of each represented taxon
+                    tax_supports = supports[idx, row == tax]
+                    report = [idx,
+                              rk,
+                              tax,
+                              count,
+                              k,
+                              tax_supports.sum(),
+                              tax_supports.mean(),
+                              tax_supports.std()]
+                    result.append(report)
+    return np.array(result, dtype=np.float32)
+                
+        
 def classify_majority(neighs, tax_tab, q_name=0, total_k=1):
     # neighs: list of neighbours to consider in the classification
     # tax_tab: taxonomic dataframe of the training set

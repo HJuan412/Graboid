@@ -8,6 +8,7 @@ Director for the classification of sequences of unknown taxonomic origin
 """
 #%%
 from classif import classification
+from classif import cost_matrix
 from mapping import director as mpdir
 from mapping import matrix
 from preprocess import feature_selection as fsele
@@ -157,6 +158,7 @@ class Director:
     
     def map_query(self, fasta_file, threads=1):
         self.query_mat, self.query_bounds, self.query_accs = self.mapper.direct(fasta_file, threads=threads, keep=True)
+        self.query_tr = {idx:acc for idx, acc in enumerate(self.query_accs)} # will be used to replace query indexes
         self.fasta_file = fasta_file
         self.query_blast = self.mapper.blast_report
         self.query_mat_file = self.mapper.mat_file
@@ -254,8 +256,11 @@ class Director:
         print(f'Reference and query matrices overlap in coordinates {overlap_low} - {overlap_high}')
         return True, [overlap_low, overlap_high]
     
-    def set_dist_mat(self):
-        return
+    def set_dist_mat(self, identity=False, transition=1, transversion=2):
+        if identity:
+            self.dist_mat = cost_matrix.id_matrix()
+        else:
+            self.dist_mat = cost_matrix.cost_matrix(transition, transversion)
     
     def classify_manual(self, w_start, w_end, k, n, mode='mwd', crop=True):
         if self.check_ref() or self.check_query():
@@ -272,8 +277,6 @@ class Director:
         windows = np.array([w_start, w_end]).T
         k_range = list(k)
         n_range = list(n)
-        # select the appropriate modes to use
-        modes = [mode_dict[m] for m in mode]
         
         # check valid windows
         check, overlap = self.get_overlap()
@@ -285,6 +288,7 @@ class Director:
         # account offset for query and reference
         query_offset = self.query_bounds[0] - self.ref_bounds
         
+        final_report = []
         for coords in windows:
             # select sites
             n_sites = self.selector.get_sites(n_range, coords[0], coords[1], 'genus') # TODO: what to do with rank
@@ -298,38 +302,18 @@ class Director:
                 
                 ref_data = ref_window.eff_mat[:, sites - ref_offset]
                 ref_tax = ref_window.eff_tax
-                # get_distances
-                # dists = get_dists(query_data, ref_data, ref_tax)
-                # neighs = np.argsort(distances + prev_distances)
-                # prev_distances += distsances
-                for k in k_range:
-                    for mode in modes:
-                        # get classif, update report, enjoi
-                        pass
-                    pass
-        return
-    
-    def classify(self, w_start=None, w_end=None, k=None, n=None, metric='F1_score'):
-        if self.ref_mat is None:
-            print('No reference matrix is set. Aborting')
-            return
-        if self.query_mat is None:
-            print('No query file is set. Aborting')
-            return
-        
-        # infer windows if none were given
-        if w_start is None or w_end is None:
-            self.get_windows(metric)
-        # hint parameters if none were given
-        elif k is None or n is None:
-            self.hint_params(w_start, w_end)
-        
-        # classify
-        query_mat = matrix.build_query_window(self.query_blast, self.fasta_file, w_start, w_end, self.windows)
-        
-        # get sites
-        q = None
-        data = None
-        dist_mat = None
-        classification.classify(q, k, data, self.tax_tab, dist_mat)
-        return
+                # get_distances                
+                classifs, prev_distances = classification.classify(query_data, ref_data, ref_tax, self.dist_mat, k_range, mode, prev_distances)
+                results = classification.get_classification(classifs)
+                
+                report = classification.parse_report(results)
+                report['n'] = n
+                report['start'] = coords[0]
+                report['end'] = coords[1]
+                final_report.append(report)
+        final_report = pd.concat(final_report)
+        final_report['idx'] = final_report.idx.replace(self.query_tr) # replace indexes with corresponding query name
+        # TODO: replace rank and taxon names
+        # TODO: incorporate cluster distances comparisons
+        final_report.reset_index(drop=True, inplace=True)
+        return final_report

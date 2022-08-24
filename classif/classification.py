@@ -8,6 +8,7 @@ Created on Mon May  2 10:21:15 2022
 #%% libraries
 import numba as nb
 import numpy as np
+import pandas as pd
 
 #%% functions
 @nb.njit
@@ -27,16 +28,6 @@ def get_dists(query, data, dist_mat):
         for idx1, d in enumerate(data):
             dist[idx0, idx1] = calc_distance(q, d, dist_mat)
     return dist
-
-def get_neighs(query, data, dist_mat):
-    if len(query.shape) == 1:
-        query = query.reshape((1, -1))
-    # get the neighbours to q sorted by distance
-    dists = get_dists(query, data, dist_mat)
-    neighs = np.argsort(dists)
-    neigh_dists = np.array([d[n] for d,n in zip(dists, neighs)])
-    
-    return neighs, neigh_dists
 
 # support functions
 # these take a matrix of distances (dists) as input and return a vector of calculated supports (supps)
@@ -66,7 +57,9 @@ def dwknn(dists):
 
 def softmax(supports):
     div = np.exp(supports).sum()
-    return np.exp(supports) / div
+    softmax_scores = np.exp(supports) / div
+    softmax_scores = softmax_scores.reshape((len(softmax_scores), 1))
+    return softmax_scores
 
 # classification functions
 def classify(query, data, tax_tab, dist_mat, k=0, mode='mwd', prev_dists=None):
@@ -94,11 +87,97 @@ def classify(query, data, tax_tab, dist_mat, k=0, mode='mwd', prev_dists=None):
     neighbours = np.argsort(distances)
     neigh_dists = np.array([d[n] for d,n in zip(distances, neighbours)])
     
-    # classify
+    # generate the result tables
+    results = {md:classifier(neighbours, tax_tab, k, md, neigh_dists) for md in mode}
+    return results, distances
+
+def classifier(neighs, tax_tab, k, mode, distances):
+    # classify each row of neighs using the data in tax_tab
+    result = []
+    
+    # classify using every value of k
     for _k in k:
-        # generate the result tables
-        results = {md:classifier(neighbours[:,:_k], tax_tab, _k, md, neigh_dists[:,:_k]) for md in mode}
-    return results
+        dists = distances[:,:_k]
+        # compute support scores if needed
+        if mode == 'w':
+            supports = wknn(dists)
+        elif mode == 'd':
+            supports = dwknn(dists)
+        
+        # classify instances
+        for idx, n in enumerate(neighs[:,:_k]):
+            # select neighbour taxonomies
+            sub_tax = tax_tab.iloc[n].to_numpy().T
+            # assign classification for each rank
+            for rk, row in enumerate(sub_tax):
+                # count reperesentatives of each taxon amongst the k neighbours
+                taxs, counts = np.unique(row, return_counts = True)
+                # for each represented taxon get representatives, average distances and std
+                for tax, count in zip(taxs, counts):
+                    average_dists = dists[idx, row == tax].mean()
+                    std_dists = dists[idx, row == tax].std()
+                    
+                    report = [idx,rk,tax,count,_k,average_dists,std_dists]
+                    if mode != 'm':
+                        tax_supports = supports[idx, row == tax]
+                        report.append(tax_supports.sum())
+                    result.append(report)
+    return np.array(result, dtype=np.float32)
+
+def get_classification(results):
+    # extract the winning classification from the knn results
+    # takes a dict with keys 'm', 'w', 'd'
+    # get classification for each query/k/rank combination
+    # in the case of majority vote, take the taxon(s) with the highest count in a given k/rank
+    # in the case of weighted modes, take the taxon(s) with the highest support score (softmax result) in a given k/rank
+    classifications = {}
+    for mode, report in results.items():
+        mode_classifs = []
+        indexes = np.unique(report[:,0])
+        k_vals = np.unique(report[:,4])
+        ranks = np.unique(report[:,1])
+        # get the matrix corresponding to each idx/k/rk combination
+        for idx in indexes:
+            idx_mat = report[report[:,0] == idx]
+            for k in k_vals:
+                k_mat = idx_mat[idx_mat[:,4] == k]
+                for rk in ranks:
+                    rk_mat = k_mat[k_mat[:,1] == rk]
+                    if mode == 'm':
+                        # winners are the ones with the highest count
+                        max_count = rk_mat[:,3].max()
+                        max_rows = rk_mat[rk_mat[:,3] == max_count]
+                    else:
+                        # winners are the ones with the highest support
+                        # add scores (softmax)
+                        scores = softmax(rk_mat[:,7])
+                        score_mat = np.append(rk_mat, scores, axis=1)
+                        max_rows = score_mat[(scores == scores.max()).flatten()]
+                    mode_classifs.append(max_rows)
+        classifications[mode] = np.concatenate(mode_classifs)
+    return classifications
+
+def parse_report(report):
+    cols_dict = {'m':['idx', 'rank', 'taxon', 'count', 'k', 'mean distance', 'std distance'],
+                 'w':['idx', 'rank', 'taxon', 'count', 'k', 'mean distance', 'std distance', 'support', 'score'],
+                 'd':['idx', 'rank', 'taxon', 'count', 'k', 'mean distance', 'std distance', 'support', 'score']}
+    tables = {mode:pd.DataFrame(matrix, columns = cols_dict[mode]) for mode, matrix in report.items()}
+    for mode, table in tables.items():
+        table['mode'] = mode
+    result_tab = pd.concat(tables.values())
+    result_tab.reset_index(drop=True, inplace=True)
+    return result_tab
+
+# DEPRECATED beyond this point
+def get_neighs(query, data, dist_mat):
+    if len(query.shape) == 1:
+        query = query.reshape((1, -1))
+    # get the neighbours to q sorted by distance
+    dists = get_dists(query, data, dist_mat)
+    neighs = np.argsort(dists)
+    neigh_dists = np.array([d[n] for d,n in zip(dists, neighs)])
+    
+    return neighs, neigh_dists
 
 def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0):
     # classification function used in calibration, generates a prediction for multiple values of K
@@ -134,48 +213,6 @@ def calibration_classify(q, k_range, data, tax_tab, dist_mat, q_name=0):
         dwknn_results.append(classify_weighted(k_neighs, supports_dwknn, tax_tab, q_name, k))
     return maj_results, wknn_results, dwknn_results
 
-def classifier(neighs, tax_tab, k, mode, dists=None):
-    # classify each row of neighs using the data in tax_tab
-    result = []
-    # compute support scores if needed
-    if mode == 'w':
-        supports = wknn(dists)
-    elif mode == 'd':
-        supports = dwknn(dists)
-    
-    # classify instances
-    for idx, n in enumerate(neighs):
-        # select neighbour taxonomies
-        sub_tax = tax_tab.iloc[n].to_numpy().T
-        # assign classification for each rank
-        for rk, row in enumerate(sub_tax):
-            # count reperesentatives of each taxon amongst the k neighbours
-            taxs, counts = np.unique(row, return_counts = True)
-            if mode == 'm':
-                # classify using majority vote (classic KNN)
-                # select winners as those with the maximum detected number of neighbours
-                # this handles the eventuality of a draw
-                max_val = np.max(counts)
-                winn_idx = np.argwhere(counts == max_val)
-                for winn in winn_idx:
-                    result.append([idx, rk, taxs[winn][0], max_val, k])
-            else:
-                # classify using a weighted KNN
-                for tax, count in zip(taxs, counts):
-                    # calculate the total, mean and std support of each represented taxon
-                    tax_supports = supports[idx, row == tax]
-                    report = [idx,
-                              rk,
-                              tax,
-                              count,
-                              k,
-                              tax_supports.sum(),
-                              tax_supports.mean(),
-                              tax_supports.std()]
-                    result.append(report)
-    return np.array(result, dtype=np.float32)
-                
-        
 def classify_majority(neighs, tax_tab, q_name=0, total_k=1):
     # neighs: list of neighbours to consider in the classification
     # tax_tab: taxonomic dataframe of the training set

@@ -81,6 +81,17 @@ def get_not_empty(matrix):
     not_empty = np.argwhere(summed != 0).flatten()
     return not_empty
 
+def tr_report(report, query_names, rank_names, taxon_names):
+    q_dict = {idx:acc for idx, acc in enumerate(query_names)}
+    rk_dict = {idx:rk for idx, rk in enumerate(rank_names)}
+    tax_dict = {taxid:tax for tax, taxid in taxon_names.taxID.iteritems()}
+    mode_dict = {'m':'majority',
+                 'w':'wknn',
+                 'd':'dwknn'}
+    report['idx'].replace(q_dict, inplace=True)
+    report['rank'].replace(rk_dict, inplace=True)
+    report['taxon'].replace(tax_dict, inplace=True)
+    report['mode'].replace(mode_dict, inplace=True)
 #%%
 class Director:
     def __init__(self, out_dir, tmp_dir, warn_dir):
@@ -107,6 +118,12 @@ class Director:
     @property
     def ref_bounds(self):
         return self.loader.bounds
+    @property
+    def ranks(self):
+        if self.loader.tax_tab is None:
+            return []
+        cols = self.loader.tax_tab.columns.tolist()
+        return [rank for rank in cols if len(rank.split('_')) == 1]
     
     def set_reference(self, mat_file, acc_file, tax_file, taxguide_file, order_file):
         self.mat_file = mat_file
@@ -132,7 +149,7 @@ class Director:
         taxonomies, missing = get_taxonomy(taxa, self.taxguide)
         if len(missing) > 0:
             print(f'Given taxa are not present in the reference dataset:\n\
-                  {",".join(missing)}')
+                  {", ".join(missing)}')
         for tax in taxa:
             self.taxa.append(taxa)
     
@@ -158,7 +175,6 @@ class Director:
     
     def map_query(self, fasta_file, threads=1):
         self.query_mat, self.query_bounds, self.query_accs = self.mapper.direct(fasta_file, threads=threads, keep=True)
-        self.query_tr = {idx:acc for idx, acc in enumerate(self.query_accs)} # will be used to replace query indexes
         self.fasta_file = fasta_file
         self.query_blast = self.mapper.blast_report
         self.query_mat_file = self.mapper.mat_file
@@ -262,7 +278,7 @@ class Director:
         else:
             self.dist_mat = cost_matrix.cost_matrix(transition, transversion)
     
-    def classify_manual(self, w_start, w_end, k, n, mode='mwd', crop=True):
+    def classify_manual(self, w_start, w_end, k, n, mode='mwd', crop=True, site_rank='genus'):
         if self.check_ref() or self.check_query():
             print('Aborting')
             return
@@ -291,7 +307,7 @@ class Director:
         final_report = []
         for coords in windows:
             # select sites
-            n_sites = self.selector.get_sites(n_range, coords[0], coords[1], 'genus') # TODO: what to do with rank
+            n_sites = self.selector.get_sites(n_range, coords[0], coords[1], site_rank)
             # select data windows
             ref_window = self.loader.get_window(coords[0], coords[1], row_thresh=0, col_thresh=1)
             ref_offset = coords[0]
@@ -312,8 +328,7 @@ class Director:
                 report['end'] = coords[1]
                 final_report.append(report)
         final_report = pd.concat(final_report)
-        final_report['idx'] = final_report.idx.replace(self.query_tr) # replace indexes with corresponding query name
-        # TODO: replace rank and taxon names
+        final_report = tr_report(final_report, self.query_accs, self.ranks, self.taxguide)
         # TODO: incorporate cluster distances comparisons
         final_report.reset_index(drop=True, inplace=True)
         return final_report

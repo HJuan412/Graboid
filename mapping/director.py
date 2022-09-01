@@ -59,7 +59,12 @@ class Director:
         # workers
         self.blaster = blast.Blaster()
         self.mapper = matrix.MatBuilder(out_dir)
-        
+    
+    def get_files(self, seq_file, seq_name=None):
+        # use this to check if a map file already exists
+        self.mapper.generate_outnames(seq_file, seq_name=None)
+        return self.mapper.mat_file, self.mapper.acc_file
+    
     def set_blastdb(self, db_dir):
         # establish db_dir as the blast database (must contain 6 *.n* files)
         check, db_files = blast.check_db_dir(db_dir)

@@ -71,26 +71,17 @@ def place_query(query, data, dist_mat, prev_dists=None):
         distances += prev_dists
     return distances
 
-def sort_classify(distances, tax_tab, k, mode):
-    # order neighbours by proximity to queries
-    # classify each row of neighbours using the data in tax_tab
+#%% classifier functions family
+# if a new classification mode is added, name it as classify_<mode> with arguments neighs, sorted_dists, tax_tab, k (even if some are not used)
+# should return a numpy array and a list of column names
+# add corresponding key values to classif_funcs, classif_modes, classif_longnames
+def classify_m(neighs, sorted_dists, tax_tab, k):
     result = []
-    
-    # sort neighbours
-    neighbours = np.argsort(distances)
-    sorted_dists = np.array([d[n] for d,n in zip(distances, neighbours)])
-    
     # classify for each value of k
     for _k in k:
         dists = sorted_dists[:,:_k]
-        # get supports
-        if mode == 'w':
-            supports = wknn(dists)
-        elif mode == 'd':
-            supports = dwknn(dists)
-        
         # classify instances
-        for idx, n in enumerate(neighbours[:,:_k]):
+        for idx, n in enumerate(neighs[:,:_k]):
             # select neighbour taxonomies
             sub_tax = tax_tab.iloc[n].to_numpy().T
             # assign classification for each rank
@@ -102,18 +93,86 @@ def sort_classify(distances, tax_tab, k, mode):
                     average_dists = dists[idx, row == tax].mean()
                     std_dists = dists[idx, row == tax].std()
                     report = [idx, rk, tax, count, _k, average_dists, std_dists]
-                    if mode != 'm':
-                        # add total supports to the report
-                        tax_supports = supports[idx, row == tax]
-                        report.append(tax_supports.sum())
                     result.append(report)
-    return np.array(result, dtype=np.float32)
+    columns = ['idx', 'rk', 'tax', 'count', '_k', 'average_dists', 'std_dists']
+    return np.array(result, dtype=np.float32), columns
 
-def build_report(result, mode):
+def classify_w(neighs, sorted_dists, tax_tab, k):
+    result = []
+    # classify for each value of k
+    for _k in k:
+        dists = sorted_dists[:,:_k]
+        # get supports
+        supports = wknn(dists)
+        
+        # classify instances
+        for idx, n in enumerate(neighs[:,:_k]):
+            # select neighbour taxonomies
+            sub_tax = tax_tab.iloc[n].to_numpy().T
+            # assign classification for each rank
+            for rk, row in enumerate(sub_tax):
+                # count reperesentatives of each taxon amongst the k neighbours
+                taxs, counts = np.unique(row, return_counts = True)
+                # for each represented taxon get representatives, average distances and std
+                for tax, count in zip(taxs, counts):
+                    average_dists = dists[idx, row == tax].mean()
+                    std_dists = dists[idx, row == tax].std()
+                    report = [idx, rk, tax, count, _k, average_dists, std_dists]
+                    # add total supports to the report
+                    tax_supports = supports[idx, row == tax]
+                    report.append(tax_supports.sum())
+                    report.append(tax_supports.median())
+                    result.append(report)
+    columns = ['idx', 'rk', 'tax', 'count', '_k', 'average_dists', 'std_dists', 'total_support', 'median_support']
+    return np.array(result, dtype=np.float32), columns
+
+def classify_d(neighs, sorted_dists, tax_tab, k):
+    result = []
+    # classify for each value of k
+    for _k in k:
+        dists = sorted_dists[:,:_k]
+        # get supports
+        supports = wknn(dists)
+        
+        # classify instances
+        for idx, n in enumerate(neighs[:,:_k]):
+            # select neighbour taxonomies
+            sub_tax = tax_tab.iloc[n].to_numpy().T
+            # assign classification for each rank
+            for rk, row in enumerate(sub_tax):
+                # count reperesentatives of each taxon amongst the k neighbours
+                taxs, counts = np.unique(row, return_counts = True)
+                # for each represented taxon get representatives, average distances and std
+                for tax, count in zip(taxs, counts):
+                    average_dists = dists[idx, row == tax].mean()
+                    std_dists = dists[idx, row == tax].std()
+                    report = [idx, rk, tax, count, _k, average_dists, std_dists]
+                    # add total supports to the report
+                    tax_supports = supports[idx, row == tax]
+                    report.append(tax_supports.sum())
+                    report.append(tax_supports.median())
+                    result.append(report)
+    columns = ['idx', 'rk', 'tax', 'count', '_k', 'average_dists', 'std_dists', 'total_support', 'median_support']
+    return np.array(result, dtype=np.float32), columns
+
+# classification functions paired to each mode
+classif_funcs = {'m':classify_m,
+                 'w':classify_w,
+                 'd':classify_d}
+# attribute used to get winner classification paired to each mode
+classif_modes = {'m':3,
+                 'w':7,
+                 'd':7}
+# full name for each classification mode
+classif_longnames = {'m':'majority',
+                     'w':'wKNN',
+                     'd':'dwKNN'}
+#%%
+def get_classif(result, attr):
     # extract the winning classification from the knn results
-    # get classification for each query/k/rank combination
+    # get classification for each query/k/rank combination using the given attr
     # in the case of majority vote (mode = 'm'), take the taxon(s) with the highest count in a given k/rank
-    # in the case of weighted modes (mode = 'w' o 'd'), take the taxon(s) with the highest support score (softmax result) in a given k/rank
+    # in the case of weighted modes (mode = 'w' o 'd'), take the taxon(s) with the highest support in a given k/rank
     report = []
     indexes = np.unique(result[:,0])
     k_vals = np.unique(result[:,4])
@@ -126,27 +185,17 @@ def build_report(result, mode):
             for rk in ranks:
                 ikr_mat = ik_mat[ik_mat[:,1] == rk]
                 # ikr_mat (idx, k, rk) built this way, array searches get smaller in size for every loop
-                if mode == 'm':
-                    # winners are the ones with the highest count
-                    max_count = ikr_mat[:,3].max()
-                    max_rows = ikr_mat[ikr_mat[:,3] == max_count]
-                else:
-                    # winners are the ones with the highest support
-                    # add scores (softmax)
-                    scores = softmax(ikr_mat[:,7])
-                    score_mat = np.append(ikr_mat, scores, axis=1)
-                    max_rows = score_mat[(scores == scores.max()).flatten()]
+                max_attr_val = ikr_mat[:, attr].max()
+                max_rows = ikr_mat[ikr_mat[:, attr] == max_attr_val]
                 report.append(max_rows)
     return np.concatenate(report)
 
-def parse_report(report, mode):
-    columns = ['idx', 'rank', 'taxon', 'count', 'k', 'mean distance', 'std distance', 'support', 'score']
-    cols = columns[:report.shape[1]]
+def parse_report(report, cols, mode):
     table = pd.DataFrame(report, columns = cols)
     table['mode'] = mode
     return table
 
-def classify(query, data, dist_mat, tax_tab, k=0, modes='mwd', prev_dists=None):
+def classify(query, data, dist_mat, tax_tab, k=0, modes='mwd', prev_dists=None, get_winners=False):
     # classification director, handles distance & support calculation, & neighbour selection
     # query : query sequence
     # data : reference sequences
@@ -155,6 +204,7 @@ def classify(query, data, dist_mat, tax_tab, k=0, modes='mwd', prev_dists=None):
     # k : number of neighbours, int or list
     # mode : 'm' : majority, 'w' : wKNN, 'd': dwKNN
     # prev_dists : used when trying multiple n_sites
+    # get_winners : used to select only the winning classification, otherwise, return all results
     
     # k defaults to all neighbours (this kills the majority vote)
     k = list(k)
@@ -163,11 +213,23 @@ def classify(query, data, dist_mat, tax_tab, k=0, modes='mwd', prev_dists=None):
     
     # get distances from each query to each reference
     distances = place_query(query, data, dist_mat, prev_dists)
+    # sort neighbours
+    neighbours = np.argsort(distances)
+    sorted_dists = np.array([d[n] for d,n in zip(distances, neighbours)])
+    
     reports = []
     for mode in modes:
+        try:
+            classifier = classif_funcs[mode]
+        except KeyError:
+            print(f'Error: Mode {mode} not valid')
+            continue
         # classify and build a report for each mode
-        pre_classif = sort_classify(distances, tax_tab, k, mode)
-        pre_report = build_report(pre_classif, mode)
-        reports.append(parse_report(pre_report, mode))
+        pre_classif, columns = classifier(neighbours, sorted_dists, tax_tab, k)
+        if get_winners:
+            pre_classif = get_classif(pre_classif, classif_modes[mode])
+            
+        reports.append(parse_report(pre_classif, columns, classif_longnames[mode]))
+        
     report = pd.concat(reports, ignore_index=True)
     return report, distances

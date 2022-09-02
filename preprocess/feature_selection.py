@@ -13,7 +13,17 @@ import numba as nb
 import numpy as np
 import pandas as pd
 
-#%% functions - information quantification
+
+#%% functions
+# table manipulation
+def get_taxid_tab(tax_tab):
+    # formats the given tax table (keeps only tax_id columns and removes the '_id' tail)
+    cols = [col for col in tax_tab if len(col.split('_')) > 1]
+    tr_dict = {col:col.split('_')[0] for col in cols}
+    taxid_tab = tax_tab[cols].rename(columns = tr_dict)
+    return taxid_tab
+
+# information quantification
 @nb.njit
 def get_entropy(array):
     valid_rows = array[array != 0]
@@ -21,13 +31,16 @@ def get_entropy(array):
     values = np.unique(valid_rows)
     counts = np.array([(valid_rows == val).sum() for val in values])
     freqs = counts / n_rows
-    return -np.sum(np.log2(freqs) * freqs)
+    return -np.sum(np.log2(freqs) * freqs, dtype=np.float32)
 
 def get_matrix_entropy(matrix):
-    entropy = np.zeros(matrix.shape[1])
+    entropy = np.zeros(matrix.shape[1], dtype=np.float32)
     for idx, col in enumerate(matrix.T):
         entropy[idx] = get_entropy(col)
-        
+    
+    # maximum possible entropy is log2(num of classes)
+    # fasta code has 15 possible classes (not counting gaps and missing values)
+    # most frequently 4 clases (acgt), log2(4) = 2
     return (2-entropy) / 2 # 1 min entropy, 0 max entropy
 
 def per_tax_entropy(matrix, tax_tab):
@@ -38,7 +51,7 @@ def per_tax_entropy(matrix, tax_tab):
         # get unique taxons in rank
         tax_list = tax_col.unique().tolist()
         # get the entropy for each taxon
-        entropy_mat = np.zeros((len(tax_list), matrix.shape[1]))
+        entropy_mat = np.zeros((len(tax_list), matrix.shape[1]), dtype=np.float32)
         for idx, tax in enumerate(tax_list):
             entropy_mat[idx] = get_matrix_entropy(matrix[tax_col == tax])
         tabs.append(pd.DataFrame(entropy_mat, index = pd.MultiIndex.from_product([[rank], tax_list])))
@@ -87,7 +100,7 @@ def plot_gain(table, rank, criterium='diff', figsize=(7,10)):
     ax.margins(x = 0.05, y = 0.01)
 
 #%%
-class Selector0:
+class Selector:
     def __init__(self):
         self.taxa = None
         self.seqs = None
@@ -96,7 +109,8 @@ class Selector0:
     def set_matrix(self, matrix, bounds, tax_tab=None):
         self.matrix = matrix
         self.bounds = bounds
-        self.tax_tab = tax_tab
+        if not tax_tab is None:
+            self.tax_tab = get_taxid_tab(tax_tab)
     
     def filter_taxons(self, min_seqs=10, rank='genus'):
         tax_counts = self.tax_tab[rank].value_counts(ascending = False)
@@ -114,7 +128,7 @@ class Selector0:
         # Define matrix and tax table to utilize
         if self.seqs:
             sub_mat = self.matrix[self.seqs]
-            sub_tax = self.tax_tab.iloc[self.taxa]
+            sub_tax = self.tax_tab.loc[self.seqs, self.taxa]
         else:
             sub_mat = self.matrix
             sub_tax = self.tax_tab
@@ -141,7 +155,8 @@ class Selector0:
         self.ranks = {rk:idx for idx, rk in enumerate(ranks)}
     
     def save_order_mat(self, out_file):
-        np.savez(out_file, order_tab = self.order_tab, order_bounds = self.order_bounds, order_tax = self.order_tax)
+        with open(out_file, 'wb') as out_handle:
+            np.savez(out_handle, order_tab = self.order_tab, order_bounds = self.order_bounds, order_tax = self.order_tax)
     
     def load_order_mat(self, file):
         order_data = np.load(file)
@@ -195,7 +210,7 @@ class Selector0:
                 total_sites = np.concatenate(total_sites, new_sites)
         return sites
     
-class Selector:
+class SelectorOLD:
     def __init__(self, matrix, tax):
         self.matrix = matrix
         self.tax = tax

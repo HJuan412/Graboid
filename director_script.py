@@ -8,6 +8,9 @@ This script is used to access graboid from the command line
 """
 
 import argparse
+import os
+import pandas as pd
+import pickle
 import sys
 #%% parsers
 print(sys.argv)
@@ -44,8 +47,8 @@ db_parser = argparse.ArgumentParser(prog='Graboid DATABASE',
                                     usage='%(prog)s MODE_ARGS [-h]',
                                     description='Graboid DATABASE downloads records from the specified taxon/marker pair from the NCBI and BOLD databases')
 db_parser.add_argument('mode')
-db_parser.add_argument('-o', '--out_dir',
-                       help='Output directory for the retrieved files',
+db_parser.add_argument('--work_dir',
+                       help='Working directory for the generated files',
                        type=str)
 db_parser.add_argument('-T', '--taxon',
                        help='Taxon to search for',
@@ -56,10 +59,10 @@ db_parser.add_argument('-M', '--marker',
 db_parser.add_argument('-F', '--fasta',
                        help='Pre-constructed fasta file')
 db_parser.add_argument('--bold',
-                       help='Search for records in the BOLD database',
+                       help='Include the BOLD database in the search',
                        action='store_true')
 db_parser.add_argument('-r', '--ranks',
-                       help='Set taxonomic ranks to download. Default: Phylum Class Order Family Genus Species',
+                       help='Set taxonomic ranks to include in the taxonomy table. Default: Phylum Class Order Family Genus Species',
                        nargs='*')
 db_parser.add_argument('-c', '--chunksize',
                        default=500,
@@ -81,31 +84,25 @@ mp_parser = argparse.ArgumentParser(prog='Graboid MAPPING',
                                     usage='%(prog)s MODE_ARGS [-h]',
                                     description='Graboid MAPPING aligns the downloaded sequences to a specified reference sequence. Alignment is stored as a numeric matrix with an accession list')
 mp_parser.add_argument('mode')
-mp_parser.add_argument('-o', '--out_dir',
-                       help='Output directory for the generated files',
+mp_parser.add_argument('--work_dir',
+                       help='Working directory for the generated files',
                        type=str)
-mp_parser.add_argument('-f', '--fasta',
-                       help='Sequence file to be aligned',
-                       type=str)
-mp_parser.add_argument('-r', '--ref',
-                       help='Reference sequence to be used as base of the alignment',
+mp_parser.add_argument('-B', '--base_seq',
+                       help='Marker sequence to be used as base of the alignment',
                        type=str)
 mp_parser.add_argument('-db', '--db_dir',
-                       help='OPTIONAL. BLAST database, alternative do reference sequence',
+                       help='OPTIONAL. BLAST database, alternative to reference sequence',
                        type=str)
-mp_parser.add_argument('-on', '--out_name',
+mp_parser.add_argument('-o', '--out_name',
                        help='OPTIONAL. Name for the generated BLAST report and alignment matrix',
                        type=str)
-mp_parser.add_argument('-rn', '--ref_name',
+mp_parser.add_argument('-bn', '--blast_name',
                        help='OPTIONAL. Name for the generated BLAST database',
                        type=str)
 mp_parser.add_argument('-e', '--evalue',
                        help='E-value threshold for the BLAST matches. Default: 0.005',
                        type=float,
                        default=0.005)
-mp_parser.add_argument('-c', '--clear',
-                       help='Replace previous BLAST database file (if present)',
-                       action='store_true')
 mp_parser.add_argument('-t', '--threads',
                        help='Number of threads to be used in the BLAST alignment. Default: 1',
                        type=int,
@@ -116,17 +113,8 @@ cb_parser = argparse.ArgumentParser(prog='Graboid CALIBRATE',
                                     usage='%(prog)s MODE_ARGS [-h]',
                                     description='Graboid CALIBRATE performs a grid search of the given ranges of K and n along a sliding window over the alignment matrix')
 cb_parser.add_argument('mode')
-cb_parser.add_argument('-o', '--out_dir',
-                       help='Output directory for the generated files',
-                       type=str)
-cb_parser.add_argument('-mat', '--mat_file',
-                       help='File containing the alignment matrix',
-                       type=str)
-cb_parser.add_argument('-acc', '--acc_file',
-                       help='File containing the accession list for the alignment matrix',
-                       type=str)
-cb_parser.add_argument('-tax', '--tax_file',
-                       help='File containing the taxonomy data for the alignment matrix',
+cb_parser.add_argument('--work_dir',
+                       help='Working directory for the generated files',
                        type=str)
 cb_parser.add_argument('-rt', '--row_thresh',
                        help='Empty row threshold',
@@ -144,22 +132,14 @@ cb_parser.add_argument('-rk', '--rank',
                        help='Rank to be used for feature selection',
                        type=str,
                        default='genus')
-cb_parser.add_argument('-ts', '--transition',
-                       help='Transition penalization in the distance matrix',
-                       type=float,
-                       default=1)
-cb_parser.add_argument('-tv', '--transversion',
-                       help='Transversion penalization in the distance matrix',
-                       type=float,
-                       default=1)
-cb_parser.add_argument('--id',
-                       help='Use the identity matrix for distance calculation',
-                       action='store_true')
+cb_parser.add_argument('-dm', '--dist_mat',
+                       help='Distance matrix to be used for distance calculation',
+                       type=str)
 cb_parser.add_argument('-wz', '--w_size',
                        help='Sliding window size',
                        type=int,
                        default=200)
-cb_parser.add_argument('-wt', '--w_step',
+cb_parser.add_argument('-ws', '--w_step',
                        help='Sliding window displacement',
                        type=int,
                        default=15)
@@ -187,7 +167,7 @@ cb_parser.add_argument('-nn', '--min_n',
                        help='Min value of n',
                        type=int,
                        default=5)
-cb_parser.add_argument('-f', '--out_file',
+cb_parser.add_argument('-o', '--out_file',
                        help='File name for the generated report (Will save into the given out_file)',
                        type=str)
 
@@ -205,13 +185,41 @@ cl_parser = argparse.ArgumentParser(prog='Graboid CLASSIFY',
                                     usage='%(prog)s MODE_ARGS [-h]',
                                     description='Graboid CLASSIFY takes a fasta file and generates a classification report for each entry')
 cl_parser.add_argument('mode')
-cl_parser.add_argument('-i', '--in_dir')
-cl_parser.add_argument('-f', '--fasta_file')
-cl_parser.add_argument('-o', '--out_file')
-cl_parser.add_argument('-k')
-cl_parser.add_argument('-s')
-cl_parser.add_argument('-m', '--mode')
-cl_parser.add_argument('-sf', '--support_func')
+cl_parser.add_argument('--work_dir',
+                       help='Working directory for the generated files',
+                       type=str)
+cl_parser.add_argument('-q', '--query_file',
+                       help='Query sequence files',
+                       type=str)
+cl_parser.add_argument('-dm', '--dist_mat',
+                       help='Distance matrix to be utilized for distance calculation',
+                       type=str)
+cl_parser.add_argument('-ws', '--w_start',
+                       help='Starting coordinates for the window of the alignment to use in classification',
+                       type=int)
+cl_parser.add_argument('-we', '--w_end',
+                       help='End coordinates for the window of the alignment to use in classification',
+                       type=int)
+cl_parser.add_argument('--k',
+                       help='K values to use in classification. Multiple values can be provided',
+                       type=int,
+                       nargs='*')
+cl_parser.add_argument('--n',
+                       help='Number of informative sites to use in the classification',
+                       type=int)
+cl_parser.add_argument('-md', '--cl_mode',
+                       help='Classification criterion to be used. "m" : majority, "w" : wKNN, "d" : dwKNN',
+                       type=str)
+cl_parser.add_argument('-rk', '--rank',
+                       help='Rank to be used for feature selection',
+                       type=str,
+                       default='genus')
+cl_parser.add_argument('-o', '--out_file',
+                       help='File name for the results file',
+                       type=str)
+cl_parser.add_argument('--keep_tmp',
+                       help='Keep temporal files',
+                       action='store_true')
 
 #%%
 parser_dict = {'DATABASE':db_parser,
@@ -241,10 +249,14 @@ print(args)
     # matrix2.plot_coverage_data(blast_file, evalue, figsize) # to plot coverage from a BLAST report
 #%% execute
 # database
-def main(mode, args):
+def main0(mode, args):
     from database import director as db
     from mapping import director as mp
     from calibration import calibrator as cb
+    from classif import director as cl
+    
+    from preprocess import feature_selection as fsele
+    
     if mode == 'DATABASE':
         if (args.taxon is None or args.marker is None) and args.fasta is None:
             sys.argv.append('--help')
@@ -278,7 +290,7 @@ def main(mode, args):
     elif mode == 'MAPPING':
         mp_out, mp_warn = mp.make_dirs(args.out_dir)
         mp_director = mp.Director(mp_out, mp_warn)
-        
+        selector = fsele.Selector()
         if not args.db_dir is None:
             # BLAST database already exists, set directory
             mp_director.set_blastdb(args.db_dir)
@@ -290,8 +302,14 @@ def main(mode, args):
             return
         
         # Perform BLAST and build matrix
-        mp_director.direct(args.fasta, args.out_name, args.evalue, args.threads)
-    
+        matrix, bounds, acclist = mp_director.direct(args.fasta, args.out_name, args.evalue, args.threads, keep=True)
+        # build order matrix
+        tax_tab = pd.read_csv(args.tax_tab, index_col=0).loc[acclist]
+        print('Cuantifying per-site information')
+        selector.set_matrix(matrix, bounds, tax_tab)
+        selector.build_tabs()
+        selector.save_order_mat(f'{mp_out}/order.npz') # TODO: set a better order file
+        
     elif mode == 'CALIBRATE':
         cb_out, cb_warn = cb.make_dirs(args.out_dir)
         calibrator = cb.Calibrator(cb_out, cb_warn)
@@ -321,3 +339,189 @@ def main(mode, args):
                                args.min_k,
                                args.min_n)
         calibrator.save_report(args.out_file)
+    
+    elif mode == 'CLASSIFY':
+        cl_out, cl_tmp, cl_wrn = cl.make_dirs(args.out_dir)
+        classifier = cl.Director(cl_out, cl_tmp, cl_wrn)
+        # set necessary data
+        files = cl.locate_files(args.in_dir)
+        classifier.set_reference(files['npz'], files['acclist'], files['tax'], files['taxguide'], files['order'])
+        
+        classifier.set_db(args.db_dir)
+        classifier.set_report(args.cal_report)
+        classifier.set_taxa(args.taxa)
+        classifier.map_query(args.fasta_file, args.threads)
+        classifier.set_dist_mat(args.dist_mat)
+        classifier.get_windows(args.metric, args.min_overlap)
+        classifier.hint_params(args.hint_start, args.hint_end, args.metric)
+        classifier.classify(args.w_start, args.w_end, args.k, args.n, args.cl_mode, args.crop, args.site_rank, args.out_file)
+
+#%%
+from database import director as db
+from mapping import director as mp
+from preprocess import feature_selection as fsele
+from calibration import calibrator as cb
+from calibration import reporter as rp
+from classif import director as cl
+
+def main(mode, args):
+    # get file catalog dict
+    catalog_path = f'{args.work_dir}/catalog.pickle' 
+    try:
+        with open(catalog_path, 'rb') as catalog_handle:
+            # file catalog dictionary contains generated files in the working directory
+            file_catalog = pickle.load(catalog_handle)
+    except FileNotFoundError:
+        file_catalog = {}
+    
+    # build files
+    res_dir = os.makedirs(f'{args.work_dir}/results', exist_ok=bool)
+    cal_dir = os.makedirs(f'{args.work_dir}/calibration', exist_ok=bool)
+    data_dir = os.makedirs(f'{args.work_dir}/data', exist_ok=bool)
+    tmp_dir = os.makedirs(f'{args.work_dir}/tmp', exist_ok=bool)
+    wrn_dir = os.makedirs(f'{args.work_dir}/warnings', exist_ok=bool)
+    
+    if mode == 'DATABASE':
+        db_director = db.Director(data_dir, tmp_dir, wrn_dir)
+        # user specified ranks to use
+        if not args.ranks is None:
+            db_director.set_ranks(args.rank)
+        # set databases
+        databases = ['NCBI']
+        if args.bold:
+            databases.append('BOLD')
+        
+        if not args.fasta is None:
+            # build db using fasta file (overrides taxon, mark)
+            db_director.direct_fasta(args.fasta, args.chunksize, args.max_attempts, args.mv)
+        elif not (args.taxon is None or args.marker is None):
+            #build db using tax & mark
+            db_director.direct(args.taxon, args.marker, databases, args.chunksize, args.max_attempts)
+        
+        # clear temporal files
+        if not args.keep_tmp:
+            db_director.clear_tmp()
+        
+        # update catalog
+        file_catalog['fasta'] = db_director.fasta_file
+        file_catalog['tax'] = db_director.tax_file
+        file_catalog['guide'] = db_director.guide_file
+        with open(catalog_path, 'wb') as catalog_path:
+            pickle.dump(file_catalog, catalog_path)
+            
+    if mode == 'MAPPER':
+        mp_director = mp.Director(data_dir, wrn_dir)
+        selector = fsele.Selector(data_dir)
+        
+        if not args.db_dir is None:
+            # BLAST database already exists, set directory
+            mp_director.set_blastdb(args.db_dir)
+        elif not args.ref is None:
+            # Create BLAST database using given ref
+            mp_director.build_blastdb(args.ref, args.ref_name, args.clear)
+        else:
+            print('Can\'t perform BLAST, provide a reference sequence or a BLAST database')
+            return
+        # locate fasta file
+        try:
+            fasta_file = file_catalog['fasta']
+        except KeyError:
+            print(f'No fasta file found in the directory {args.work_dir}. Aborting')
+            return
+        # Perform BLAST and build matrix
+        mp_director.direct(fasta_file, args.out_name, args.evalue, args.threads, keep=True)
+        # build order matrix
+        tax_tab = pd.read_csv(args.tax_tab, index_col=0).loc[mp_director.accs]
+        print('Cuantifying per-site information')
+        selector.set_matrix(mp_director.matrix, mp_director.bounds, tax_tab)
+        selector.build_tabs()
+        selector.save_order_mat()
+        # update catalog
+        file_catalog['db_dir'] = mp_director.db_dir
+        file_catalog['base_seq'] = mp_director.base_seq
+        file_catalog['blast'] = mp_director.blast_file
+        file_catalog['matrix'] = mp_director.matrix_file
+        file_catalog['accs'] = mp_director.acc_file
+        file_catalog['order'] = selector.order_file
+    
+    if mode in ['CALIBRATE', 'CLASSIFY']:
+        # retrieve files common to CALIBRATE and CLASSIFY
+        try:
+            mat_file = file_catalog['matrix']
+        except KeyError:
+            print(f'No matrix file found in {args.work_dir}. Aborting')
+            return
+        try:
+            acc_file = file_catalog['accs']
+        except KeyError:
+            print(f'No accession file found in {args.work_dir}. Aborting')
+            return
+        try:
+            tax_file = file_catalog['tax']
+        except KeyError:
+            print(f'No taxonomy file found in {args.work_dir}. Aborting')
+            return
+        try:
+            order_file = file_catalog['order']
+        except KeyError:
+            print(f'No order file found in {args.work_dir}. Aborting')
+            return
+    
+    if mode in ['REPORT', 'CLASSIFY']:
+        try:
+            guide_file = file_catalog['guide']
+        except KeyError:
+            print(f'No guide file found in {args.work_dir}. Aborting')
+            return
+        
+    if mode == 'REPORT':
+        report = None
+        report_meta = None
+        reporter = rp.Director(report)
+        reporter.set_taxa(args.taxa)
+        reporter.report(args.w_start, args.w_end, args.n_rows)
+        
+    if mode == 'CALIBRATE':
+        calibrator = cb.Calibrator(cal_dir, wrn_dir)
+        # set parameters
+        calibrator.set_row_thresh(args.row_thresh)
+        calibrator.set_col_thresh(args.col_thresh)
+        calibrator.set_min_seqs(args.min_seqs)
+        calibrator.set_rank(args.rank)
+        # TODO: change this to option 'id', 's1v2' or mat file
+        calibrator.set_cost_mat(args.transition, args.transversion, args.id)
+        # TODO: make out_file optional
+        if args.out_file is None:
+            print('Missing argument for the output file (out_file)')
+            return
+        
+        calibrator.set_database(mat_file, acc_file, tax_file)
+        # calibration
+        calibrator.grid_search(args.w_size,
+                               args.w_step,
+                               args.max_k,
+                               args.step_k,
+                               args.max_n,
+                               args.step_n,
+                               args.min_k,
+                               args.min_n)
+        calibrator.save_report(args.out_file)
+    
+    if mode == 'CLASSIFY':
+        classifier = cl.Director(res_dir, tmp_dir, wrn_dir)
+        # set necessary data
+        try:
+            db_dir = file_catalog['db_dir']
+        except KeyError:
+            print(f'No db directory found in {args.work_dir}. Aborting')
+            return
+
+        classifier.set_reference(mat_file, acc_file, tax_file, guide_file, order_file)
+        
+        classifier.set_db(db_dir)
+        classifier.set_report(args.cal_report)
+        classifier.set_taxa(args.taxa)
+        classifier.map_query(args.fasta_file, args.threads)
+        # TODO: use the same method to set the dist matrix as in calibration
+        classifier.set_dist_mat(args.dist_mat)
+        classifier.classify(args.w_start, args.w_end, args.k, args.n, args.cl_mode, args.crop, args.site_rank, args.out_file)

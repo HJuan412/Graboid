@@ -285,11 +285,12 @@ class Calibrator:
     def set_rank(self, rank='genus'):
         self.rank = rank
     
-    def set_cost_mat(self, transition=1, transversion=2, id=False):
-        if id:
-            self.cost_mat = cost_matrix.id_matrix()
-        else:
-            self.cost_mat = cost_matrix.cost_matrix(transition, transversion)
+    def set_dist_mat(self, mat_code):
+        matrix = cost_matrix.get_matrix(mat_code)
+        if matrix is None:
+            #TODO: warning if matrix code was invalid
+            return
+        self.cost_mat = matrix
     
     def grid_search(self, w_size, w_step, max_k, step_k, max_n, step_n, min_k=1, min_n=5):
         if self.loader is None:

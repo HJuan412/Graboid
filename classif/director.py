@@ -135,8 +135,13 @@ class Director:
     def set_db(self, db_dir):
         self.mapper.set_blastdb(db_dir)
     
-    def set_dist_mat(self, dist_mat):
-        self.dist_mat = dist_mat
+    def set_cost_mat(self, mat_code):
+        matrix = cost_matrix.get_matrix(mat_code)
+        if matrix is None:
+            #TODO: warning if matrix code was invalid
+            return
+        self.cost_mat = matrix
+        
     def set_report(self, report_file):
         report = pd.read_csf(report_file)
         self.w_len = report.w_end.iloc[0] - report.w_start.iloc[1]

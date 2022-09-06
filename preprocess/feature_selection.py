@@ -101,7 +101,10 @@ def plot_gain(table, rank, criterium='diff', figsize=(7,10)):
 
 #%%
 class Selector:
-    def __init__(self):
+    def __init__(self, out_dir):
+        self.out_dir = out_dir
+        self.order_file = f'{out_dir}/order.npz'
+        self.diff_file = f'{out_dir}/diff.csv'
         self.taxa = None
         self.seqs = None
         self.set_ranks()
@@ -154,8 +157,8 @@ class Selector:
     def set_ranks(self, ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']):
         self.ranks = {rk:idx for idx, rk in enumerate(ranks)}
     
-    def save_order_mat(self, out_file):
-        with open(out_file, 'wb') as out_handle:
+    def save_order_mat(self):
+        with open(self.order_file, 'wb') as out_handle:
             np.savez(out_handle, order_tab = self.order_tab, order_bounds = self.order_bounds, order_tax = self.order_tax)
     
     def load_order_mat(self, file):
@@ -164,8 +167,8 @@ class Selector:
         self.order_bounds = order_data['order_bounds']
         self.order_tax = order_data['order_tax']
     
-    def save_diff_tab(self, out_file):
-        self.diff_tab.to_csv(out_file)
+    def save_diff_tab(self):
+        self.diff_tab.to_csv(self.diff_file)
     
     def load_diff_tab(self, file):
         self.diff_tab = pd.read_csv(file, index_col = [0, 1])

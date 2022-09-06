@@ -13,7 +13,7 @@ import os
 import urllib3
 
 #%% setup logger
-logger = logging.getLogger('database_logger.surveyor')
+logger = logging.getLogger('Graboid.database.surveyor')
 
 #%% classes
 # survey tools
@@ -72,20 +72,18 @@ class SurveyWAPI(SurveyTool):
 class SurveyBOLD(SurveyWAPI):
     # consider using the full data retrieval API
     def get_logger(self):
-        self.logger = logging.getLogger('database_logger.surveyor.BOLD')
+        self.logger = logging.getLogger('Graboid.database.surveyor.BOLD')
     
     def get_dbase(self):
         return 'BOLD'
 
     def get_url(self):
-        # apiurl = f'http://www.boldsystems.org/index.php/API_Public/specimen?taxon={self.taxon}&format=tsv'
-        # TODO: BOLD downloads take too long regardless of mode (summary or sequence), furthermore, the api used to build the summary doesn't allow filtering by marker
         apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={self.taxon}&marker={self.marker}&format=tsv' # this line downloads sequences AND taxonomies
         return apiurl
 
 class SurveyENA(SurveyWAPI):
     def get_logger(self):
-        self.logger = logging.getLogger('database_logger.surveyor.ENA')
+        self.logger = logging.getLogger('Graboid.database.surveyor.BOLD.surveyor.ENA')
     def get_dbase(self):
         return 'ENA'
 
@@ -96,7 +94,7 @@ class SurveyENA(SurveyWAPI):
 class SurveyNCBI(SurveyTool):
     # This surveyor uses the Entrez package instead of an API, defines its own survey method
     def get_logger(self):
-        self.logger = logging.getLogger('database_logger.surveyor.NCBI')
+        self.logger = logging.getLogger('Graboid.database.surveyor.BOLD.surveyor.NCBI')
     
     def get_dbase(self):
         return 'NCBI'
@@ -135,7 +133,7 @@ class Surveyor:
             return
         
         tool = Surveyor.tooldict[database](taxon, marker, self.out_dir)
-        logging.info(f'Surveying database {database} for {taxon} {marker}')
+        print(f'Surveying database {database} for {taxon} {marker}')
         
         tool.survey(max_attempts)
         if tool.done:

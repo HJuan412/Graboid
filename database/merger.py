@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 #%% setup logger
-logger = logging.getLogger('database_logger.merger')
+logger = logging.getLogger('Graboid.database.merger')
 
 #%% variables
 valid_databases = ['BOLD', 'NCBI']
@@ -114,6 +114,7 @@ class Merger():
         with open(self.seq_out, 'w') as seq_handle:
             SeqIO.write(records, seq_handle, 'fasta')
         acc_tab.to_csv(self.acc_out)
+        logger.info(f'Merged {len(records)} sequence records to {self.seq_out}')
     
     def merge_taxons(self):
         mtax = MergerTax(self.taxfiles, self.ranks)
@@ -129,6 +130,7 @@ class Merger():
         # Used when a fasta file was provided, generate acclist and taxguide
         header = seqfile.split('/')[-1].split('.')[0]
         self.acc_out = f'{self.out_dir}/{header}.acclist'
+        self.tax_out = f'{self.out_dir}/{header}.tax'
         self.taxguide_out = f'{self.out_dir}/{header}.taxguide'
         # generate acc list
         acc_list = []
@@ -143,6 +145,7 @@ class Merger():
         tax_tab = pd.read_csv(taxfile, index_col = 0)
         guide_tab = flatten_taxtab(tax_tab, self.ranks)
         guide_tab.to_csv(self.taxguide_out)
+        logger.info(f'Generated files {header}.acclist and {header.taxguide} in directory {self.out_dir}')
 
 class MergerTax():
     def __init__(self, tax_files, ranks):
@@ -209,6 +212,7 @@ class MergerTax():
         merged_taxons = pd.concat(self.tax_tabs.values())
         
         merged_taxons.to_csv(tax_out)
+        logger.info(f'Unified taxonomies stored to {tax_out}')
         # drop duplicated records (if any)
         merged_taxons.loc[np.invert(merged_taxons.index.duplicated())]
         self.guide_tab.to_csv(taxguide_out)

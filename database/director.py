@@ -19,16 +19,10 @@ from database import taxonomist as txnm
 from database import merger as mrgr
 
 #%% set logger
-logger = logging.getLogger('database_logger')
+logger = logging.getLogger('Graboid.database')
 logger.setLevel(logging.DEBUG)
-# set formatter
-fmtr = logging.Formatter('%(asctime)s - %(levelname)s: %(message)s')
-#%% Manage directories
-def make_dirs(base_dir):
-    os.makedirs(f'{base_dir}/data', exist_ok=bool)
-    os.makedirs(f'{base_dir}/tmp', exist_ok=bool)
-    os.makedirs(f'{base_dir}/warnings', exist_ok=bool)
-        
+
+#%% functions
 # handle fasta
 def fasta_name(fasta):
     return fasta.split('/')[-1].split('.')[0]
@@ -45,17 +39,6 @@ class Director:
         self.out_dir = out_dir
         self.tmp_dir = tmp_dir
         self.warn_dir = warn_dir
-        # set handlers
-        self.warn_handler = logging.FileHandler(warn_dir + '/database.warnings')
-        self.warn_handler.setLevel(logging.WARNING)
-        self.log_handler = logging.StreamHandler()
-        self.log_handler.setLevel(logging.DEBUG)
-        # create formatter
-        self.warn_handler.setFormatter(fmtr)
-        self.log_handler.setFormatter(fmtr)
-        # add handlers
-        logger.addHandler(self.warn_handler)
-        logger.addHandler(self.log_handler)
         
         # set workers
         self.surveyor = surv.Surveyor(tmp_dir)
@@ -68,11 +51,13 @@ class Director:
         self.get_out_files()
     
     def clear_tmp(self):
-        for tmp_file in os.listdir(self.tmp_dir):
-            os.remove(f'{self.tmp_dir}/{tmp_file}')
+        tmp_files = self.get_tmp_files()
+        for file in tmp_files:
+            os.remove(file)
     
-    def set_ranks(self, ranks):
+    def set_ranks(self, ranks=['phylum', 'class', 'order', 'family', 'genus', 'species']):
         fmt_ranks = [rk.lower() for rk in ranks]
+        logger.INFO(f'Taxonomic ranks set as {" ".join(fmt_ranks)}')
         self.taxonomist.set_ranks(fmt_ranks)
         self.merger.set_ranks(fmt_ranks)
 
@@ -82,18 +67,21 @@ class Director:
             shutil.move(fasta_file, seq_path)
         else:
             shutil.copy(fasta_file, seq_path)
-        
+        logger.info(f'Moved fasta file {fasta_file} to location {self.out_dir}')
         # generate taxtmp file
         print(f'Retrieving TaxIDs for {fasta_file}...')
         self.fetcher.fetch_tax_from_fasta(fasta_file)
         
         print('Reconstructing taxonomies...')
+        # taxonomy needs no merging so it is saved directly to out_dir
         self.taxonomist.out_dir = self.out_dir # dump tax table to out_dir
         self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
+        self.taxonomist.out_files = {} # clear out_files container so the generated file is not found by get_tmp_files
         
         print('Building output files...')
-        self.merger.merge_from_fasta(seq_path, self.taxonomist.out_files)
+        self.merger.merge_from_fasta(seq_path, self.taxonomist.out_files['NCBI'])
         self.get_out_files()
+        print('Done!')
     
     def direct(self, taxon, marker, databases, chunksize=500, max_attempts=3):
         print('Surveying databases...')
@@ -111,8 +99,21 @@ class Director:
         self.get_out_files()
         print('Done!')
     
+    def get_tmp_files(self):
+        tmp_files = []
+        for file in self.surveyor.out_files.values():
+            tmp_files.append(file)
+        tmp_files.append(self.lister.out_file)
+        for file in self.fetcher.seq_files.values():
+            tmp_files.append(file)
+        for file in self.fetcher.tax_files.values():
+            tmp_files.append(file)
+        for file in self.taxonomist.out_files.values():
+            tmp_files.append(file)
+        return tmp_files
+    
     def get_out_files(self):
         self.seq_file = self.merger.seq_out
         self.acc_file = self.merger.acc_out
         self.tax_file = self.merger.tax_out
-        self.taxguide_file = self.merger.taxguide_out
+        self.guide_file = self.merger.taxguide_out

@@ -16,14 +16,12 @@ from Bio.SeqRecord import SeqRecord
 import logging
 import numpy as np
 import pandas as pd
-import urllib3
 
 #%% setup logger
-logger = logging.getLogger('database_logger.fetcher')
+logger = logging.getLogger('Graboid.database.fetcher')
 #%% functions
 # Entrez
-# TODO: remove mail and apikey
-def set_entrez(email = "hernan.juan@gmail.com", apikey = "7c100b6ab050a287af30e37e893dc3d09008"):
+def set_entrez(email, apikey):
     Entrez.email = email
     Entrez.api_key = apikey
 
@@ -34,41 +32,6 @@ def acc_slicer(acc_list, chunksize):
     for i in np.arange(0, n_seqs, chunksize):
         yield acc_list[i:i+chunksize]
 
-# fetch functions (OBSOLETE: MAY DELETE LATER)
-###############################################################################
-def fetch_ncbi(acc_list, out_seqs, out_taxs):
-    # download sequences from NCBI, generates a temporal fasta and am acc:taxID list
-    seq_handle = Entrez.efetch(db = 'nucleotide', id = acc_list, rettype = 'fasta', retmode = 'xml')
-    seqs_recs = Entrez.read(seq_handle)
-    
-    seqs = []
-    taxs = []
-
-    for acc, seq in zip(acc_list, seqs_recs):
-        seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), name = seq['TSeq_orgname'], description = None))
-        taxs.append(','.join([acc, seq['TSeq_taxid']]))
-    
-    with open(out_seqs, 'a') as out_handle0:
-        SeqIO.write(seqs, out_handle0, 'fasta')
-
-    with open(out_taxs, 'a') as out_handle1:
-        out_handle1.write('\n'.join(taxs + ['']))
-    
-def fetch_api(apiurl, out_handle):
-    http = urllib3.PoolManager()
-    r = http.request('GET', apiurl, preload_content = False)
-    for chunk in r.stream():
-        out_handle.write(chunk)
-    r.release_conn()
-    return
-
-def fetch_bold(taxon, marker, out_seqs, out_taxs = None):
-    # downloads sequence AND summary
-    apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={taxon}&marker={marker}&format=tsv'
-    with open(out_seqs, 'ab') as out_handle:
-        fetch_api(apiurl, out_handle)
-    return
-###############################################################################
 def fetch_seqs(acc_list, database, out_header, bold_file=None, chunk_size=500, max_attempts=3):
     # this performs a single pass over the given acc_list
     # chunks that can't be downloaded are returned in the failed list
@@ -100,7 +63,7 @@ class NCBIFetcher:
         # out_header is used to generate the names for the output files
         self.out_seqs = f'{out_header}.seqtmp'
         self.out_taxs = f'{out_header}.taxtmp'
-        self.logger = logging.getLogger('database_logger.fetcher.NCBI')
+        self.logger = logging.getLogger('Graboid.database.fetcher.NCBI')
 
     def fetch(self, acc_list, chunk_size=500, max_attempts=3):
         # download acc_list sequences from NCBI to a fasta file and tax ids to an acc:taxID list
@@ -148,7 +111,7 @@ class BOLDFetcher:
         self.out_seqs = f'{out_header}.seqtmp'
         self.out_taxs = f'{out_header}.taxtmp'
         self.bold_file = bold_file
-        self.logger = logging.getLogger('database_logger.fetcher.BOLD')
+        self.logger = logging.getLogger('Graboid.database.fetcher.BOLD')
 
     def fetch(self, acc_list, chunk_size=0, max_attempts=3):
         # read table and get records in acc_list
@@ -199,7 +162,7 @@ class Fetcher():
             return False
         if 'BOLD' in self.acc_tab['Database']:
             if self.bold_file is None:
-                logger.warning(f'BOLD records detected in {self.acc_file} but no BOLD.summ file was provided')
+                logger.error(f'BOLD records detected in {self.acc_file} but no BOLD.summ file was provided')
                 return False
         return True
 
@@ -267,4 +230,4 @@ class Fetcher():
         
         # save tax table to csv
         taxs = pd.DataFrame(taxs)
-        taxs.to_csv(out_file, header = False, index = False)
+        taxs.to_csv(out_file, header=False, index=False)

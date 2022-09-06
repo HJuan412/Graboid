@@ -11,13 +11,13 @@ This script fetches the taxonomy data for the downloaded records
 #%% modules
 from Bio import Entrez
 
-from data_fetch.database_construction import bold_marker_vars
+# from data_fetch.database_construction import bold_marker_vars
 import logging
 import numpy as np
 import pandas as pd
 
 #%% setup logger
-logger = logging.getLogger('database_logger.taxonomist')
+logger = logging.getLogger('Graboid.database.taxonomist')
 
 #%% variables
 valid_databases = ['BOLD', 'NCBI']
@@ -84,7 +84,7 @@ class TaxonomistNCBI(Taxer):
         self.read_taxid_file()
         self.make_tax_tables()
         
-        self.logger = logging.getLogger('database_logger.taxonomist.NCBI')
+        self.logger = logging.getLogger('Graboid.database.taxonomist.NCBI')
         
         self.failed = []
     
@@ -98,7 +98,7 @@ class TaxonomistNCBI(Taxer):
         
         # generates a warning if taxid_list is empty
         if len(taxid_list) == 0:
-            self.logger.warning(f'Summary file {self.in_file} is empty')
+            self.logger.ERROR(f'Summary file {self.in_file} is empty')
             return
 
         self.taxid_list = taxid_list[1] # index are the accession codes
@@ -130,7 +130,7 @@ class TaxonomistNCBI(Taxer):
         
         self.failed = failed
         if len(failed) > 0:
-            self.logger.warning(f'Failed to download {len(failed)} taxIDs of {len(self.uniq_taxs)}')
+            self.logger.WARNING(f'Failed to download {len(failed)} taxIDs of {len(self.uniq_taxs)}')
     
     def retry_dl(self, max_attempts=3):
         # if some taxids couldn't be downloaded, rety up to max_attempts times
@@ -174,7 +174,7 @@ class TaxonomistBOLD(Taxer):
         
         self.read_taxid_file()
         
-        self.logger = logging.getLogger('database_logger.taxonomist.BOLD')
+        self.logger = logging.getLogger('Graboid.database.taxonomist.BOLD')
 
     def __set_marker_vars(self):
         # BOLD records may have variations of the marker name (18S/18s, COI-3P/COI-5P)
@@ -185,7 +185,7 @@ class TaxonomistBOLD(Taxer):
         bold_tab = pd.read_csv(self.taxid_file, index_col = 0)
 
         if len(bold_tab) == 0:
-            self.logger.warning(f'Summary file {self.in_file} is empty')
+            self.logger.ERROR(f'Summary file {self.in_file} is empty')
             self.bold_tab = None
             return
         self.bold_tab = bold_tab
@@ -229,10 +229,11 @@ class Taxonomist:
         # taxid_files dict with {database:taxid_file}
         # check that summ_file container is not empty
         if len(taxid_files) == 0:
-            logger.warning('No valid taxid files detected')
+            logger.ERROR('No valid taxid files detected')
             return
         
         for database, taxid_file in taxid_files.items():
             taxer = taxer_dict[database](taxid_file, self.ranks, self.out_dir)
             taxer.taxing(chunksize, max_attempts)
+            logger.INFO(f'Finished retrieving taxonomy data from {database} database. Saved to {taxer.tax_out}')
             self.out_files[database] = taxer.tax_out

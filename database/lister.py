@@ -14,7 +14,7 @@ import pandas as pd
 import os
 
 #%% set logger
-logger = logging.getLogger('database_logger.lister')
+logger = logging.getLogger('Graboid.database.lister')
 #%% variables
 valid_databases = ['BOLD', 'NCBI']
 #%% functions
@@ -53,7 +53,7 @@ def read_summ(summ_file, database):
         accs = bold_tab['sampleid'].tolist()
     
     if len(accs) == 0:
-        logger.warning(f'No records present in {summ_file}')
+        logger.error(f'No records present in {summ_file}')
     return accs
 
 # summary manipulation
@@ -128,7 +128,7 @@ class Lister:
         # summ_files dict with {database:summ_file}
         # generates a consensus list of accession codes from the summary files
         if len(summ_files) == 0:
-            logger.warning('No valid summaries detected')
+            logger.error('No valid summaries detected')
             return
         
         self.get_summ_files(summ_files)
@@ -145,8 +145,9 @@ class Lister:
         
         # store tab
         merged_clear.to_csv(self.out_file)
+        logger.info(f'Accession list stored to {self.out_file}')
 
-# TODO: these classes are no longer needed mut may be of use in the future
+#%% These classes are no longer needed mut may be of use in the future
 class SummProcessor():
     def __init__(self, taxon, marker, database, in_file, out_dir):
         self.taxon = taxon

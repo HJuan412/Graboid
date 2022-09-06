@@ -171,15 +171,6 @@ cb_parser.add_argument('-o', '--out_file',
                        help='File name for the generated report (Will save into the given out_file)',
                        type=str)
 
-#%% design parser
-ds_parser = argparse.ArgumentParser(prog='Graboid DESIGN',
-                                    usage='%(prog)s MODE_ARGS [-h]',
-                                    description='Graboid DESIGN takes a given set of taxons or coordinates and generates suggest an experiment')
-ds_parser.add_argument('mode')
-ds_parser.add_argument('-i', '--in_dir')
-ds_parser.add_argument('-t', '--taxon')
-ds_parser.add_argument('-c', '-coords')
-
 #%% classify parser
 cl_parser = argparse.ArgumentParser(prog='Graboid CLASSIFY',
                                     usage='%(prog)s MODE_ARGS [-h]',
@@ -225,8 +216,7 @@ cl_parser.add_argument('--keep_tmp',
 parser_dict = {'DATABASE':db_parser,
                'MAPPING':mp_parser,
                'CALIBRATE':cb_parser,
-               'DESIGN':ds_parser,
-               'CLASSIFY':ds_parser,
+               'CLASSIFY':cl_parser,
                'HELP':help_parser}
 
 base_args, unknown = first_parser.parse_known_args()
@@ -248,115 +238,6 @@ print(args)
 #TODO: PLOTTER mode. make plots from different modules. For now:
     # matrix2.plot_coverage_data(blast_file, evalue, figsize) # to plot coverage from a BLAST report
 #%% execute
-# database
-def main0(mode, args):
-    from database import director as db
-    from mapping import director as mp
-    from calibration import calibrator as cb
-    from classif import director as cl
-    
-    from preprocess import feature_selection as fsele
-    
-    if mode == 'DATABASE':
-        if (args.taxon is None or args.marker is None) and args.fasta is None:
-            sys.argv.append('--help')
-            taxmark = [tm for tm, arg in zip(('taxon', 'marker'), (args.taxon, args.marker)) if not arg is None]
-            taxmark_msg = ' and '.join(taxmark)
-            print(f'Missing value for {taxmark_msg}. Alternative, provide a fasta file')
-            return
-        args = parser.parse_args()
-        
-        db_out, db_tmp, db_warn = db.make_dirs(args.out_dir)
-        db_director = db.Director(db_out, db_tmp, db_warn)
-        
-        # user specified ranks to use
-        if not args.ranks is None:
-            db_director.set_ranks(args.rank)
-        
-        if not args.fasta is None:
-            # build db using fasta file (overrides taxon, mark)
-            db_director.direct_fasta(args.fasta, args.chunksize, args.max_attempts, args.mv)
-        if not (args.taxon is None or args.marker is None):
-            #build db using tax & mark
-            databases = ['NCBI']
-            if args.bold:
-                databases.append('BOLD')
-            db_director.direct(args.taxon, args.marker, databases, args.chunksize, args.max_attempts)
-        
-        # clear temporal files
-        if not args.keep_tmp:
-            db_director.clear_tmp()
-            
-    elif mode == 'MAPPING':
-        mp_out, mp_warn = mp.make_dirs(args.out_dir)
-        mp_director = mp.Director(mp_out, mp_warn)
-        selector = fsele.Selector()
-        if not args.db_dir is None:
-            # BLAST database already exists, set directory
-            mp_director.set_blastdb(args.db_dir)
-        elif not args.ref is None:
-            # Create BLAST database using given ref
-            mp_director.build_blastdb(args.ref, args.ref_name, args.clear)
-        else:
-            print('Can\'t perform BLAST, provide a reference sequence or a BLAST database')
-            return
-        
-        # Perform BLAST and build matrix
-        matrix, bounds, acclist = mp_director.direct(args.fasta, args.out_name, args.evalue, args.threads, keep=True)
-        # build order matrix
-        tax_tab = pd.read_csv(args.tax_tab, index_col=0).loc[acclist]
-        print('Cuantifying per-site information')
-        selector.set_matrix(matrix, bounds, tax_tab)
-        selector.build_tabs()
-        selector.save_order_mat(f'{mp_out}/order.npz') # TODO: set a better order file
-        
-    elif mode == 'CALIBRATE':
-        cb_out, cb_warn = cb.make_dirs(args.out_dir)
-        calibrator = cb.Calibrator(cb_out, cb_warn)
-        
-        # set parameters
-        calibrator.set_row_thresh(args.row_thresh)
-        calibrator.set_col_thresh(args.col_thresh)
-        calibrator.set_min_seqs(args.min_seqs)
-        calibrator.set_rank(args.rank)
-        calibrator.set_cost_mat(args.transition, args.transversion, args.id)
-        
-        # load data
-        if args.mat_file is None or args.acc_file is None or args.tax_file is None:
-            print('One of the necesary files for calibration (mat_file, acc_file or tax_file) is missing')
-            return
-        if args.out_file is None:
-            print('Missing argument for the output file (out_file)')
-            return
-        calibrator.set_database(args.mat_file, args.acc_file, args.tax_file)
-        # calibration
-        calibrator.grid_search(args.w_size,
-                               args.w_step,
-                               args.max_k,
-                               args.step_k,
-                               args.max_n,
-                               args.step_n,
-                               args.min_k,
-                               args.min_n)
-        calibrator.save_report(args.out_file)
-    
-    elif mode == 'CLASSIFY':
-        cl_out, cl_tmp, cl_wrn = cl.make_dirs(args.out_dir)
-        classifier = cl.Director(cl_out, cl_tmp, cl_wrn)
-        # set necessary data
-        files = cl.locate_files(args.in_dir)
-        classifier.set_reference(files['npz'], files['acclist'], files['tax'], files['taxguide'], files['order'])
-        
-        classifier.set_db(args.db_dir)
-        classifier.set_report(args.cal_report)
-        classifier.set_taxa(args.taxa)
-        classifier.map_query(args.fasta_file, args.threads)
-        classifier.set_dist_mat(args.dist_mat)
-        classifier.get_windows(args.metric, args.min_overlap)
-        classifier.hint_params(args.hint_start, args.hint_end, args.metric)
-        classifier.classify(args.w_start, args.w_end, args.k, args.n, args.cl_mode, args.crop, args.site_rank, args.out_file)
-
-#%%
 from database import director as db
 from mapping import director as mp
 from preprocess import feature_selection as fsele
@@ -443,6 +324,8 @@ def main(mode, args):
         file_catalog['matrix'] = mp_director.matrix_file
         file_catalog['accs'] = mp_director.acc_file
         file_catalog['order'] = selector.order_file
+        with open(catalog_path, 'wb') as catalog_path:
+            pickle.dump(file_catalog, catalog_path)
     
     if mode in ['CALIBRATE', 'CLASSIFY']:
         # retrieve files common to CALIBRATE and CLASSIFY
@@ -468,12 +351,14 @@ def main(mode, args):
             return
     
     if mode in ['REPORT', 'CLASSIFY']:
+        # retrieve files common to REPORT and CLASSIFY
         try:
             guide_file = file_catalog['guide']
         except KeyError:
             print(f'No guide file found in {args.work_dir}. Aborting')
             return
-        
+    
+    # TODO: move parameter hint from classification director to a report module
     if mode == 'REPORT':
         report = None
         report_meta = None
@@ -488,8 +373,7 @@ def main(mode, args):
         calibrator.set_col_thresh(args.col_thresh)
         calibrator.set_min_seqs(args.min_seqs)
         calibrator.set_rank(args.rank)
-        # TODO: change this to option 'id', 's1v2' or mat file
-        calibrator.set_cost_mat(args.transition, args.transversion, args.id)
+        calibrator.set_dist_mat(args.dist_mat)
         # TODO: make out_file optional
         if args.out_file is None:
             print('Missing argument for the output file (out_file)')
@@ -522,6 +406,5 @@ def main(mode, args):
         classifier.set_report(args.cal_report)
         classifier.set_taxa(args.taxa)
         classifier.map_query(args.fasta_file, args.threads)
-        # TODO: use the same method to set the dist matrix as in calibration
         classifier.set_dist_mat(args.dist_mat)
         classifier.classify(args.w_start, args.w_end, args.k, args.n, args.cl_mode, args.crop, args.site_rank, args.out_file)

@@ -13,8 +13,10 @@ sys.path.append('classif')
 import logging
 import numpy as np
 import pandas as pd
-from classif import classification
-from classif import cost_matrix
+import pickle
+import time
+from classification import classification
+from classification import cost_matrix
 import os
 from preprocess import feature_selection as fsele
 from preprocess import preproc
@@ -22,10 +24,8 @@ from preprocess import taxon_study as tstud
 from preprocess import windows
 
 #%% set
-logger = logging.getLogger('Calibrator')
+logger = logging.getLogger('Graboid.calibrator')
 logger.setLevel(logging.DEBUG)
-# set formatter
-fmtr = logging.Formatter('%(asctime) - %(levelname)s: %(message)s')
 
 #%% functions
 def make_dirs(base_dir):
@@ -248,19 +248,8 @@ class Calibrator:
     def __init__(self, out_dir, warn_dir):
         self.out_dir = out_dir
         self.warn_dir = warn_dir
-
-        # set handlers
-        self.warn_handler = logging.FileHandler(warn_dir)
-        self.warn_handler.setLevel(logging.WARNING)
-        self.log_handler = logging.StreamHandler()
-        self.log_handler.setLevel(logging.DEBUG)
-        # create formatter
-        self.warn_handler.setFormatter(fmtr)
-        self.log_handler.setFormatter(fmtr)
-        # add handlers
-        logger.addHandler(self.warn_handler)
-        logger.addHandler(self.log_handler)
         
+        self.selector = fsele.Selector(out_dir)
         self.loader = None
         self.set_row_thresh()
         self.set_col_thresh()
@@ -269,9 +258,10 @@ class Calibrator:
         self.set_cost_mat()
         self.report = None
     
-    def set_database(self, mat_file, acc_file, tax_file):
-        self.loader = windows.WindowLoader('Calibrator.WindowLoader')
+    def set_database(self, mat_file, acc_file, tax_file, order_file):
+        self.loader = windows.WindowLoader('Graboid.calibrator.windowloader')
         self.loader.set_files(mat_file, acc_file, tax_file)
+        self.selector.load_order_mat(order_file)
     
     def set_row_thresh(self, thresh=0.2):
         self.row_thresh = thresh
@@ -288,9 +278,37 @@ class Calibrator:
     def set_dist_mat(self, mat_code):
         matrix = cost_matrix.get_matrix(mat_code)
         if matrix is None:
-            #TODO: warning if matrix code was invalid
+            logger.error('Could not set distance matrix, invalid matrix code')
             return
         self.cost_mat = matrix
+    
+    def check_ready(self):
+        # check that the calibration is ready to go
+        missing = []
+        try:
+            self.cost_mat
+        except AttributeError:
+            missing.append('distance matrix')
+        try:
+            self.loader.matrix
+            self.loader.bounds
+            self.loader.dims
+        except AttributeError:
+            missing.append('alignment matrix')
+        try:
+            self.loader.accdist
+        except AttributeError:
+            missing.append('accession list')
+        try:
+            self.loader.tax_tab            
+        except AttributeError:
+            missing.append('taxonomy table')
+        try:
+            self.order_file
+        except AttributeError:
+            missing.append('order file')
+        ready = len(missing) > 0
+        return ready, missing
     
     def grid_search(self, w_size, w_step, max_k, step_k, max_n, step_n, min_k=1, min_n=5):
         if self.loader is None:
@@ -318,35 +336,32 @@ class Calibrator:
             window = self.loader.get_window(start, end, self.row_thresh, self.col_thresh)
             if len(window.eff_mat) == 0:
                 continue
-            selector = fsele.Selector(window.cons_mat, window.cons_tax)
-            selector.select_taxons(minseqs = self.min_seqs)
-            selector.build_diff_tab()
+            n_seqs = window.eff_mat.shape[0]
+            quintile = int(n_seqs / 5)
+
+            if n_seqs < self.min_seqs:
+                # not enough sequences passed the filter, skip iteration
+                print(f'Window {start} - {end}. Not enoug sequences to perform calibration ({n_seqs}, min = {self.min_seqs}), skipping')
+                continue
             
-            # preprocess
-            for n_sites in n_range:
-                print(f'\t{n_sites} sites')
+            n_sites = self.selector.get_sites(n_range, start, end, self.rank)
+            y = window.eff_tax
+            prev_distances = np.zeros(window.shape[0], window.shape[0]-1, dtype = np.int8)
+            reports1 = []
+            for n, sites in n_sites.items():
+                print(f'\t{n} sites')
                 # post collapse, generates the final data matrix and taxonomy table
-                x, y = selector.select_sites(n_sites, self.rank)
-                x, y = windows.collapse_window(x, y)
-                # TODO: incorporate cluster distances and softmax activation of weighted classification into the calibration report
-                super_c = tstud.SuperCluster(x, y, self.rank, self.cost_mat)
+                x = window.eff_mat[:, sites - start]
                 
                 # loo_result tables are plain lists, later to be converted into np.arrays
                 # these store the classifications for each query
-                loo_maj = []
-                loo_wknn = []
-                loo_dwknn = []
                 
                 # iterate trought the data
                 idx_gen = loo_generator(x.shape[0])
-                n_seqs = x.shape[0]
-                quintile = int(n_seqs / 5)
                 
+                reports0 = []
                 # outer loop
                 for train_idx, test_idx in idx_gen:
-                    if len(train_idx) == 0:
-                        # no training sequences (only 1 sequence passed the filters)
-                        continue
                     if test_idx % quintile == 0:
                         print(f'\t\tCalibrated {test_idx} of {n_seqs} ({(test_idx/n_seqs) * 100:.2f}%)')
                     
@@ -354,72 +369,57 @@ class Calibrator:
                     query = x[test_idx]
                     train_data = x[train_idx]
                     train_tax = y.iloc[train_idx]
+                    query_dists = prev_distances[test_idx]
                     
-                    # get classifications using each method
-                    results_maj, results_wknn, results_dwknn = classification.calibration_classify(query, k_range, train_data, train_tax, self.cost_mat, q_name=test_idx)
+                    q_report, new_dists = classification.classify(query, train_data, self.dist_mat, train_tax, k_range, modes = 'mwd', prev_dists = query_dists, get_winners = True)
+                    # q_report columns: idx, rk, tax, count, _k, average_dists, std_dists, total_support, median_support
+                    prev_distances[test_idx] += new_dists
+                    reports0.append(q_report)
+                reports0 = pd.concat(reports0)
+                reports0 = reports0.insert(2, 'w_start', start)
+                reports0 = reports0.insert(3, 'w_end', end)
+                reports0 = reports0.insert(4, 'n_sites', n)
+                reports1.append(reports0)
+                
+            report = pd.concat(reports1)
+            report.sort_values(['w_start', 'n_sites', '_k'], inplace=True, ignore_index=True)
+            
+            # get metrics for each tank/tax in each mode,K,n_sites combination
+            for (w_start, n, k, mode), subtab0 in report.groupby(['w_start', 'n_sites', '_k', 'mode']):
+                w_end = subtab0.w_end.iloc[0]
+                for (rk, tax), subtab1 in subtab0.groupby(['rk', 'tax']):
+                    pred = subtab1.tax.values
+                    real = y.loc[pred.idx, rk].values
+                    confusion, taxons = build_confusion(pred, real)
+                    metrics = get_metrics(confusion, taxons)
+                    metrics_report = pd.DataFrame(metrics, columns=['Accuracy', 'Precision', 'Recall', 'F1_score'])
+                    metrics_report['w_start'] = w_start
+                    metrics_report['w_end'] = w_end
+                    metrics_report['rank'] = rk
+                    metrics_report['taxon'] = tax
+                    metrics_report['n_sites'] = n
+                    metrics_report['K'] = k
+                    metrics_report['mode'] = mode
                     
-                    # update classification tables
-                    for res_tab, loo_tab, mode in [(results_maj, loo_maj, 'majority'),
-                                                     (results_wknn, loo_wknn, 'weighted'),
-                                                     (results_dwknn, loo_dwknn, 'weighted')]:
-                        for k, tab in zip(k_range, res_tab):
-                            # get classification for each k
-                            classif = classification.get_classif(tab, mode)
-                            # include the test idx and the used k (for the final report)
-                            classif = np.insert(classif, [0, len(classif)], [test_idx, k])
-                            loo_tab.append(classif)
-                
-                if len(loo_maj) == 0:
-                    # no reports generated for the current window
-                    continue
-                
-                # combine classification tables into np.arrays
-                loo_maj = np.array(loo_maj)
-                loo_wknn = np.array(loo_wknn)
-                loo_dwknn = np.array(loo_dwknn)
-                
-                # get classification metrics
-                cal_res = []
-                # get metrics for each mode,K,n_sites combination
-                for mode, loo_tab in enumerate((loo_maj, loo_wknn, loo_dwknn)):
-                    for k in k_range:
-                        # select the results submatrix for the current K and get the metrics for each rank
-                        k_submat = loo_tab[loo_tab[:,-1] == k]
-                        cal_tab = build_cal_tab(k_submat, y)
-                        # add remaining columns
-                        add_cols = np.tile([start, end, k, n_sites, mode], (cal_tab.shape[0], 1))
-                        cal_tab = np.concatenate((cal_tab, add_cols), axis=1)
-                        # add to results
-                        cal_res.append(cal_tab)
-                
-                # update results
-                cal_res = np.concatenate(cal_res)
-                results.append(cal_res)
+                    results.append(metrics_report)
         
-        # build results table
-        calibration_result = pd.DataFrame(np.concatenate(results),
-                                          columns=['rank',
-                                                   'taxon',
-                                                   'accuracy',
-                                                   'precision',
-                                                   'recall',
-                                                   'F1_score',
-                                                   'w_start',
-                                                   'w_end',
-                                                   'K',
-                                                   'n_sites',
-                                                   'mode']) # do all three modes in a single table
+        results = pd.concatenate(results)
+
         # translate numeric codes
         numcode_dict = {idx:rank for idx, rank in enumerate(self.loader.tax_tab.columns)}
-        calibration_result['rank'].replace(numcode_dict,
-                                           inplace=True)
-        calibration_result['mode'].replace({0:'maj',
-                                            1:'wknn',
-                                            2:'dwknn'},
-                                           inplace=True)
-        self.report = calibration_result
+        results['rank'].replace(numcode_dict, inplace=True)
+        self.report = results
+        self.meta = {'k':k_range,
+                     'n':n_range,
+                     'w_size':w_size,
+                     'w_step':w_step}
     
-    def save_report(self, filename):
-        out_file = f'{self.out_dir}/{filename}'
+    def save_report(self, filename=None):
+        if filename is None:
+            filename = time.strftime("report_%d%m%Y-%H%M%S")
+        self.out_file = f'{self.out_dir}/{filename}.csv'
+        self.meta_file = f'{self.out_dir}/{filename}.meta'
         if not self.report is None:
-            self.report.to_csv(out_file)
+            self.report.to_csv(self.out_file)
+            with open(self.meta_file, 'wb') as meta_handle:
+                pickle.dump(self.meta, meta_handle)

@@ -219,14 +219,6 @@ class WindowLoader:
     def __init__(self, logger='WindowLoader'):
         # logger set at initialization (because this class may be used by multiple modules)
         self.logger = logging.getLogger(logger)
-        self.mat_file = None
-        self.acc_file = None
-        self.tax_file = None
-        self.matrix = None
-        self.bounds = None
-        self.dims = None
-        self.acclist = None
-        self.tax_tab = None
         
     def set_files(self, mat_file, acc_file, tax_file):
         self.mat_file = mat_file
@@ -250,7 +242,7 @@ class WindowLoader:
             return
 
         if start < 0 or end > self.dims[1]:
-            self.logger.warning(f'Invalid window dimensions: start: {start}, end: {end}. Must be between 0 and {self.dims[1]}')
+            self.logger.error(f'Invalid window dimensions: start: {start}, end: {end}. Must be between 0 and {self.dims[1]}')
             return
 
         window = np.array(self.matrix[:, start:end])

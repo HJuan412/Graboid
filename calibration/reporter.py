@@ -1,172 +1,98 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Thu May 19 10:14:55 2022
+Created on Wed Sep  7 13:36:32 2022
 
 @author: hernan
-read the calibration results, present replies to queries
+This script is used to extract the best parameter combinations from a calibration result
 """
 
-from matplotlib.colors import ListedColormap
-import matplotlib.cm as cm
-import matplotlib.pyplot as plt
-import numpy as np
+#%% libraries
+import time
 import pandas as pd
-
-viridis = cm.get_cmap('viridis', 256)
-newcolors = viridis(np.linspace(0,1,256))
-grey = np.array([128/256, 128/256, 128/256, 1])
-newcolors[0] = grey
-newcmp = ListedColormap(newcolors)
+import pickle
 
 #%% functions
-def build_plot_tab(report_tab, metric='F1_score'):
-    # prepare iterables for multiindexes
-    w_start = report_tab['w_start'].unique()
-    w_end = report_tab['w_end'].unique()
-    taxons = report_tab['taxon'].unique()
-    params = ['k', 'n', 'mode']
-    # prepare result dataframes
-    met_tab = pd.DataFrame(index = taxons,
-                            columns = pd.MultiIndex.from_arrays((w_start, w_end)))
-    param_tab = pd.DataFrame(index = taxons,
-                             columns = pd.MultiIndex.from_product((w_start, params)))
-    # process report table
-    report_tab = report_tab.sort_values(metric, ascending = False).set_index(['w_start', 'taxon'])
-    for win in w_start:
-        win_tab = report_tab.loc[win]
-        for tax in win_tab.index.unique():
-            row = win_tab.loc[tax].iloc[0]
-            # row contains the parameter combination with the best results for the given parameters
-            # store metric value in met_tab and parameter combination in param_tab
-            met_tab.at[tax, win] = row[metric]
-            param_tab.at[tax, win] = row.loc[['k', 'n', 'mode']].values
-    # prepare met_tab to build heatmap
-    met_tab.fillna(-1, inplace=True)
-    return met_tab, param_tab
+def get_best_params(subreport, metric='F1_score', nrows=3):
+    # from a subsection of a calibration report, get the average score for the given metric for each represented combination of parameters
+    best_params = []
+    
+    for params, param_tab in subreport.groupby(['K', 'n_sites', 'mode']):
+        # no need to sort the subreport because it was sorted by Reporter.report
+        sample_row = param_tab.iloc[[0]].copy()
+        sample_row[f'mean {metric}'] = param_tab[metric].mean()
+        sample_row[f'std {metric}'] = param_tab[metric].std()
+        best_params.append(sample_row)
+    best_params.append(pd.DataFrame(index=[nrows], columns = sample_row.columns)) # separator row (empty)
+    best_params = pd.concat(best_params, ignore_index=True)
+    best_params = best_params.sort_values(f'mean {metric}', ascending = False).iloc[:nrows]
+    return best_params
 
-def plot_report(report_tab, tax_dict=None, metric='F1_score', rank=None):
-    if not rank is None:
-        report_tab = report_tab.loc[report_tab['rank'] == rank]
-    met_tab, param_tab = build_plot_tab(report_tab, metric)
-    
-    matrix = met_tab.to_numpy()
-    not_null_idx = np.argwhere(matrix >= 0)
-    not_null_param = np.argwhere(matrix >= 0) * [1,3]
-    
-    fig, ax = plt.subplots(figsize = matrix.shape)
-    ax.imshow(matrix, cmap=newcmp, vmax=1)
-    
-    for idx0, idx1 in zip(not_null_idx, not_null_param):
-        params = param_tab.iloc[idx1[0], idx1[1]:idx1[1]+3].values
-        # vignette = f'{metric}: {matrix[idx[0], idx[1]]:.3f}\n\
-        #     K: {params[0]}\n\
-        #     n: {params[1]}\n\
-        #     {params[2]}'
-        vignette = f'K:{params[0]}\nn:{params[1]}\n{params[2]}'
-        ax.text(idx0[1], idx0[0], vignette, size=8, ha='center', va='center')
-    
-    win_labels = [f'{i[0]} - {i[1]}' for i in met_tab.columns]
-    ax.set_xticks(np.arange(matrix.shape[1]))
-    ax.set_xticklabels(win_labels)
-    ax.set_yticks(np.arange(matrix.shape[0]))
-    if not tax_dict is None:
-        tax_labels = [tax_dict[i] for i in met_tab.index]
-        ax.set_yticklabels(tax_labels)
-    else:
-        ax.set_yticklabels(met_tab.index)
-    
-    # Rotate the tick labels and set their alignment
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    
-    ax.set_title(f'Best {metric}')
-    ax.set_xlabel('Windows')
-    ax.set_xlabel('Taxons')
-    
 #%% classes
-class ReportLoader:
-    def get_report(self, report_file):
-        self.report_file = report_file
-        self.report = pd.read_csv(report_file)
-    
-    def get_taxguide(self, taxguide_file):
-        self.taxguide_file = taxguide_file
-        self.taxguide = pd.read_csv(self.taxguide_file, index_col = 0)
-        self.tax_dict = {taxid:tax for tax, taxid in self.taxguide['TaxID'].iteritems()}
-    
-    def query_tax(self, *taxa, w_start=None, w_end=None, metric='F1_score'):
-        # query is case insensitive
-        lower_taxa = [tax.lower() for tax in taxa]
-        valid_taxa = []
-        invalid_taxa = []
-        
-        # check which queried taxa can be found in the database
-        for tax in lower_taxa:
-            if tax in self.taxguide.index:
-                valid_taxa.append(tax)
-            else:
-                invalid_taxa.append(tax)
-        
-        # let user know if there are invalid taxa
-        if len(invalid_taxa) > 0:
-            print('The following taxa are not found in the database:')
-            for it in invalid_taxa:
-                print(it)
-        
-        # locate taxIDs of queried taxa
-        taxids = self.taxguide.loc[valid_taxa, 'TaxID'].tolist()
-        
-        # filter report for the queried taxa
-        subtab = self.report.loc[self.report['taxon'].isin(taxids)]
-        
-        # if a given range is specified, filter subtab
-        if not w_start is None:
-            subtab = subtab.loc[subtab['w_start'] >= w_start]
-        if not w_end is None:
-            subtab = subtab.loc[subtab['w_end'] <= w_end]
-        
-        results = []
-        # split the subtab by taxon, then by window, extract the best parameter combination for said taxon - window param
-        for tax, tax_subtab in subtab.groupby('taxon'):
-            for win, win_subtab in tax_subtab.groupby('w_start'):
-                win_subtab.sort_values(by=metric, ascending=False, inplace=True)
-                results = results.append(win_subtab.iloc[0])
-        results = pd.DataFrame(results)
-        results['taxon'].replace(self.tax_dict, inplace=True)
-        return results
-
-    def query_window(self, w_start=0, w_end=np.inf, metric='F1_score'):
-        subtab = self.report.loc[(self.report['w_start'] >= w_start) & (self.report['w_end'] <= w_end)]
-        results = []
-        for win, win_subtab in subtab.groupby('w_start'):
-            for tax, tax_subtab in win_subtab.groupby('taxon'):
-                tax_subtab.sort_values(by=metric, ascending=False, inplace=True)
-                results.append(tax_subtab.iloc[0])
-        
-        results = pd.DataFrame(results)
-        results['taxon'].replace(self.tax_dict, inplace=True)
-        return results
-
-class Director:
+class Reporter:
     def __init__(self, out_dir):
         self.out_dir = out_dir
-        self.loader = ReportLoader()
         
-    def set_data(self, report_file, taxguide_file):
-        self.loader.set_report(report_file)
-        self.loader.set_taxguide(taxguide_file)
+    def load_report(self, report_file):
+        meta_file = report_file.split('.csv')[-1] + '.meta'
+        self.report = pd.read_csv(report_file)
+        with open(meta_file, 'rb') as meta_handle:
+            meta = pickle.load(meta_handle)
+            self.k_range = meta['k']
+            self.n_range = meta['n']
+            self.w_size = meta['w_size']
+            self.w_step = meta['w_step']
     
-    def query_report(self, metric='F1_score'):
-        self.report = self.loader.query_window(metric = metric)
+    def set_guide(self, guide_file):
+        self.taxguide = pd.read_csv(guide_file, index_col=0)
         
-    def query_window(self, w_start, w_end, metric='F1_score'):
-        self.report = self.loader.query_window(self, w_start, w_end, metric='F1_score')
+    def report(self, w_start=None, w_end=None, taxa=[], metric='F1_score', nrows=3, show=True):
+        # generate a report for the best parameters for the given window/taxa using the selected metric
+        # if only w_start and w_end are given, select the overall best parameters for the window
+        # if only taxa is given, select the best parameters including windows for each taxon
+        # if both are given, select the best parameters for each taxon in the selected window
         
-    def query_tax(self, *taxa, w_start=None, w_end=None, metric='F1_score'):
-        self.report = self.loader.query_tax(taxa, w_start=None, w_end=None, metric='F1_score')
+        header = [f'{nrows} best parameter combinations given by the mean {metric} values']
+        if w_end - w_start > self.w_len * 1.5 or w_end - w_start < self.w_len * 0.8:
+            header.append(f'**Warning: The provided window has a length of {w_end - w_start}. The window length used in the calibration {self.w_len}**')
+            header.append('**Parameter hints may not be reliable. Recommend performing a calibration step for the desired window**')
+        
+        sub_report = self.report.sort_values(metric, ascending=False)
+        if not w_start is None and not w_end is None:
+            sub_report = sub_report.loc[(sub_report.w_start >= w_start) & (sub_report.w_end <= w_end)]
+        # check valid taxa
+        missing = set(taxa).difference(self.taxguide.index)
+        if len(missing) > 0:
+            header.append(f'The follofing taxa are not found in the database: {" ".join(missing)}')
+        elif len(missing) == len(taxa):
+            header.append('No valid taxa presented. Aborting')
+            return
+        
+        param_report = []
+        # explore each window in the selection
+        for win, win_tab in sub_report.groupby('w_start'):
+            if len(taxa) > 0:
+                # get the best match for each taxon
+                for tax, tax_tab in win_tab.loc[win_tab.taxon.isin(taxa)]:
+                    param_report.append(get_best_params(tax_tab, metric, nrows))
+            else:
+                # no taxes are set, get the generic best for each window
+                best_params = get_best_params(sub_report, metric, nrows).drop(columns=['rank', 'taxon'])
+                param_report.append(best_params)
+        self.params = pd.concat(param_report)
+        for i in range(7 - len(header)):
+            header.append('')
+        self.header = header
+        
+        if show:
+            print('\n'.join(header))
+            print()
+            print(self.paran_report)
     
-    def plot_report(self, metric='F1_score', rank=None):
-        plot_report(self.report, self.loader.tax_dict, metric, rank)
-    
-    def save_report(self, out_file):
-        self.report.to_csv(f'{self.out_dir}/{out_file}')
+    def save_report(self, filename=None):
+        if filename is None:
+            filename = time.strftime("report_summ_%d%m%Y-%H%M%S")
+        self.out_file = f'{self.out_dir}/{filename}.csv'
+        with open(self.out_file, 'w') as out_handle:
+            out_handle.write('\n'.join(self.report))
+        self.params.to_csv(self.out_file, mode='a')

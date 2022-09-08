@@ -7,20 +7,91 @@ Created on Thu May 19 10:14:55 2022
 read the calibration results, present replies to queries
 """
 
-from matplotlib.colors import ListedColormap
+import logging
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 
+#%% set logger
+logger = logging.getLogger('Graboid.plotter')
+logger.setLevel(logging.INFO)
+#%% variables
 viridis = cm.get_cmap('viridis', 256)
-newcolors = viridis(np.linspace(0,1,256))
 grey = np.array([128/256, 128/256, 128/256, 1])
-newcolors[0] = grey
-newcmp = ListedColormap(newcolors)
+viridis.set_bad(grey)
 
 #%% functions
-def build_plot_tab(report_tab, metric='F1_score'):
+def generate_title(report_tab):
+    # check metric
+    title = f'Parameters generating the best {report_tab.metric.iloc[0]} values for'
+    # check rank
+    if len(report_tab.ranks.unique()) == 1:
+        title += f'Rank: {report_tab.ranks.iloc[0]}, '
+    # check windows
+    first_win = (report_tab.iloc[0].w_start, report_tab.iloc[0].w_end)
+    last_win = (report_tab.iloc[-1].w_start, report_tab.iloc[-1].w_end)
+    if first_win == last_win:
+        title += f'Window: {first_win[0]} - {first_win[1]}, '
+    else:
+        title += f'Windows: [{first_win[0]} - {first_win[1]}] to [{last_win[0]} - {last_win[1]}], '
+    # check n taxa
+    title += f'{len(report_tab.taxon.unique())} taxa'
+    return title
+
+def build_plot_tab(report_tab):
+    x_values = report_tab.w_start.unique()
+    x_values1 = report_tab.w_end.unique()
+    y_values = report_tab.taxon.unique()
+    x_labels = [f'{x0} - {x1}' for x0,x1 in zip(x_values, x_values1)]
+    
+    met_tab = pd.DataFrame(index = y_values, columns = x_values)
+    param_tab = pd.DataFrame(index = y_values, columns = (x_values))
+    
+    for (w_start, taxon), wt_tab in report_tab.groupby(['w_start', 'taxon']):
+        row = wt_tab.iloc[0]
+        # row contains the parameter combination with the best results for the given parameters
+        # should only be a single row in wt_tab, select first one in case of ties
+        # store metric value in met_tab and parameter combination in param_tab
+        # metric column is always the last one
+        met_tab.at[taxon, w_start] = row.iloc[-1]
+        param_tab.at[taxon, w_start] = f'k:{row.K}\nn:{row.n_sites}\nmode:{row["mode"]}'
+    
+    return met_tab.to_numpy(), param_tab, x_labels, y_values
+
+def plot_report(report_tab, show=True, **kwargs):
+    # kwargs: out_file, use to save generated plot to out_file
+    # get values, labels and title
+    matrix, params, x_labels, y_labels = build_plot_tab(report_tab)
+    title = generate_title(report_tab)
+    
+    # generate plot
+    figure_size = (matrix.shape[0]/2, matrix.shape[1]/2)
+    fig, ax = plt.subplots(figsize=figure_size, dpi=200)
+    
+    sns.heatmap(data=matrix,
+                cmap=viridis,
+                annot=params,
+                annot_kws={'size':8, 'ha':'center', 'va':'center'},
+                cbar=True,
+                square=True,
+                xticklabels=x_labels,
+                yticklabels=y_labels,
+                ax=ax)
+    ax.set_xlabel('Windows')
+    ax.set_xlabel('Taxons')
+    ax.set_title(title)
+    
+    if show:
+        fig.show()
+    try:
+        plt.savefig(kwargs['out_file'], format='png')
+        logger.info(f'Plot "{title}" saved to {kwargs["out_file"]}')
+    except KeyError:
+        return
+
+def build_plot_tabOLD(report_tab, metric='F1_score'):
     # prepare iterables for multiindexes
     w_start = report_tab['w_start'].unique()
     w_end = report_tab['w_end'].unique()
@@ -45,7 +116,7 @@ def build_plot_tab(report_tab, metric='F1_score'):
     met_tab.fillna(-1, inplace=True)
     return met_tab, param_tab
 
-def plot_report(report_tab, tax_dict=None, metric='F1_score', rank=None):
+def plot_reportOLD(report_tab, tax_dict=None, metric='F1_score', rank=None):
     if not rank is None:
         report_tab = report_tab.loc[report_tab['rank'] == rank]
     met_tab, param_tab = build_plot_tab(report_tab, metric)
@@ -55,7 +126,7 @@ def plot_report(report_tab, tax_dict=None, metric='F1_score', rank=None):
     not_null_param = np.argwhere(matrix >= 0) * [1,3]
     
     fig, ax = plt.subplots(figsize = matrix.shape)
-    ax.imshow(matrix, cmap=newcmp, vmax=1)
+    ax.imshow(matrix, cmap=viridis, vmax=1)
     
     for idx0, idx1 in zip(not_null_idx, not_null_param):
         params = param_tab.iloc[idx1[0], idx1[1]:idx1[1]+3].values
@@ -92,8 +163,8 @@ class ReportLoader:
     def set_guide(self, guide_file):
         self.taxguide = pd.read_csv(guide_file, index_col=0)
     
-    def query(self, rank, w_start=0, w_end=np.inf, metric='F1_score', *taxa):
-        report = self.report.loc[(self.report.w_start >= w_start) & (self.report.w_end <= w_end) & (self.report == rank)]
+    def query(self, w_start=0, w_end=np.inf, metric='F1_score', *taxa):
+        report = self.report.loc[(self.report.w_start >= w_start) & (self.report.w_end <= w_end)]
         # check that taxa were provided
         if len(taxa) > 0:
             # query is case insensitive
@@ -169,20 +240,46 @@ class ReportLoader:
 class Director:
     def __init__(self, out_dir):
         self.out_dir = out_dir
-        self.loader = ReportLoader()
         
-    def set_data(self, report_file, taxguide_file):
-        self.loader.set_report(report_file)
-        self.loader.set_guide(taxguide_file)
+    def set_data(self, report_file):
+        self.report = pd.read_csv(report_file)
     
     def query_report(self, rank, w_start=0, w_end=np.inf, metric='F1_score', *taxa):
         self.report = self.loader.query(rank, w_start, w_end, metric, taxa)
-        
-    # def query_window(self, w_start, w_end, metric='F1_score'):
-    #     self.report = self.loader.query_window(self, w_start, w_end, metric)
-        
-    # def query_tax(self, *taxa, w_start=None, w_end=None, metric='F1_score'):
-    #     self.report = self.loader.query_tax(taxa, w_start=None, w_end=None, metric='F1_score')
     
-    def plot_report(self, metric='F1_score', rank=None):
-        plot_report(self.report, self.loader.tax_dict, metric, rank)
+    def zoom_report(self, rank=None, w_start=0, w_end=np.inf, metric='F1_score', *taxa):
+        # zoom onto a specific part of the calibration report
+        # rank and taxa aren mutually exclusive but if rank is set only the taxa belonging to said rank will be shown
+        report = self.report.loc[(self.report.w_start >= w_start) & (self.report.w_end <= w_end)]
+        if not rank is None:
+            report = report.loc[report.rank == rank]
+        if len(taxa) > 0:
+            # query is case insensitive
+            lower_taxa = [tax.lower() for tax in taxa]
+            missing_tax = set(lower_taxa).difference(report.taxon.unique)
+            # let user know if there are invalid taxa
+            if len(missing_tax) > 0:
+                print('The following taxa are not found in the window scope:')
+                for mt in missing_tax:
+                    print(mt)
+            report = report.loc[report.taxon.isin(lower_taxa)]
+        # locate best combination per window/taxon
+        indexes = []
+        for (win, tax), subtab in report.groupby(['w_start', 'taxon']):
+            indexes.append(subtab.idxmax(metric))
+        zoomed_report = report.loc[indexes, ['rank', 'taxon', 'w_start', 'w_end', 'K', 'n_sites', metric]]
+        zoomed_report.sort_values('w_start', inplace=True)
+        # zoomed_report.set_index(['w_start', 'taxon'], drop=True, inplace=True)
+        self.zoomed = zoomed_report
+        
+    def plot_report(self,show=True, out_file=None):
+        # kwargs: out_file, use to save generated plot to out_file
+        try:
+            if out_file is None:
+                plot_report(self.zoomed, show)
+            else:
+                self.out_file = self.out_dir + '/' + out_file
+                plot_report(self.zoomed, show, out_file=self.out_file)
+        except AttributeError:
+            print('Set the zoom level before generating a table')
+            return

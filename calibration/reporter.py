@@ -8,9 +8,14 @@ This script is used to extract the best parameter combinations from a calibratio
 """
 
 #%% libraries
-import time
+import logging
 import pandas as pd
 import pickle
+import time
+
+#%% set logger
+logger = logging.getLogger('Graboid.reporter')
+logger.setLevel(logging.INFO)
 
 #%% functions
 def get_best_params(subreport, metric='F1_score', nrows=3):
@@ -96,3 +101,4 @@ class Reporter:
         with open(self.out_file, 'w') as out_handle:
             out_handle.write('\n'.join(self.report))
         self.params.to_csv(self.out_file, mode='a')
+        logger.info(f'Calibration summary saved to {self.out_file}')

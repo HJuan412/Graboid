@@ -278,7 +278,7 @@ class Calibrator:
     def set_dist_mat(self, mat_code):
         matrix = cost_matrix.get_matrix(mat_code)
         if matrix is None:
-            logger.error('Could not set distance matrix, invalid matrix code')
+            print('Could not set distance matrix, invalid matrix code')
             return
         self.cost_mat = matrix
     

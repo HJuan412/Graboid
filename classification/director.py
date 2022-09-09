@@ -9,50 +9,190 @@ Director for the classification of sequences of unknown taxonomic origin
 #%%
 from classif import classification
 from classif import cost_matrix
+import logging
 from mapping import director as mpdir
 from mapping import matrix
 from preprocess import feature_selection as fsele
 from preprocess import windows
 import numpy as np
-import os
 import pandas as pd
 #%% variables
 mode_dict = {'m':'majority',
              'w':'wknn',
              'd':'dwknn'}
-#%%
-# steps
-# optional: hint paramters
-# Select window
-# classify
-# report
-#%%
-def make_dirs(base_dir):
-    report_dir = f'{base_dir}/reports'
-    tmp_dir = f'{base_dir}/tmp'
-    wrn_dir = f'{base_dir}/warnings'
-    
-    os.makedirs(report_dir, exist_ok=bool)
-    os.makedirs(tmp_dir, exist_ok=bool)
-    os.makedirs(wrn_dir, exist_ok=bool)
-    
-    return report_dir, tmp_dir, wrn_dir
 
-def locate_files(in_dir):
-    # locate reference data files
-    # returns a list with [mat_file, acc_list, tax_list, guide_file, ord_file]
-    # if a file is missing, its place is the list is filled as None
-    files = os.listdir(in_dir)
-    file_dict = {file.split('.')[-1]:file for file in files}
+#%% set logger
+logger = logging.getLogger('Graboid.Classifier')
+logger.setLevel(logging.INFO)
+
+#%%
+def tr_report(report, query_names, rank_names, taxon_names):
+    q_dict = {idx:acc for idx, acc in enumerate(query_names)}
+    rk_dict = {idx:rk for idx, rk in enumerate(rank_names)}
+    tax_dict = {taxid:tax for tax, taxid in taxon_names.taxID.iteritems()}
+    mode_dict = {'m':'majority',
+                 'w':'wknn',
+                 'd':'dwknn'}
+    report['idx'].replace(q_dict, inplace=True)
+    report['rank'].replace(rk_dict, inplace=True)
+    report['taxon'].replace(tax_dict, inplace=True)
+    report['mode'].replace(mode_dict, inplace=True)
+
+def community_report(report, rank, by='count'):
+    # generates a report of the estimate composition of the comunity based on the individual reads classification
+    final_report = []
+    rk_tab = report.loc[rank]
+    max_value = int(rk_tab[by].max())
+    taxa_idx = {tx:idx for idx, tx in enumerate(rk_tab.taxon.unique())}
+    n_tax = len(taxa_idx)
+    n_k = len(rk_tab.unique())
+    value_matrix = np.zeros((n_tax, max_value, n_k), dtype=np.int32)
     
-    out_files = []
-    for tail in ('npz', 'acclist', 'tax', 'taxguide', 'order'):
+    for k_idx, (k, k_subtab) in enumerate(rk_tab.groupby('K')):
+        for tax, tax_subtab in k_subtab.groupby('taxon'):
+            tax_idx = taxa_idx[tax]
+            # Count number of occurrences for each level of support for the current tax
+            values = tax_subtab[by].value_counts().sort_index()
+            values.set_axis(values.index.astype(int))
+            values = values.reset_index()
+            values.rename({'index':'support'})
+            values['K'] = k
+            values['tax'] = tax
+            final_report.append(values)
+            # update value matrix
+            value_matrix[tax_idx, values.support.values, k_idx] = values[by].values
+    return
+#%%
+class Director:
+    def __init__(self, out_dir, tmp_dir, warn_dir):
+        self.out_dir = out_dir
+        self.tmp_dir = tmp_dir
+        self.warn_dir = warn_dir
+        
+        self.taxa = {}
+        self.loader = windows.WindowLoader()
+        self.selector = fsele.Selector()
+        self.mapper = mpdir.Director(tmp_dir, warn_dir)
+    
+    @property
+    def ref_mat(self):
+        return self.loader.matrix
+    @property
+    def ref_bounds(self):
+        return self.loader.bounds
+    
+    def set_ref_data(self, mat_file, acc_file, tax_file):
+        self.loader.set_files(mat_file, acc_file, tax_file)
+        self.get_overlap()
+    
+    def set_taxguide(self, guide_file):
+        self.taxguide = pd.read_csv(guide_file, index_col=0)
+    
+    def set_order(self, order_file):
+        self.selector.load_order_mat(order_file)
+    
+    def set_db(self, db_dir):
+        self.mapper.set_blastdb(db_dir)
+    
+    def set_dist_mat(self, mat_code):
+        matrix = cost_matrix.get_matrix(mat_code)
+        if matrix is None:
+            print('Could not set distance matrix, invalid matrix code')
+            return
+        self.cost_mat = matrix
+        
+    def set_query(self, fasta_file, query_name=None, threads=1):
+        # load query files
+        # if query is already mapped, load map, else map query
+        query_mat, query_acc = self.mapper.get_files(fasta_file, query_name)
         try:
-            out_files.append(file_dict[tail])
-        except KeyError:
-            out_files.append(None)
-    return out_files
+            query_data = np.load(query_mat)
+            self.query_mat = query_data['matrix']
+            self.query_bounds = query_data['bounds']
+            with open(query_acc, 'r') as acc_handle:
+                self.query_accs = acc_handle.read().splitlines()
+        except FileNotFoundError:
+            self.query_mat, self.query_bounds, self.query_accs = self.mapper.direct(fasta_file, threads=threads, keep=True)
+        
+        self.get_overlap()
+    
+    def get_overlap(self):
+        # method called by set_query and set_ref_data, only completes when both are set
+        try:
+            overlap_low = max(self.query_bounds[0], self.ref_bounds[0])
+            overlap_high = min(self.query_bounds[1], self.ref_bounds[1])
+            if overlap_high > overlap_low:
+                self.overlap = [overlap_low, overlap_high]
+        except TypeError:
+            return
+    
+    def classify(self, w_start, w_end, k, n, mode='mwd', site_rank='genus', out_path=None):
+        # check query data and reference data
+        try:
+            self.query_mat
+        except AttributeError:
+            print('There is no query file set')
+            return
+        try:
+            self.ref_mat
+        except AttributeError:
+            print('There is no reference matrix set')
+        # check that given coordinates are within valid space
+        try:
+            if self.overlap is None:
+                print('Error: No valid overlap between query and reference sequences')
+                return
+        except AttributeError:
+            print('No overlap set between query and reference sequences')
+            return
+        # check valid overlap
+        try:
+            self.overlap
+        except AttributeError:
+            print(f'No overlap found between query bounds {self.query_bounds} and reference bounds {self.ref_bounds}')
+            return
+        
+        window = [np.max(w_start, self.overlap[0]), np.min(w_end, self.overlap[1])]
+        window_length = window[1] - window[0]
+        if window_length < 0:
+            print(f'Error: No overlap bewteen given coordinates {w_start} - {w_end} and the valid overlap {self.overlap[0]} - {self.overlap[1]}')
+            return
+        if window[0] > w_start or window[1] < w_end:
+            print('Cropped given window from {w_start} - {w_end} to {window[0]} - {window[1]} to fit valid overlap')
+        
+        # account offset for query and reference
+        ref_offset = window[0] - self.ref_bounds[0]
+        query_offset = self.ref_bounds[0] - self.query_bounds[0]
+        
+        # select sites
+        ref_sites = self.selector.select_sites(ref_offset, window_length + ref_offset, n, site_rank)
+        query_sites = ref_sites + query_offset
+        
+        # collect sequence and taxonomic data
+        ref_window = self.loader.get_window(window[0], window[1], row_thresh=0, col_thresh=1)
+        ref_data = ref_window.eff_mat[:, ref_sites]
+        query_data = self.query_mat[:, query_sites]
+        ref_tax = ref_window.eff_tax
+        
+        # get_distances (prev_disances isn't used, kept for compatiblity with calibration)
+        report, prev_distances = classification.classify(query_data, ref_data, self.dist_mat, ref_tax, k, mode)
+        
+        report[f'n per taxon ({site_rank})'] = n
+        report['total n'] = len(ref_sites)
+        report['start'] = window[0]
+        report['end'] = window[1]
+        
+        sites_report = [window[0], window[1]] + list(ref_sites - ref_offset)
+        
+        report = tr_report(report, self.query_accs, self.ranks, self.taxguide)
+        report.reset_index(drop=True, inplace=True)
+        
+        if out_path is None:
+            return report, sites_report
+        report.to_csv(f'{self.out_dir}/{out_path}.csv')
+        sites_report.to_csv(f'{self.out_dir}/{out_path}.sites')
 
+#%% Deprecated
 def get_best_params(subreport, metric='F1_score'):
     # from a subsection of a calibration report, get the average score for the given metric for each represented combination of parameters
     params = []
@@ -86,224 +226,7 @@ def get_valid_windows(windows, overlap, crop=True):
     if np.sum(partial) != np.sum(within):
         print(f'The valid windows:\n{windows[partial]}\nWere truncated to:\n{valid}\nTo fit within coordinates {overlap}')
     return valid
-    
-def get_not_empty(matrix):
-    summed = matrix.sum(1)
-    not_empty = np.argwhere(summed != 0).flatten()
-    return not_empty
 
-def tr_report(report, query_names, rank_names, taxon_names):
-    q_dict = {idx:acc for idx, acc in enumerate(query_names)}
-    rk_dict = {idx:rk for idx, rk in enumerate(rank_names)}
-    tax_dict = {taxid:tax for tax, taxid in taxon_names.taxID.iteritems()}
-    mode_dict = {'m':'majority',
-                 'w':'wknn',
-                 'd':'dwknn'}
-    report['idx'].replace(q_dict, inplace=True)
-    report['rank'].replace(rk_dict, inplace=True)
-    report['taxon'].replace(tax_dict, inplace=True)
-    report['mode'].replace(mode_dict, inplace=True)
-
-#%%
-class Director:
-    def __init__(self, out_dir, tmp_dir, warn_dir):
-        self.out_dir = out_dir
-        self.tmp_dir = tmp_dir
-        self.warn_dir = warn_dir
-        
-        self.taxa = {}
-        self.loader = windows.WindowLoader()
-        self.selector = fsele.Selector()
-        self.mapper = mpdir.Director(tmp_dir, warn_dir)
-    
-    @property
-    def ref_mat(self):
-        return self.loader.matrix
-    @property
-    def ref_bounds(self):
-        return self.loader.bounds
-    
-    def set_ref_data(self, mat_file, acc_file, tax_file):
-        self.loader.set_files(mat_file, acc_file, tax_file)
-    
-    def set_taxguide(self, guide_file):
-        self.taxguide = pd.read_csv(guide_file, index_col=0)
-    
-    def set_order(self, order_file):
-        self.selector.load_order_mat(order_file)
-    
-    def set_db(self, db_dir):
-        self.mapper.set_blastdb(db_dir)
-    
-    def set_cost_mat(self, mat_code):
-        matrix = cost_matrix.get_matrix(mat_code)
-        if matrix is None:
-            #TODO: warning if matrix code was invalid
-            return
-        self.cost_mat = matrix
-        
-    def set_report(self, report_file):
-        report = pd.read_csf(report_file)
-        self.w_len = report.w_end.iloc[0] - report.w_start.iloc[1]
-        self.w_step = report.w_start.iloc[1] - report.w_start.iloc[0]
-        self.report = report
-        
-    def set_query(self, fasta_file, query_name=None, threads=1):
-        # load query files
-        # if query is already mapped, load map, else map query
-        query_mat, query_acc = self.mapper.get_files(fasta_file, query_name)
-        try:
-            query_data = np.load(query_mat)
-            self.query_mat = query_data['matrix']
-            self.query_bounds = query_data['bounds']
-            with open(query_acc, 'r') as acc_handle:
-                self.query_accs = acc_handle.read().splitlines()
-        except FileNotFoundError:
-            self.query_mat, self.query_bounds, self.query_accs = self.mapper.direct(fasta_file, threads=threads, keep=True)
-    
-    def report_params(self, w_start, w_end, metric='F1_score'):
-        # get the parameter combination with the best scores for the given metric within the scope determined by w_start - w_end
-        # if a set of priority taxa is establish, get the parameter combination for each taxon
-        try:
-            self.report
-        except AttributeError:
-            print('No report file is set')
-            return
-        
-        # if the selected window is smaller than the window length used in the report, issue a warning
-        if w_end - w_start < self.w_len:
-            print(f'Warning: The provided window length {w_end - w_start} is less than 0.8 times the window length used in the calibration {self.w_len}\n\
-                  Parameter hints may not be reliable. Recommend performing a calibration step for the desired window')
-            return
-        # get the portion of the report containing the selected windows
-        sub_report = self.report.loc[(self.report.w_start >= w_start) & (self.report.w_end <= w_end)]
-        
-        param_rows = []
-        if len(self.taxa) > 0:
-            # Priority taxa have been set, get parameter combinations for each of them
-            tax_report = sub_report.loc[sub_report.tax.isin(self.taxa.keys())]
-            for vals, sub_tab in tax_report.groupby(['w_start', 'k', 'n', 'taxon']):
-                mean_metric = sub_tab[metric].mean()
-                std_metric = sub_tab[metric].std()
-                
-                row = sub_tab.iloc[0].loc[['w_start', 'w_end', 'taxon', 'k', 'n']].copy()
-                row[f'{metric} mean'] = mean_metric
-                row[f'{metric} std'] = std_metric
-                param_rows.append(row)
-            param_report = pd.concat(param_rows)
-            param_report.taxon.replace(self.taxa, inplace=True)
-            param_report.sort_values('taxon', inplace=True)
-        else:
-            for vals, sub_tab in sub_report.groupby(['w_start', 'k', 'n']):
-                mean_metric = sub_tab[metric].mean()
-                std_metric = sub_tab[metric].std()
-                
-                row = sub_tab.iloc[0].loc[['w_start', 'w_end', 'k', 'n']].copy()
-                row[f'{metric} mean'] = mean_metric
-                row[f'{metric} std'] = std_metric
-                param_rows.append(row)
-            param_report = pd.concat(param_rows)
-            
-        param_report.sort_values(f'{metric} mean', ascending=False, inplace=True)
-        param_report.sort_values('w_start', inplace=True)
-        # parameter report is sorted by window, taxon (if applicable) and the mean metric values
-        # columns in param report are: w_start, w_end, taxon (if applicable), k, n, metric mean, metric std
-        self.params = param_report
-    
-    def get_params(self, nrows=2):
-        # return the first nrows rows in the params report
-        # check that param report is set
-        try:
-            self.params
-        except AttributeError:
-            print('No parameter report, call report_params method')
-            return
-        
-        group_by = ['w_start']
-        if 'taxon' in self.params.columns:
-            group_by.append('taxon')
-        for vals, subtab in self.params.groupby(group_by):
-            print(subtab.iloc[:nrows])
-    
-    def get_overlap(self):
-        overlap_low = max(self.query_bounds[0], self.ref_bounds[0])
-        overlap_high = min(self.query_bounds[1], self.ref_bounds[1])
-        if overlap_high > overlap_low:
-            self.overlap = [overlap_low, overlap_high]
-        else:
-            self.overlap = None
-            print(f'No overlap found between query bounds {self.query_bounds} and reference bounds {self.ref_bounds}')
-    
-    def set_taxa(self, taxa):
-        present = [tx for tx in taxa if tx in self.taxguide.index]
-        missing = [tx for tx in taxa if not tx in self.taxguide.index]
-        if len(missing) > 0:
-            print(f'Given taxa are not present in the reference dataset:\n\
-                  {", ".join(missing)}')
-        for tax in present:
-            self.taxa[self.taxguide.loc[tax, 'taxID']] = tax
-    
-    def classify(self, w_start, w_end, k, n, mode='mwd', site_rank='genus', out_path=None):
-        # check query data and reference data
-        try:
-            self.query_mat
-        except AttributeError:
-            print('No query matrix set. Aborting')
-            return
-        try:
-            self.ref_mat
-        except AttributeError:
-            print('No reference matrix set. Aborting')
-        # check that given coordinates are within valid space
-        try:
-            if self.overlap is None:
-                print('Error: No valid overlap between query and reference sequences')
-                return
-        except AttributeError:
-            print('No overlap set between query and reference sequences')
-            return
-        
-        window = [np.max(w_start, self.overlap[0]), np.min(w_end, self.overlap[1])]
-        window_length = window[1] - window[0]
-        if window_length < 0:
-            print(f'Error: No overlap bewteen given coordinates {w_start} - {w_end} and the valid overlap {self.overlap[0]} - {self.overlap[1]}')
-            return
-        if window[0] > w_start or window[1] < w_end:
-            print('Cropped given window from {w_start} - {w_end} to {window[0]} - {window[1]} to fit valid overlap')
-        
-        # account offset for query and reference
-        ref_offset = window[0] - self.ref_bounds[0]
-        query_offset = self.ref_bounds[0] - self.query_bounds[0]
-        
-        # select sites
-        ref_sites = self.selector.select_sites(ref_offset, window_length + ref_offset, n, site_rank)
-        query_sites = ref_sites + query_offset
-        
-        # collect sequence and taxonomic data
-        ref_window = self.loader.get_window(window[0], window[1], row_thresh=0, col_thresh=1)
-        ref_data = ref_window.eff_mat[:, ref_sites]
-        query_data = self.query_mat[:, query_sites]
-        ref_tax = ref_window.eff_tax
-        
-        # get_distances
-        classifs, prev_distances = classification.classify(query_data, ref_data, ref_tax, self.dist_mat, list(k), mode)
-        results = classification.get_classification(classifs)
-        
-        report = classification.parse_report(results)
-        report['n'] = n
-        report['start'] = window[0]
-        report['end'] = window[1]
-        
-        sites_report = [window[0], window[1]] + list(ref_sites - ref_offset)
-        
-        report = tr_report(report, self.query_accs, self.ranks, self.taxguide)
-        report.reset_index(drop=True, inplace=True)
-        
-        if out_path is None:
-            return report, sites_report
-        report.to_csv(f'{self.out_dir}/{out_path}.csv')
-        sites_report.to_csv(f'{self.out_dir}/{out_path}.sites')
-    
 class DirectorOLD:
     def __init__(self, out_dir, tmp_dir, warn_dir):
         self.out_dir = out_dir

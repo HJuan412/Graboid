@@ -501,10 +501,10 @@ def main(mode, args):
             print(f'No db directory found in {args.work_dir}')
             return
 
-        classifier.set_reference(mat_file, acc_file, tax_file, guide_file, order_file)
+        classifier.set_ref_data(mat_file, acc_file, tax_file)
+        classifier.set_taxguide(guide_file)
+        classifier.set_order(order_file)
         classifier.set_db(db_dir)
-        classifier.set_report(args.cal_report)
-        classifier.set_taxa(args.taxa)
-        classifier.map_query(args.fasta_file, args.threads)
+        classifier.set_query(args.fasta_file, args.query_name, args.threads)
         classifier.set_dist_mat(args.dist_mat)
-        classifier.classify(args.w_start, args.w_end, args.k, args.n, args.cl_mode, args.crop, args.site_rank, args.out_file)
+        classifier.classify(args.w_start, args.w_end, args.k, args.n, args.cl_mode, args.site_rank, args.out_file)

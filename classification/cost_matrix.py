@@ -75,7 +75,7 @@ def cost_matrix(transition=1, transversion=2):
 
 def id_matrix():
     mat = np.ones((16,16))
-    for i in range(1,17):
+    for i in range(1,16):
         mat[i,i] = 0
     return mat
     

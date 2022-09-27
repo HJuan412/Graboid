@@ -6,10 +6,14 @@ Created on Mon May  2 10:21:15 2022
 @author: hernan
 """
 #%% libraries
+import logging
 import numba as nb
 import numpy as np
 import pandas as pd
 
+#%% set logger
+logger = logging.getLogger('Graboid.Classification')
+logger.setLevel(logging.DEBUG)
 #%% functions
 @nb.njit
 def calc_distance(seq1, seq2, dist_mat):
@@ -23,8 +27,8 @@ def calc_distance(seq1, seq2, dist_mat):
 def get_dists(query, data, dist_mat):
     # new version, performs calculations for multiple queries
     # single query vector should have dimensions (1, len(seq))
-    if len(query.shape) == 1:
-        query = query.reshape((1,-1))
+    # if len(query.shape) == 1:
+    #     query = query.reshape((1,-1))
     dist = np.zeros((query.shape[0], data.shape[0]), dtype = np.float32)
     for idx0, q in enumerate(query):
         for idx1, d in enumerate(data):
@@ -44,12 +48,38 @@ def wknn(dists):
     # equals an array of (dk - di) / (dk - d1), the distance function for wknn
     return supps
 
+@nb.njit
+def wknn_nb(dists):
+    # weighted KNN, weight of an instance linearly decreases with distance along a range of [0, 1]
+    d1 = np.array([d.min() for d in dists]).reshape((len(dists), -1)) # axis=1 get the min/max value per row. Reshape to turn into a column vector
+    dk = np.array([d.max() for d in dists]).reshape((len(dists), -1))
+    rang = dk - d1 # range of values
+    supps = np.ones(dists.shape) # default support values
+    valid = (rang != 0).flatten() # instances in which all neighbours overlap with the query are invalid, the range is 0
+    supps[valid] = (dk[valid] - dists[valid]) / rang[valid]
+    # equals an array of (dk - di) / (dk - d1), the distance function for wknn
+    return supps
+
 def dwknn(dists):
     # double weighted KNN, weight of an instance decreases "exponentially" with distance
     d1 = dists.min(axis=1).reshape((len(dists), -1))
     dk = dists.max(axis=1).reshape((len(dists), -1))
     rang = dk + d1
     term1 = wknn(dists)
+    term2 = np.ones(dists.shape) # default support values
+    valid = (rang != 0).flatten() # instances in which all neighbours overlap with the query are invalid, the range is 0
+    term2[valid] = rang[valid] / (dk[valid] + dists[valid])
+    supps = term1 * term2
+    # equals an array of ((dk - di) / (dk - d1)) * ((dk + d1) / (dk + di))
+    return supps
+
+@nb.njit
+def dwknn_nb(dists):
+    # double weighted KNN, weight of an instance decreases "exponentially" with distance
+    d1 = np.array([d.min() for d in dists]).reshape((len(dists), -1)) # axis=1 get the min/max value per row. Reshape to turn into a column vector
+    dk = np.array([d.max() for d in dists]).reshape((len(dists), -1))
+    rang = dk + d1
+    term1 = wknn_nb(dists)
     term2 = np.ones(dists.shape) # default support values
     valid = (rang != 0).flatten() # instances in which all neighbours overlap with the query are invalid, the range is 0
     term2[valid] = rang[valid] / (dk[valid] + dists[valid])
@@ -97,6 +127,32 @@ def classify_m(neighs, sorted_dists, tax_tab, k):
     columns = ['idx', 'rk', 'tax', 'count', '_k', 'average_dists', 'std_dists']
     return np.array(result, dtype=np.float32), columns
 
+# TODO: tax_tab should be turned to numpy array before running numba functions
+@nb.njit
+def classify_m_nb(neighs, sorted_dists, tax_tab, k):
+    result = [[0.0] for i in range(0)]
+    # classify for each value of k
+    for _k in k:
+        dists = sorted_dists[:,:_k]
+        # classify instances
+        for idx, n in enumerate(neighs[:,:_k]):
+            # select neighbour taxonomies
+            sub_tax = tax_tab[n].T
+            # assign classification for each rank
+            for rk, row in enumerate(sub_tax):
+                # count reperesentatives of each taxon amongst the k neighbours
+                taxa = np.unique(row)
+                # for each represented taxon get representatives, average distances and std
+                for tax in taxa:
+                    tax_idxs = row == tax
+                    count = tax_idxs.sum()
+                    average_dists = dists[idx][tax_idxs].mean()
+                    std_dists = dists[idx][tax_idxs].std()
+                    report = [idx, rk, tax, count, _k, average_dists, std_dists]
+                    result.append(report)
+    columns = ['idx', 'rk', 'tax', 'count', '_k', 'average_dists', 'std_dists']
+    return np.array(result, dtype=np.float32), columns
+
 def classify_w(neighs, sorted_dists, tax_tab, k):
     result = []
     # classify for each value of k
@@ -121,7 +177,38 @@ def classify_w(neighs, sorted_dists, tax_tab, k):
                     # add total supports to the report
                     tax_supports = supports[idx, row == tax]
                     report.append(tax_supports.sum())
-                    report.append(tax_supports.median())
+                    report.append(np.median(tax_supports))
+                    result.append(report)
+    columns = ['idx', 'rk', 'tax', 'count', '_k', 'average_dists', 'std_dists', 'total_support', 'median_support']
+    return np.array(result, dtype=np.float32), columns
+
+@nb.njit
+def classify_w_nb(neighs, sorted_dists, tax_tab, k):
+    result = [[0.0] for i in range(0)]
+    # classify for each value of k
+    for _k in k:
+        dists = sorted_dists[:,:_k]
+        # get supports
+        supports = wknn_nb(dists)
+        # classify instances
+        for idx, n in enumerate(neighs[:,:_k]):
+            # select neighbour taxonomies
+            sub_tax = tax_tab[n].T
+            # assign classification for each rank
+            for rk, row in enumerate(sub_tax):
+                # count reperesentatives of each taxon amongst the k neighbours
+                taxa = np.unique(row)
+                # for each represented taxon get representatives, average distances and std
+                for tax in taxa:
+                    tax_idxs = row == tax
+                    count = tax_idxs.sum()
+                    average_dists = dists[idx][tax_idxs].mean()
+                    std_dists = dists[idx][tax_idxs].std()
+                    report = [idx, rk, tax, count, _k, average_dists, std_dists]
+                    # add total supports to the report
+                    tax_supports = supports[idx][tax_idxs]
+                    report.append(tax_supports.sum())
+                    report.append(np.median(tax_supports))
                     result.append(report)
     columns = ['idx', 'rk', 'tax', 'count', '_k', 'average_dists', 'std_dists', 'total_support', 'median_support']
     return np.array(result, dtype=np.float32), columns
@@ -132,7 +219,7 @@ def classify_d(neighs, sorted_dists, tax_tab, k):
     for _k in k:
         dists = sorted_dists[:,:_k]
         # get supports
-        supports = wknn(dists)
+        supports = dwknn(dists)
         
         # classify instances
         for idx, n in enumerate(neighs[:,:_k]):
@@ -150,7 +237,39 @@ def classify_d(neighs, sorted_dists, tax_tab, k):
                     # add total supports to the report
                     tax_supports = supports[idx, row == tax]
                     report.append(tax_supports.sum())
-                    report.append(tax_supports.median())
+                    report.append(np.median(tax_supports))
+                    result.append(report)
+    columns = ['idx', 'rk', 'tax', 'count', '_k', 'average_dists', 'std_dists', 'total_support', 'median_support']
+    return np.array(result, dtype=np.float32), columns
+
+@nb.njit
+def classify_d_nb(neighs, sorted_dists, tax_tab, k):
+    result = [[0.0] for i in range(0)]
+    # classify for each value of k
+    for _k in k:
+        dists = sorted_dists[:,:_k]
+        # get supports
+        supports = dwknn_nb(dists)
+        
+        # classify instances
+        for idx, n in enumerate(neighs[:,:_k]):
+            # select neighbour taxonomies
+            sub_tax = tax_tab[n].T
+            # assign classification for each rank
+            for rk, row in enumerate(sub_tax):
+                # count reperesentatives of each taxon amongst the k neighbours
+                taxa = np.unique(row)
+                # for each represented taxon get representatives, average distances and std
+                for tax in taxa:
+                    tax_idxs = row == tax
+                    count = tax_idxs.sum()
+                    average_dists = dists[idx][tax_idxs].mean()
+                    std_dists = dists[idx][tax_idxs].std()
+                    report = [idx, rk, tax, count, _k, average_dists, std_dists]
+                    # add total supports to the report
+                    tax_supports = supports[idx][tax_idxs]
+                    report.append(tax_supports.sum())
+                    report.append(np.median(tax_supports))
                     result.append(report)
     columns = ['idx', 'rk', 'tax', 'count', '_k', 'average_dists', 'std_dists', 'total_support', 'median_support']
     return np.array(result, dtype=np.float32), columns
@@ -159,6 +278,9 @@ def classify_d(neighs, sorted_dists, tax_tab, k):
 classif_funcs = {'m':classify_m,
                  'w':classify_w,
                  'd':classify_d}
+classif_funcs_nb = {'m':classify_m_nb,
+                    'w':classify_w_nb,
+                    'd':classify_d_nb}
 # attribute used to get winner classification paired to each mode
 classif_modes = {'m':3,
                  'w':7,

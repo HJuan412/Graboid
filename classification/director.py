@@ -7,8 +7,8 @@ Created on Mon Aug  8 09:59:03 2022
 Director for the classification of sequences of unknown taxonomic origin
 """
 #%%
-from classif import classification
-from classif import cost_matrix
+from classification import classification
+from classification import cost_matrix
 import logging
 from mapping import director as mpdir
 from mapping import matrix

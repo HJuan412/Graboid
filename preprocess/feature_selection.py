@@ -183,11 +183,11 @@ class Selector:
         # get sites, first nsites columns in the order table
         sub_order = []
         for row in self.order_tab:
-            sub_order.append(row[np.logical_and(row >= start, row <= end)])
+            sub_order.append(row[np.logical_and(row >= start, row < end)])
         sub_order = np.array(sub_order)
         order_subtab = sub_order[self.order_tax[:,0] == rk,:nsites]
         # adjust offset, discard sites outside the matrix bounds
-        selected_sites = np.unique(order_subtab)
+        selected_sites = np.unique(order_subtab) - start
         
         return selected_sites
     
@@ -210,7 +210,7 @@ class Selector:
             new_sites = n_sites[np.in1d(n_sites, total_sites, invert=True)]
             if len(new_sites) > 0:
                 sites[n] = new_sites
-                total_sites = np.concatenate(total_sites, new_sites)
+                total_sites = np.concatenate([total_sites, new_sites])
         return sites
     
 class SelectorOLD:

@@ -11,7 +11,7 @@ import sys
 sys.path.append('preprocess')
 sys.path.append('classif')
 #%% libraries
-from classif import cost_matrix
+from classification import cost_matrix
 from preprocess import windows
 from preprocess import feature_selection as fsel
 from preprocess import taxon_study as tstud

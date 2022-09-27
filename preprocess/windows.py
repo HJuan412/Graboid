@@ -12,9 +12,18 @@ import logging
 import numba as nb
 import numpy as np
 import pandas as pd
-from classif import cost_matrix
+from classification import cost_matrix
 
 #%%
+# tax table manipulation
+def get_taxid_tab(tax_file):
+    # formats the given tax table (keeps only tax_id columns and removes the '_id' tail)
+    tax_tab = pd.read_csv(tax_file, index_col=0)
+    cols = [col for col in tax_tab if len(col.split('_')) > 1]
+    tr_dict = {col:col.split('_')[0] for col in cols}
+    taxid_tab = tax_tab[cols].rename(columns = tr_dict)
+    return taxid_tab
+
 # filter matrix
 def filter_matrix(matrix, thresh = 1, axis = 0):
     # filter columns (axis = 0) or rows (axis = 1) according to a maximum number of empty values
@@ -25,7 +34,7 @@ def filter_matrix(matrix, thresh = 1, axis = 0):
     max_empty = thresh * matrix.shape[axis]
     filtered = np.argwhere(n_empty <= max_empty)
         
-    return filtered
+    return filtered.flatten()
 
 #%% Old collapsing functions
 # TODO: delete this entire cell once the new one is tested
@@ -172,7 +181,7 @@ def collapse_1(matrix, tax_tab):
 # TODO: Test these
 def build_effective_matrix(eff_idxs, matrix):
     # construct the effective sequence for each given custer
-    effective_matrix = np.zeros((len(eff_idxs), matrix.shape[1]))
+    effective_matrix = np.zeros((len(eff_idxs), matrix.shape[1]), dtype=np.int8)
     for idx, cluster in enumerate(eff_idxs):
         # since unknown values are 0 and each column can have AT MOST two values
         # effective sequence is the maximum value for each column
@@ -195,11 +204,11 @@ def build_effective_taxonomy(eff_idxs, tax_tab):
         for idx, rank in enumerate(sub_mat):
             uniq_vals = np.unique(rank)
             if len(uniq_vals) > 1:
-                # rank contains multiple taxon. Conflict, set this and all subsequent positions as last unconflicting taxon and break
+                # rank contains multiple taxa. Conflict, set this and all subsequent positions as last unconflicting taxon and break
                 clust_tax[idx:] = p_tax
                 break
             # no conflict, set taxon and update p_tax
-            clust_tax[idx] = uniq_vals
+            clust_tax[idx] = uniq_vals[0]
             p_tax = uniq_vals
         # add completed taxonomy
         effective_taxes[idx0] = clust_tax
@@ -219,6 +228,7 @@ class WindowLoader:
     def __init__(self, logger='WindowLoader'):
         # logger set at initialization (because this class may be used by multiple modules)
         self.logger = logging.getLogger(logger)
+        self.logger.setLevel(logging.DEBUG)
         
     def set_files(self, mat_file, acc_file, tax_file):
         self.mat_file = mat_file
@@ -233,7 +243,7 @@ class WindowLoader:
         with open(acc_file, 'r') as acc_handle:
             self.acclist = acc_handle.read().splitlines()
         # load tax tab
-        self.tax_tab = pd.read_csv(tax_file, index_col=0)
+        self.tax_tab = get_taxid_tab(tax_file)
     
     def get_window(self, start, end, row_thresh=0.2, col_thresh=0.2):
         self.rows = []
@@ -258,9 +268,6 @@ class Window:
         self.loader = loader
         self.shape = (0,0)
         self.process_window(row_thresh, col_thresh)
-        self.window = None
-        self.cons_mat = None
-        self.cons_tax = None
     
     @property
     def window(self):
@@ -289,21 +296,97 @@ class Window:
         self.cols = cols
         self.shape = (len(rows), len(cols))
         # self.window = window
-        
-        # collapse windows
-        # self.cons_mat, self.cons_tax = collapse_1(self.window, self.tax_tab)
-        self.collapse_window()
+        if len(rows) > 0:
+            self.collapse_window()
+        else:
+            self.eff_mat = np.zeros((0, len(cols)))
     
     def collapse_window(self):
-        tree = Tree()
-        tree.build(self.window)
-        
-        self.eff_idxs = [lv[0] for lv in tree.leaves]
-        self.eff_mat = build_effective_matrix(self.eff_idxs, self.window)
+        # tree = Tree()
+        # tree.build(self.window)
+        # self.eff_idxs = [lv[0] for lv in tree.leaves]
+        # self.eff_idxs = get_leaves(0, np.arange(len(self.window)), self.window)
+        # self.eff_mat = build_effective_matrix(self.eff_idxs, self.window)
+        self.eff_mat, self.eff_idxs = seq_collapse_nb(self.window)
+        # print(self.eff_idxs)
         self.eff_tax = build_effective_taxonomy(self.eff_idxs, self.tax_tab)
         
 
 #%%
+@nb.njit
+def get_leaves(col, indexes, matrix):
+    # print(col)
+    leaves = [np.array([i]) for i in range(0)]
+    # get unique non-zero values in column col, rows indexes. Get indexes of zeros separately
+    array = matrix[indexes, col]
+    values = np.unique(array)
+    values = values[values != 0]
+    zero_idxs = np.argwhere(array == 0).flatten()
+    
+    for val in values:
+        # get indexes of value + indexes of zeros
+        val_idxs = np.argwhere(array == val).flatten()
+        joint_idxs = np.concatenate((zero_idxs, val_idxs))
+        sub_indexes = indexes[joint_idxs]
+        # stop conditions, end of the matrix or single sequence remaining
+        if col == matrix.shape[1] - 1 or len(sub_indexes) == 1:
+            leaves.append(sub_indexes)
+        else:
+            leaves += get_leaves(col + 1, sub_indexes, matrix)
+    return leaves
+
+@nb.njit
+def seq_collapse_nb(matrix):
+    # matrix data
+    base_range = matrix.max() + 1
+    seq_len = matrix.shape[1]
+    n_seqs = matrix.shape[0]
+    # set up branch container and guide
+    # seq_guide indicates which branches are available for a given value in a given position
+    # value 0 always contains all possible branches (can't be used to discard)
+    branches = [[0 for i in range(0)] for seq in range(n_seqs)]
+    seq_guide = [[set([0 for i in range(0)]) for char in range(base_range)] for site in range(seq_len)]
+    # all_branches: same variable referenced by position 0 of all sites in seq_guide
+    all_branches = set([0 for i in range(0)])
+    for site_idx in range(seq_len):
+        seq_guide[site_idx][0] = all_branches
+    # initialize branch counter as 0
+    n_branch = 0
+    # make a single pass along the entire matrix
+    for seq_idx, seq in enumerate(matrix):
+        # all branches are possible at first
+        possible_branches = all_branches
+        # discard invalid branches by checking the seq_guide for each site
+        for base_idx, base in enumerate(seq):
+            possible_branches = possible_branches.intersection(seq_guide[base_idx][base])
+            # all existing branches discarded, this one is new
+            if len(possible_branches) == 0:
+                # define new branch, update all_branches and branch counter
+                possible_branches.add(n_branch)
+                all_branches.add(n_branch)
+                n_branch += 1
+                break
+        # update branches and seq_guide
+        # allways do this in case an existing branch has incorporated new non ambiguous data
+        for br in possible_branches:
+            branches[br].append(seq_idx)
+        for base_idx in np.argwhere(seq != 0).flatten():
+            base = seq[base_idx]
+            for br in possible_branches:
+                seq_guide[base_idx][base].add(br)
+    # generate collapsed matrix
+    collapsed = np.zeros((n_branch, seq_len), dtype = matrix.dtype)
+    for br_idx, br in enumerate(branches[:n_branch]):
+        sub_mat = matrix[np.array(br, dtype=np.int64)]
+        collapsed[br_idx] = np.array([col.max() for col in sub_mat.T])
+    # # remove repeated sequences
+    # repeats = set([0 for i in range(0)])
+    # for idx0, br0 in enumerate(branches):
+    #     for idx1, br1 in enumerate(branches[idx0+1]):
+            
+            
+    return collapsed, branches[:n_branch]
+
 # TODO: test these
 # TODO: maybe coud be changed into a numba function
 class Tree:
@@ -318,7 +401,7 @@ class Node:
         self.row = row
         self.indexes = indexes
         self.matrix = matrix
-        self.tree
+        self.tree = tree
         self.children = []
         if lvl + 1 < len(matrix):
             self.get_children()
@@ -334,4 +417,4 @@ class Node:
             indexes = np.concatenate((zeros, indexes))
             indexes = self.indexes[indexes]
             row = self.matrix[self.lvl + 1, indexes]
-            self.children.append(Node(self.lvl + 1, self, val, row, indexes, self.matrix, self.tree))
+            self.children.append(Node(self.lvl + 1, val, row, indexes, self.matrix, self.tree))

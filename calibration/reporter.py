@@ -9,6 +9,7 @@ This script is used to extract the best parameter combinations from a calibratio
 
 #%% libraries
 import logging
+import numpy as np
 import pandas as pd
 import pickle
 import time
@@ -39,7 +40,7 @@ class Reporter:
         self.out_dir = out_dir
         
     def load_report(self, report_file):
-        meta_file = report_file.split('.csv')[-1] + '.meta'
+        meta_file = report_file.split('.csv')[0] + '.meta'
         self.report = pd.read_csv(report_file)
         with open(meta_file, 'rb') as meta_handle:
             meta = pickle.load(meta_handle)
@@ -51,27 +52,26 @@ class Reporter:
     def set_guide(self, guide_file):
         self.taxguide = pd.read_csv(guide_file, index_col=0)
         
-    def report(self, w_start=None, w_end=None, taxa=[], metric='F1_score', nrows=3, show=True):
+    def get_report(self, w_start=0, w_end=np.inf, taxa=[], metric='F1_score', nrows=3, show=True):
         # generate a report for the best parameters for the given window/taxa using the selected metric
         # if only w_start and w_end are given, select the overall best parameters for the window
         # if only taxa is given, select the best parameters including windows for each taxon
         # if both are given, select the best parameters for each taxon in the selected window
         
         header = [f'{nrows} best parameter combinations given by the mean {metric} values']
-        if w_end - w_start > self.w_len * 1.5 or w_end - w_start < self.w_len * 0.8:
-            header.append(f'**Warning: The provided window has a length of {w_end - w_start}. The window length used in the calibration {self.w_len}**')
+        if w_end - w_start < self.w_size * 0.8:
+            header.append(f'**Warning: The provided window has a length of {w_end - w_start}. The window length used in the calibration is {self.w_size}**')
             header.append('**Parameter hints may not be reliable. Recommend performing a calibration step for the desired window**')
         
-        sub_report = self.report.sort_values(metric, ascending=False)
-        if not w_start is None and not w_end is None:
-            sub_report = sub_report.loc[(sub_report.w_start >= w_start) & (sub_report.w_end <= w_end)]
+        sub_report = self.report.loc[(self.report.w_start >= w_start) & (self.report.w_end <= w_end)].sort_values(metric, ascending=False).sort_values('w_start')
+        
         # check valid taxa
         missing = set(taxa).difference(self.taxguide.index)
         if len(missing) > 0:
+            if len(missing) == len(taxa):
+                header.append('No valid taxa presented. Aborting')
+                return
             header.append(f'The follofing taxa are not found in the database: {" ".join(missing)}')
-        elif len(missing) == len(taxa):
-            header.append('No valid taxa presented. Aborting')
-            return
         
         param_report = []
         # explore each window in the selection
@@ -82,7 +82,7 @@ class Reporter:
                     param_report.append(get_best_params(tax_tab, metric, nrows))
             else:
                 # no taxes are set, get the generic best for each window
-                best_params = get_best_params(sub_report, metric, nrows).drop(columns=['rank', 'taxon'])
+                best_params = get_best_params(sub_report, metric, nrows).drop(columns=['rank', 'Taxon'])
                 param_report.append(best_params)
         self.params = pd.concat(param_report)
         for i in range(7 - len(header)):
@@ -92,7 +92,7 @@ class Reporter:
         if show:
             print('\n'.join(header))
             print()
-            print(self.paran_report)
+            print(self.params)
     
     def save_report(self, filename=None):
         if filename is None:

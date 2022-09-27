@@ -25,10 +25,10 @@ viridis.set_bad(grey)
 #%% functions
 def generate_title(report_tab):
     # check metric
-    title = f'Parameters generating the best {report_tab.metric.iloc[0]} values for'
+    title = f'Parameters generating the best {report_tab.columns[-1]} values for'
     # check rank
-    if len(report_tab.ranks.unique()) == 1:
-        title += f'Rank: {report_tab.ranks.iloc[0]}, '
+    if len(report_tab['rank'].unique()) == 1:
+        title += f'Rank: {report_tab["rank"].iloc[0]}, '
     # check windows
     first_win = (report_tab.iloc[0].w_start, report_tab.iloc[0].w_end)
     last_win = (report_tab.iloc[-1].w_start, report_tab.iloc[-1].w_end)
@@ -37,19 +37,19 @@ def generate_title(report_tab):
     else:
         title += f'Windows: [{first_win[0]} - {first_win[1]}] to [{last_win[0]} - {last_win[1]}], '
     # check n taxa
-    title += f'{len(report_tab.taxon.unique())} taxa'
+    title += f'{len(report_tab.Taxon.unique())} taxa'
     return title
 
 def build_plot_tab(report_tab):
     x_values = report_tab.w_start.unique()
     x_values1 = report_tab.w_end.unique()
-    y_values = report_tab.taxon.unique()
+    y_values = report_tab.Taxon.unique()
     x_labels = [f'{x0} - {x1}' for x0,x1 in zip(x_values, x_values1)]
     
     met_tab = pd.DataFrame(index = y_values, columns = x_values)
     param_tab = pd.DataFrame(index = y_values, columns = (x_values))
     
-    for (w_start, taxon), wt_tab in report_tab.groupby(['w_start', 'taxon']):
+    for (w_start, taxon), wt_tab in report_tab.groupby(['w_start', 'Taxon']):
         row = wt_tab.iloc[0]
         # row contains the parameter combination with the best results for the given parameters
         # should only be a single row in wt_tab, select first one in case of ties
@@ -58,7 +58,7 @@ def build_plot_tab(report_tab):
         met_tab.at[taxon, w_start] = row.iloc[-1]
         param_tab.at[taxon, w_start] = f'k:{row.K}\nn:{row.n_sites}\nmode:{row["mode"]}'
     
-    return met_tab.to_numpy(), param_tab, x_labels, y_values
+    return met_tab.to_numpy(dtype=np.float), param_tab, x_labels, y_values
 
 def plot_report(report_tab, show=True, **kwargs):
     # kwargs: out_file, use to save generated plot to out_file
@@ -67,13 +67,14 @@ def plot_report(report_tab, show=True, **kwargs):
     title = generate_title(report_tab)
     
     # generate plot
-    figure_size = (matrix.shape[0]/2, matrix.shape[1]/2)
+    figure_size = (matrix.shape[0]/1.5, matrix.shape[1]/1.5)
     fig, ax = plt.subplots(figsize=figure_size, dpi=200)
     
     sns.heatmap(data=matrix,
                 cmap=viridis,
-                annot=params,
-                annot_kws={'size':8, 'ha':'center', 'va':'center'},
+                annot=params.to_numpy(dtype=str),
+                fmt='',
+                annot_kws={"size": 20 / np.sqrt(min(matrix.shape)), 'ha':'center', 'va':'center'},
                 cbar=True,
                 square=True,
                 xticklabels=x_labels,
@@ -252,7 +253,7 @@ class Director:
         # rank and taxa aren mutually exclusive but if rank is set only the taxa belonging to said rank will be shown
         report = self.report.loc[(self.report.w_start >= w_start) & (self.report.w_end <= w_end)]
         if not rank is None:
-            report = report.loc[report.rank == rank]
+            report = report.loc[report['rank'] == rank]
         if len(taxa) > 0:
             # query is case insensitive
             lower_taxa = [tax.lower() for tax in taxa]
@@ -265,9 +266,9 @@ class Director:
             report = report.loc[report.taxon.isin(lower_taxa)]
         # locate best combination per window/taxon
         indexes = []
-        for (win, tax), subtab in report.groupby(['w_start', 'taxon']):
-            indexes.append(subtab.idxmax(metric))
-        zoomed_report = report.loc[indexes, ['rank', 'taxon', 'w_start', 'w_end', 'K', 'n_sites', metric]]
+        for (win, tax), subtab in report.groupby(['w_start', 'Taxon']):
+            indexes.append(subtab.index[np.argmax(subtab[metric])])
+        zoomed_report = report.loc[indexes, ['rank', 'Taxon', 'w_start', 'w_end', 'K', 'n_sites', 'mode', metric]]
         zoomed_report.sort_values('w_start', inplace=True)
         # zoomed_report.set_index(['w_start', 'taxon'], drop=True, inplace=True)
         self.zoomed = zoomed_report

@@ -19,12 +19,16 @@ logger = logging.getLogger('Graboid')
 logger.setLevel(logging.INFO)
 # set formatters
 fmtr0 = logging.Formatter('%(asctime)s %(name)-20s %(levelname)-8s %(message)s')
-fmtr1 = logging.Formatter('%(name)-20s %(levelname)-8s %(message)s')
+fmtr1 = logging.Formatter('%(name)-30s %(levelname)-8s %(message)s')
 # set console handler
 console = logging.StreamHandler()
 console.setLevel(logging.WARNING)
 console.setFormatter(fmtr1) # use shorter formatter, easier to read
 logger.addHandler(console)
+# debug logger
+debug = logging.StreamHandler()
+debug.setLevel(logging.DEBUG)
+logger.addHandler(debug)
 #%% parsers
 print(sys.argv)
 first_parser = argparse.ArgumentParser(add_help=False)
@@ -43,12 +47,13 @@ help_parser = argparse.ArgumentParser(prog='Graboid',
                                       description='Graboid is a program for the taxonomic identification of DNA amplicons of a specified marker. Have fun!',
                                       epilog='For a more detailed description of the function of each mode use "graboid MODE --help"')
 help_parser.add_argument('mode',
-                         help='''Specify graboid mode. Accepted values are:
-                             database
-                             mapping
-                             calibrate
-                             design
-                             classify''',
+                         help='''Specify graboid mode. Accepted values are:\n
+                             DATABASE\n
+                             MAP\n
+                             CALIBRATE\n
+                             PLOT\n
+                             REPORT\n
+                             CLASSIFY''',
                          nargs='?',
                          default='help')
 help_parser.add_argument('mode args',
@@ -70,7 +75,7 @@ db_parser.add_argument('-M', '--marker',
                        help='Marker sequence to search for',
                        type=str)
 db_parser.add_argument('-F', '--fasta',
-                       help='Pre-constructed fasta file')
+                       help='Pre-constructed fasta file (use this in place of --taxon and --marker)')
 db_parser.add_argument('--bold',
                        help='Include the BOLD database in the search',
                        action='store_true')
@@ -90,7 +95,13 @@ db_parser.add_argument('--mv',
                        action='store_true')
 db_parser.add_argument('--keep_tmp',
                        help='Keep temporal files',
-                       action='store_true')
+                       action='store_true'),
+db_parser.add_argument('--email',
+                       help='Provide an email adress and an API key in order to use the NCBI Entrez utilities',
+                       type=str)
+db_parser.add_argument('--api_key',
+                       help='API key associated to the provided email adress',
+                       type=str)
 
 #%% mapping parser
 mp_parser = argparse.ArgumentParser(prog='Graboid MAPPING',
@@ -101,25 +112,29 @@ mp_parser.add_argument('--work_dir',
                        help='Working directory for the generated files',
                        type=str)
 mp_parser.add_argument('-B', '--base_seq',
+                       default=None,
                        help='Marker sequence to be used as base of the alignment',
                        type=str)
 mp_parser.add_argument('-db', '--db_dir',
+                       default=None,
                        help='OPTIONAL. BLAST database, alternative to reference sequence',
                        type=str)
 mp_parser.add_argument('-o', '--out_name',
+                       default=None,
                        help='OPTIONAL. Name for the generated BLAST report and alignment matrix',
                        type=str)
 mp_parser.add_argument('-bn', '--blast_name',
+                       default=None,
                        help='OPTIONAL. Name for the generated BLAST database',
                        type=str)
 mp_parser.add_argument('-e', '--evalue',
+                       default=0.005,
                        help='E-value threshold for the BLAST matches. Default: 0.005',
-                       type=float,
-                       default=0.005)
+                       type=float)
 mp_parser.add_argument('-t', '--threads',
+                       default=1,
                        help='Number of threads to be used in the BLAST alignment. Default: 1',
-                       type=int,
-                       default=1)
+                       type=int)
 
 #%% calibrate parser
 cb_parser = argparse.ArgumentParser(prog='Graboid CALIBRATE',
@@ -130,59 +145,63 @@ cb_parser.add_argument('--work_dir',
                        help='Working directory for the generated files',
                        type=str)
 cb_parser.add_argument('-rt', '--row_thresh',
-                       help='Empty row threshold',
-                       type=float,
-                       default=0.2)
+                       default=0.2,
+                       help='Empty row threshold. Default: 0.2',
+                       type=float)
 cb_parser.add_argument('-ct', '--col_thresh',
-                       help='Empty column threshold',
-                       type=float,
-                       default=0.2)
+                       default=1.0,
+                       help='Empty column threshold. Default: 0.2',
+                       type=float)
 cb_parser.add_argument('-ms', '--min_seqs',
-                       help='Minimum number of sequences allowed per taxon',
-                       type=int,
-                       default=10)
+                       default=10,
+                       help='Minimum number of sequences allowed per taxon. Default: 10',
+                       type=int)
 cb_parser.add_argument('-rk', '--rank',
-                       help='Rank to be used for feature selection',
-                       type=str,
-                       default='genus')
+                       default='genus',
+                       help='Rank to be used for feature selection. Default: genus',
+                       type=str)
 cb_parser.add_argument('-dm', '--dist_mat',
-                       help='Distance matrix to be used for distance calculation',
+                       help='Distance matrix to be used for distance calculation. Valid codes: "id" and "s<int>v<int>"',
                        type=str)
 cb_parser.add_argument('-wz', '--w_size',
-                       help='Sliding window size',
-                       type=int,
-                       default=200)
+                       default=200,
+                       help='Sliding window size. Default: 200',
+                       type=int)
 cb_parser.add_argument('-ws', '--w_step',
-                       help='Sliding window displacement',
-                       type=int,
-                       default=15)
+                       default=15,
+                       help='Sliding window displacement. Default: 15',
+                       type=int)
 cb_parser.add_argument('-mk', '--max_k',
-                       help='Max value of K',
-                       type=int,
-                       default=15)
+                       default=15,
+                       help='Max value of K. Default: 15',
+                       type=int)
 cb_parser.add_argument('-sk', '--step_k',
-                       help='Rate of increase of K',
-                       type=int,
-                       default=2)
+                       default=2,
+                       help='Rate of increase of K. Default: 2',
+                       type=int)
 cb_parser.add_argument('-mn', '--max_n',
-                       help='Max value of n',
-                       type=int,
-                       default=30)
+                       default=30,
+                       help='Max value of n. Default: 30',
+                       type=int)
 cb_parser.add_argument('-sn', '--step_n',
-                       help='Rate of increase of n',
-                       type=int,
-                       default=5)
+                       default=5,
+                       help='Rate of increase of n. Default: 5',
+                       type=int)
 cb_parser.add_argument('-nk', '--min_k',
-                       help='Min value of K',
-                       type=int,
-                       default=1)
+                       default=1,
+                       help='Min value of K. Default: 1',
+                       type=int)
 cb_parser.add_argument('-nn', '--min_n',
-                       help='Min value of n',
-                       type=int,
-                       default=5)
+                       default=5,
+                       help='Min value of n. Default: 5',
+                       type=int)
 cb_parser.add_argument('-o', '--out_file',
-                       help='File name for the generated report (Will save into the given out_file)',
+                       help='Optional. File name for the generated report (Will save into the given out_file)',
                        type=str)
+cb_parser.add_argument('-t', '--threads',
+                       default=1,
+                       help='Number of threads to be used in the calibration. Default: 1',
+                       type=int)
 
 #%% plot parser
 pt_parser = argparse.ArgumentParser(prog='Graboid PLOT',
@@ -294,29 +313,22 @@ cl_parser.add_argument('--keep_tmp',
 
 #%%
 parser_dict = {'DATABASE':db_parser,
-               'MAPPING':mp_parser,
+               'MAP':mp_parser,
                'CALIBRATE':cb_parser,
+               'PLOT':pt_parser,
+               'REPORT':rp_parser,
                'CLASSIFY':cl_parser,
                'HELP':help_parser}
 
 base_args, unknown = first_parser.parse_known_args()
-
-modes = ['DATABASE',
-         'MAPPING',
-         'CALIBRATE',
-         'DESIGN',
-         'CLASSIFY']
 mode = base_args.mode.upper()
-
-if mode not in modes:
+if mode not in parser_dict:
     mode = 'HELP'
     sys.argv.append('--help')
 parser = parser_dict[mode]
 args = parser.parse_args()
-print(args)
+logger.debug(f'Arguments {args}')
 
-#TODO: PLOTTER mode. make plots from different modules. For now:
-    # matrix2.plot_coverage_data(blast_file, evalue, figsize) # to plot coverage from a BLAST report
 #%% execute
 from database import director as db
 from mapping import director as mp
@@ -336,12 +348,15 @@ def main(mode, args):
     except FileNotFoundError:
         file_catalog = {}
     
-    # build files
-    res_dir = os.makedirs(f'{args.work_dir}/results', exist_ok=bool)
-    cal_dir = os.makedirs(f'{args.work_dir}/calibration', exist_ok=bool)
-    data_dir = os.makedirs(f'{args.work_dir}/data', exist_ok=bool)
-    tmp_dir = os.makedirs(f'{args.work_dir}/tmp', exist_ok=bool)
-    wrn_dir = os.makedirs(f'{args.work_dir}/warnings', exist_ok=bool)
+    # build directories
+    res_dir = f'{args.work_dir}/results'
+    cal_dir = f'{args.work_dir}/calibration'
+    data_dir = f'{args.work_dir}/data'
+    tmp_dir = f'{args.work_dir}/tmp'
+    wrn_dir = f'{args.work_dir}/warnings'
+    
+    for dir_path in [res_dir, cal_dir, data_dir, tmp_dir, wrn_dir]:
+        os.makedirs(dir_path, exist_ok=True)
     # set log handler
     log_handler = logging.FileHandler(f'{args.work_dir}/graboid.log')
     log_handler.setLevel(logging.WARNING)
@@ -350,6 +365,10 @@ def main(mode, args):
     
     if mode == 'DATABASE':
         db_director = db.Director(data_dir, tmp_dir, wrn_dir)
+        try:
+            db.set_entrez(args.email, args.api_key)
+        except AttributeError:
+            print('Missing email adress and/or API key')
         # user specified ranks to use
         if not args.ranks is None:
             db_director.set_ranks(args.rank)
@@ -373,22 +392,24 @@ def main(mode, args):
             db_director.clear_tmp()
         
         # update catalog
-        file_catalog['fasta'] = db_director.fasta_file
+        file_catalog['fasta'] = db_director.seq_file
         file_catalog['tax'] = db_director.tax_file
         file_catalog['guide'] = db_director.guide_file
-        with open(catalog_path, 'wb') as catalog_path:
-            pickle.dump(file_catalog, catalog_path)
+        file_catalog['acclist'] = db_director.acc_file
+        with open(catalog_path, 'wb') as catalog_handle:
+            pickle.dump(file_catalog, catalog_handle)
             
-    if mode == 'MAPPER':
+    if mode == 'MAP':
         mp_director = mp.Director(data_dir, wrn_dir)
         selector = fsele.Selector(data_dir)
         
         if not args.db_dir is None:
             # BLAST database already exists, set directory
             mp_director.set_blastdb(args.db_dir)
-        elif not args.ref is None:
+        elif not args.base_seq is None:
+            logger.debug('Building blast database')
             # Create BLAST database using given ref
-            mp_director.build_blastdb(args.ref, args.ref_name, args.clear)
+            mp_director.build_blastdb(args.base_seq, args.blast_name)
         else:
             print('Can\'t perform BLAST. Either provide a reference sequence file as --base_seq or a BLAST database as --db_dir')
             return
@@ -405,6 +426,7 @@ def main(mode, args):
             print(f'No taxonomy table file found in directory {args.work_dir}')
             return
         # Perform BLAST and build matrix
+        logger.debug('Starting mapping')
         mp_director.direct(fasta_file, args.out_name, args.evalue, args.threads, keep=True)
         # build order matrix
         tax_tab = pd.read_csv(tax_file, index_col=0).loc[mp_director.accs]
@@ -414,13 +436,12 @@ def main(mode, args):
         selector.save_order_mat()
         # update catalog
         file_catalog['db_dir'] = mp_director.db_dir
-        file_catalog['base_seq'] = mp_director.base_seq
-        file_catalog['blast'] = mp_director.blast_file
-        file_catalog['matrix'] = mp_director.matrix_file
+        file_catalog['blast'] = mp_director.blast_report
+        file_catalog['matrix'] = mp_director.mat_file
         file_catalog['accs'] = mp_director.acc_file
         file_catalog['order'] = selector.order_file
-        with open(catalog_path, 'wb') as catalog_path:
-            pickle.dump(file_catalog, catalog_path)
+        with open(catalog_path, 'wb') as catalog_handle:
+            pickle.dump(file_catalog, catalog_handle)
     
     if mode in ['CALIBRATE', 'CLASSIFY']:
         # retrieve files common to CALIBRATE and CLASSIFY
@@ -467,7 +488,10 @@ def main(mode, args):
                                args.max_n,
                                args.step_n,
                                args.min_k,
-                               args.min_n)
+                               args.min_n,
+                               args.out_file,
+                               args.threads,
+                               True) # TODO: this true is to keep the generated classification file, remember to set as false
         calibrator.save_report(args.out_file)
     
     if mode == 'PLOT':
@@ -508,3 +532,6 @@ def main(mode, args):
         classifier.set_query(args.fasta_file, args.query_name, args.threads)
         classifier.set_dist_mat(args.dist_mat)
         classifier.classify(args.w_start, args.w_end, args.k, args.n, args.cl_mode, args.site_rank, args.out_file)
+
+if __name__ == '__main__':
+    main(mode, args)

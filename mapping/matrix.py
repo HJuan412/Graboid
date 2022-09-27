@@ -43,7 +43,7 @@ def make_transdict():
 
 # read blast file
 def read_blast(blast_file, evalue = 0.005):
-    # read blast file, flip reversed matches, sort by qseqid and qstart, subtract 1 from qstart and sstart to adjust for python indexing
+    # read blast file, register match orientations, flip reversed matches, sort by qseqid and qstart, subtract 1 from qstart and sstart to adjust for python indexing
     colnames = 'qseqid pident length qstart qend sstart send evalue'.split(' ')
     blast_tab = pd.read_csv(blast_file,
                             sep = '\t',
@@ -51,18 +51,18 @@ def read_blast(blast_file, evalue = 0.005):
                             names = colnames)
     # blast_tab.rename(columns = columns, inplace = True)
     blast_tab = blast_tab.loc[blast_tab['evalue'] <= evalue]
-    qmat = blast_tab[['qstart', 'qend']].values
     smat = blast_tab[['sstart', 'send']].values
     
+    # get orients (0: forward, 1:reverse)
+    orients = (smat[:,0] > smat[:,1]).reshape((-1,1)).astype(int)
     # flip inverted matches
-    qmat = np.sort(qmat, 1)
     smat = np.sort(smat, 1)
     # adjust for python indexing
-    qmat[:,0] -= 1
+    blast_tab.qstart -= 1
     smat[:,0] -= 1
     # update values
-    blast_tab[['qstart', 'qend']] = qmat
     blast_tab[['sstart', 'send']] = smat
+    blast_tab['orient'] = orients
     blast_tab.sort_values(['qseqid', 'qstart'], ignore_index=True, inplace=True)
     return blast_tab
 
@@ -81,7 +81,8 @@ def make_guide(values):
 def get_mat_dims(blast_tab):
     # get total dimensions for the sequence matrix
     nrows = len(blast_tab.qseqid.unique())
-    subject_coords = blast_tab[['sstart', 'send']].to_numpy().sort(index=1)
+    subject_coords = blast_tab[['sstart', 'send']].to_numpy()
+    subject_coords.sort(axis=1)
     lower = subject_coords[:,0].min()
     upper = subject_coords[:,1].max()
     # lower = blast_tab.sstart.min() # used to calculate the offset, most times this value is 0
@@ -115,65 +116,6 @@ def get_numseq(seq, trans_dict):
     numseq = np.array([trans_dict[base] for base in seq], dtype = np.int8)
     return numseq
 
-#%% discarded code
-# def build_coords(coord_mat):
-#     # get the sorted coordinates for the given match
-#     # seq_coords tell what part of each sequence to take
-#     # mat_coords tell where the matches go in the alignment
-#     seq_coords_raw = coord_mat[:, :2]
-#     mat_coords_raw = coord_mat[:, 2:]
-#     seq_coords_ord = np.sort(seq_coords_raw, axis = 1)
-#     mat_coords_ord = np.sort(mat_coords_raw, axis = 1)
-#     order = np.argsort(seq_coords_ord[:,0])
-
-#     seq_coords = seq_coords_ord[order]
-#     mat_coords = mat_coords_ord[order]
-#     # substract 1 from first column to account for python indexing
-#     seq_coords[:,0] -= 1
-#     mat_coords[:,0] -= 1
-#     return seq_coords, mat_coords
-
-# # TODO: replace original build_row
-# def build_row0(seq, seq_coords, mat_coords, rowlen):
-#     row = np.zeros(rowlen, dtype = np.int8)
-#     for seq_coor, mat_coor in zip(seq_coords, mat_coords):
-#         # subseq = seq[seq_coor[0]:seq_coor[1]]
-#         # numseq = np.array([tr_dict[base] for base in subseq], dtype = 'int64')
-#         # row[mat_coor[0]:mat_coor[1]] = numseq
-#         row[mat_coor[0]:mat_coor[1]] = seq[seq_coor[0]:seq_coor[1]]
-#     return row
-
-# def build_row(acc, seq, seq_coords, mat_coords, rowlen, transdict):
-#     row = np.ones(rowlen, dtype = np.int64) * 16
-#     for seq_coor, mat_coor in zip(seq_coords, mat_coords):
-#         subseq = seq[seq_coor[0]:seq_coor[1]+1]
-#         numseq = np.array([transdict[base] for base in subseq], dtype = 'int64')
-#         row[mat_coor[0]:mat_coor[1]+1] = numseq    
-#     return row.astype(np.int64)
-
-# def build_query_window(query_blast, seq_file, w_start=None, w_end=None, w_dict=None):
-#     # TODO: need to keep track of the offset of the reference alignment matrix
-#     blast_tab = read_blast(query_blast)
-    
-#     # get aligned sequences
-#     sequences = get_seqs(seq_file, blast_tab)
-#     rows = []
-#     acclist = []
-#     for qid, subtab in blast_tab.groupby('qseqid'):
-#         coord_mat = subtab[['qstart', 'qend', 'sstart', 'send']].to_numpy()
-#         # coord_mat[:, 2:] -= offset
-#         seq_coords, mat_coords = build_coords(coord_mat)
-#         rowlen = mat_coords[:, 3].max()
-#         row = build_row0(sequences[qid], seq_coords, mat_coords, rowlen)
-#         rows.append(row)
-#         acclist.append(qid)
-    
-#     if not w_dict is None:
-#         rows = np.array([rows[w_dict[acc][0]:w_dict[acc][1] + 1] for acc in acclist])
-#     else:
-#         rows = np.array(rows)
-#         rows = rows[:, w_start:w_end + 1]
-#     return np.array(rows), acclist
 #%%
 def plot_coverage_data(blast_file, evalue = 0.005, figsize=(12,7)):
     # TODO: save plot to file
@@ -221,24 +163,19 @@ class MatBuilder:
         # load blast report
         print('Reading blast report...')
         blast_tab = read_blast(blast_file, evalue)
-        blast_tab.sort_values('qseqid', inplace=True)
         if len(blast_tab) == 0:
             logger.warning(f'No matches in the blast report {blast_file} passed the filter (evalue <= {evalue})')
             return
         
         # get dimensions
-        mat_dims = get_mat_dims(blast_tab)
-        nrows = mat_dims[0]
-        ncols = mat_dims[1]
-        bounds = np.array([mat_dims[2], mat_dims[3]])
-        offset = mat_dims[2]
+        nrows, ncols, lower, upper = get_mat_dims(blast_tab)
+        bounds = np.array([lower, upper])
+        offset = lower # lower value already shifted 1 to the left by read_blast
         
         # get coordinates
-        coord_mat = blast_tab[['qstart', 'qend', 'sstart', 'send']].to_numpy()
-        coord_mat[:, 2:] -= offset
-        # include match orientations. 1 if orientation is plus, 0 if minus
-        orients = (coord_mat[:,2] < coord_mat[:,3]).astype(int).reshape((-1,1))
-        coord_mat = np.concatenate((coord_mat, orients), axis=1)
+        coord_mat = blast_tab[['qstart', 'qend', 'sstart', 'send', 'orient']].to_numpy()
+        # offset subject coordinates (substract the lower bound of the match coordinates)
+        coord_mat[:, [2,3]] -= offset
         
         # get filtered sequences
         print('Retrieving sequences...')
@@ -246,26 +183,19 @@ class MatBuilder:
         sequences = read_seqfile(seq_file)
         
         # build matrix
-        # guide = make_guide(blast_tab.qseqid.values) Used for commented version of the matrix construction
         print('Building matrix...')
         matrix = np.zeros((nrows, ncols), dtype=np.int8)
         for q_idx, (qry, qry_tab) in enumerate(blast_tab.groupby('qseqid')):
             seq = sequences[qry]
             coords = coord_mat[qry_tab.index]
             for match in coords:
-                if match == 1:
-                    numseq = get_numseq(seq[match[0]-1:match[1]], tr_dict)
-                    matrix[q_idx, match[2]:match[3]] = numseq
+                # if orient (row 4) is 0, get original sequence, else get reversed
+                if match[4] == 0:
+                    numseq = get_numseq(seq[match[0]:match[1]], tr_dict)
                 else:
-                    numseq = get_numseq(seq[match[1]-1:match[0]:-1], rc_dict)
-                    matrix[q_idx, match[3]:match[2]] = numseq
+                    numseq = get_numseq(seq[match[0]:match[1]][::-1], rc_dict)
+                matrix[q_idx, match[2]:match[3]] = numseq
             self.acclist.append(qry)
-        # for accnum, (acc, idx0, idx1) in enumerate(guide):
-        #     seq = sequences[acc]
-        #     coord_submat = coord_mat[idx0:idx1]            
-        #     for coord in coord_submat:
-        #         matrix[accnum, coord[2]:coord[3]] = seq[coord[0]:coord[1]]
-        #     self.acclist.append(acc)
         
         # generate out_files
         self.generate_outnames(seq_file, out_name)
@@ -276,7 +206,7 @@ class MatBuilder:
         with open(self.acc_file, 'w') as list_handle:
             list_handle.write('\n'.join(self.acclist))
         logger.info(f'Stored matrix of dimensions {matrix.shape} in {self.mat_file}')
-        logger.info(f'Stored accession_list in {self.acclist}')
+        logger.info(f'Stored accession_list in {self.acc_file}')
         
         if keep:
             # use this to retrieve generating directly from this method

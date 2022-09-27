@@ -10,8 +10,8 @@ Direct dataset_construction
 #%% Libraries
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 import logging
-from data_fetch.dataset_construction import blast
-from data_fetch.dataset_construction import matrix
+from mapping import blast
+from mapping import matrix
 import os
 
 #%% set logger
@@ -29,6 +29,7 @@ def check_fasta(fasta_file):
     with open(fasta_file, 'r') as fasta_handle:
         for rec in sfp(fasta_handle):
             nseqs += 1
+    return nseqs
 #%% classes
 class Director:
     def __init__(self, out_dir, warn_dir):
@@ -43,7 +44,7 @@ class Director:
         self.dims = None
         
         # workers
-        self.blaster = blast.Blaster()
+        self.blaster = blast.Blaster(out_dir)
         self.mapper = matrix.MatBuilder(out_dir)
     
     @property
@@ -108,5 +109,7 @@ class Director:
         self.acc_file = self.mapper.acc_file
         print('Done!')
         if keep:
-            return map_data
+            self.matrix = map_data[0]
+            self.bounds = map_data[1]
+            self.acclist = map_data[2]
         return

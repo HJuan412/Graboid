@@ -35,6 +35,7 @@ def makeblastdb(ref_file, db_prefix):
     cline = makeblast_cline(input_file=ref_file,
                             out=db_prefix,
                             dbtype='nucl',
+                            parse_seqids=True,
                             input_type='fasta')
     cline()
 
@@ -47,8 +48,9 @@ def check_db_dir(db_dir):
 
 #%% classes
 class Blaster:
-    def __init__(self):
+    def __init__(self, out_dir):
         self.report = None
+        self.out_dir = out_dir
 
     def make_ref_db(self, ref_file, db_dir, clear=False):
         check, db_files = check_db_dir(db_dir)

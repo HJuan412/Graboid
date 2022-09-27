@@ -94,7 +94,7 @@ class SurveyENA(SurveyWAPI):
 class SurveyNCBI(SurveyTool):
     # This surveyor uses the Entrez package instead of an API, defines its own survey method
     def get_logger(self):
-        self.logger = logging.getLogger('Graboid.database.surveyor.BOLD.surveyor.NCBI')
+        self.logger = logging.getLogger('Graboid.database.surveyor.NCBI')
     
     def get_dbase(self):
         return 'NCBI'

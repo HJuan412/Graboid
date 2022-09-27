@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 
+from Bio import Entrez
 from database import surveyor as surv
 from database import lister as lstr
 from database import fetcher as ftch
@@ -23,6 +24,10 @@ logger = logging.getLogger('Graboid.database')
 logger.setLevel(logging.DEBUG)
 
 #%% functions
+# Entrez
+def set_entrez(email, apikey):
+    Entrez.email = email
+    Entrez.api_key = apikey
 # handle fasta
 def fasta_name(fasta):
     return fasta.split('/')[-1].split('.')[0]
@@ -76,11 +81,11 @@ class Director:
         # taxonomy needs no merging so it is saved directly to out_dir
         self.taxonomist.out_dir = self.out_dir # dump tax table to out_dir
         self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
-        self.taxonomist.out_files = {} # clear out_files container so the generated file is not found by get_tmp_files
         
         print('Building output files...')
         self.merger.merge_from_fasta(seq_path, self.taxonomist.out_files['NCBI'])
         self.get_out_files()
+        self.taxonomist.out_files = {} # clear out_files container so the generated file is not found by get_tmp_files
         print('Done!')
     
     def direct(self, taxon, marker, databases, chunksize=500, max_attempts=3):

@@ -13,6 +13,7 @@ from Bio.Seq import Seq
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 from Bio.SeqRecord import SeqRecord
 
+import http
 import logging
 import numpy as np
 import pandas as pd
@@ -20,11 +21,6 @@ import pandas as pd
 #%% setup logger
 logger = logging.getLogger('Graboid.database.fetcher')
 #%% functions
-# Entrez
-def set_entrez(email, apikey):
-    Entrez.email = email
-    Entrez.api_key = apikey
-
 # accession list handling
 def acc_slicer(acc_list, chunksize):
     # slice the list of accessions into chunks
@@ -75,35 +71,44 @@ class NCBIFetcher:
         
         for chunk_n, chunk in enumerate(chunks):
             print(f'Downloading chunk {chunk_n + 1} of {n_chunks}')
-            attempt = 1
-            while attempt <= max_attempts:
-                seqs = []
+            seq_recs = []
+            for attempt in range(max_attempts):
+                # try to retrieve the sequence records up to max_attempt times per chunk
                 try:
                     # contact NCBI and attempt download
+                    logger.debug(f'Starting chunk download (size: {len(chunk)})')
                     seq_handle = Entrez.efetch(db = 'nucleotide', id = chunk, rettype = 'fasta', retmode = 'xml')
-                    seqs_recs = Entrez.read(seq_handle)
-                    
-                    seqs = []
-                    taxs = {'Accession':[], 'TaxID':[]}
-                    
-                    # generate seq records and acc:taxid series
-                    for acc, seq in zip(chunk, seqs_recs):
-                        seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
-                        taxs['Accession'].append(acc)
-                        taxs['TaxID'].append(seq['TSeq_taxid'])
-                        
-                    # save seq recods to fasta
-                    with open(self.out_seqs, 'a') as out_handle0:
-                        SeqIO.write(seqs, out_handle0, 'fasta')
-                    # save tax table to csv
-                    taxs = pd.DataFrame(taxs)
-                    taxs.to_csv(self.out_taxs, header = False, index = False, mode='a')
+                    seq_recs = Entrez.read(seq_handle)
+                    logger.debug(f'Done retrieving {len(seq_recs)} records')
                     break
-                except:
-                    self.logger.warning(f'Chunk {chunk_n} download interrupted at {len(seqs)} of {chunk_size}. {max_attempts - attempt} attempts remaining')
-                    attempt += 1
-                    failed += chunk
-        
+                except IOError:
+                    print(f'Chunk {chunk_n} download interrupted. {max_attempts - attempt} attempts remaining')
+                    continue
+                except http.client.IncompleteRead:
+                    print(f'Chunk {chunk_n} download interrupted. {max_attempts - attempt} attempts remaining')
+                    continue
+                except KeyboardInterrupt:
+                    print('Manually aborted')
+                    return
+            if len(seq_recs) != len(chunk):
+                failed += chunk
+                continue
+            seqs = []
+            taxs = {'Accession':[], 'TaxID':[]}
+            
+            # generate seq records and acc:taxid series
+            for acc, seq in zip(chunk, seq_recs):
+                seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
+                taxs['Accession'].append(acc)
+                taxs['TaxID'].append(seq['TSeq_taxid'])
+                
+            # save seq recods to fasta
+            with open(self.out_seqs, 'a') as out_handle0:
+                SeqIO.write(seqs, out_handle0, 'fasta')
+            # save tax table to csv
+            taxs = pd.DataFrame(taxs)
+            taxs.to_csv(self.out_taxs, header = False, index = False, mode='a')
+            
         return failed
 
 class BOLDFetcher:
@@ -130,7 +135,7 @@ class BOLDFetcher:
             SeqIO.write(records, out_handle, 'fasta')
         tax_subtab.to_csv(self.out_taxs)
         
-        return []
+        return [] # empty list returned for compatibility with NCBIFetcher's failed list
 
 fetch_dict = {'BOLD':BOLDFetcher,
               'NCBI':NCBIFetcher}

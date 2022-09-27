@@ -12,6 +12,7 @@ This script fetches the taxonomy data for the downloaded records
 from Bio import Entrez
 
 # from data_fetch.database_construction import bold_marker_vars
+import http
 import logging
 import numpy as np
 import pandas as pd
@@ -98,7 +99,7 @@ class TaxonomistNCBI(Taxer):
         
         # generates a warning if taxid_list is empty
         if len(taxid_list) == 0:
-            self.logger.ERROR(f'Summary file {self.in_file} is empty')
+            self.logger.error(f'Summary file {self.in_file} is empty')
             return
 
         self.taxid_list = taxid_list[1] # index are the accession codes
@@ -113,24 +114,37 @@ class TaxonomistNCBI(Taxer):
         # name tax_tab0 used for compatibility with method fill_blanks
         self.tax_tab0 = pd.DataFrame(index = self.uniq_taxs, columns = cols) # this will be used to store the taxonomic data and later distribute it to each record
     
-    def dl_tax_records(self, tax_list, chunksize=500):
+    def dl_tax_records(self, tax_list, chunksize=500, max_attemps=3):
         # attempts to download the taxonomic records in chunks of size chunksize
         chunks = tax_slicer(tax_list, chunksize)
         n_chunks = int(np.ceil(len(tax_list)/chunksize))
         failed = []
         for idx, chunk in enumerate(chunks):
             print(f'Retrieving taxonomy. Chunk {idx + 1} of {n_chunks}')
+            tax_records = []
+            for attempt in range(max_attemps):
+                try:
+                    tax_handle = Entrez.efetch(db = 'taxonomy', id = chunk, retmode = 'xml')
+                    tax_records = Entrez.read(tax_handle)
+                    break
+                except IOError:
+                    logger.debug('Interrupted taxing due to conection error')
+                    continue
+                except http.client.client.Incomplete:
+                    logger.debug('Interrupted taxing due to bad file')
+                    continue
+            if len(tax_records) != len(chunk):
+                failed += list(chunk)
+                continue
             try:
-                tax_handle = Entrez.efetch(db = 'taxonomy', id = chunk, retmode = 'xml')
-                tax_records = Entrez.read(tax_handle)
-                
                 self.update_guide(chunk, tax_records)
-            except:
-                failed += chunk
+            except KeyError:
+                failed += list(chunk)
+                continue
         
         self.failed = failed
         if len(failed) > 0:
-            self.logger.WARNING(f'Failed to download {len(failed)} taxIDs of {len(self.uniq_taxs)}')
+            self.logger.warning(f'Failed to download {len(failed)} taxIDs of {len(self.uniq_taxs)}')
     
     def retry_dl(self, max_attempts=3):
         # if some taxids couldn't be downloaded, rety up to max_attempts times
@@ -185,7 +199,7 @@ class TaxonomistBOLD(Taxer):
         bold_tab = pd.read_csv(self.taxid_file, index_col = 0)
 
         if len(bold_tab) == 0:
-            self.logger.ERROR(f'Summary file {self.in_file} is empty')
+            self.logger.error(f'Summary file {self.in_file} is empty')
             self.bold_tab = None
             return
         self.bold_tab = bold_tab
@@ -229,11 +243,11 @@ class Taxonomist:
         # taxid_files dict with {database:taxid_file}
         # check that summ_file container is not empty
         if len(taxid_files) == 0:
-            logger.ERROR('No valid taxid files detected')
+            logger.error('No valid taxid files detected')
             return
         
         for database, taxid_file in taxid_files.items():
             taxer = taxer_dict[database](taxid_file, self.ranks, self.out_dir)
             taxer.taxing(chunksize, max_attempts)
-            logger.INFO(f'Finished retrieving taxonomy data from {database} database. Saved to {taxer.tax_out}')
+            logger.info(f'Finished retrieving taxonomy data from {database} database. Saved to {taxer.tax_out}')
             self.out_files[database] = taxer.tax_out

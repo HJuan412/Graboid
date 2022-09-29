@@ -14,6 +14,7 @@ from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 import logging
 import numpy as np
 import pandas as pd
+import pickle
 
 #%% setup logger
 logger = logging.getLogger('Graboid.database.merger')
@@ -54,6 +55,20 @@ def flatten_taxtab(tax_tab, ranks=['phylum', 'class', 'order', 'family', 'genus'
     flattened_tab.set_index('SciName', inplace=True)
     return flattened_tab
 
+def dissect_guide(guide, current_rank, rank_n, rank_dict):
+    # generate a rank dict (assign an irdered index to each taxonomic rank in the retrieved taxonomy)
+    # update dict
+    rank_dict.update({current_rank:rank_n})
+    # get child ranks
+    sub_guide = guide.loc[guide['rank'] == current_rank]
+    child_taxa = set(sub_guide.taxID).intersection(set(guide.parent_taxID))
+    # stop condition, parent rank has no children
+    if len(child_taxa) == 0:
+        return
+    # update rank dict
+    child_rank = guide.loc[guide.parent_taxID.isin(child_taxa), 'rank'].iloc[0]
+    dissect_guide(guide, child_rank, rank_n+1, rank_dict)
+    
 #%% classes
 class Merger():
     def __init__(self, out_dir):
@@ -83,6 +98,8 @@ class Merger():
             self.acc_out = f'{self.out_dir}/{header}.acclist'
             self.tax_out = f'{self.out_dir}/{header}.tax'
             self.taxguide_out = f'{self.out_dir}/{header}.taxguide'
+            self.rank_dict_out = f'{self.out_dir}/{header}.ranks'
+            self.valid_rows_out = f'{self.out_dir}/{header}.rows'
             break
         
     def set_ranks(self, ranklist=['phylum', 'class', 'order', 'family', 'genus', 'species']):
@@ -118,7 +135,7 @@ class Merger():
     
     def merge_taxons(self):
         mtax = MergerTax(self.taxfiles, self.ranks)
-        mtax.merge_taxons(self.tax_out, self.taxguide_out)
+        mtax.merge_taxons(self.tax_out, self.taxguide_out, self.rank_dict_out, self.valid_rows_out)
     
     def merge(self, seqfiles, taxfiles):
         self.get_files(seqfiles, taxfiles)
@@ -207,12 +224,52 @@ class MergerTax():
         
         self.guide_tab = guide_tab
     
-    def merge_taxons(self, tax_out, taxguide_out):
-        self.unify_taxids()
-        merged_taxons = pd.concat(self.tax_tabs.values())
+    def build_rank_dict(self):
+        root = set(self.guide_tab.parent_taxID).difference(set(self.guide_tab.taxID))
+        root_rank = self.guide_tab.loc[self.guide_tab.parent_taxID.isin(root), 'rank'].iloc[0]
+        self.rank_dict = {}
         
+        dissect_guide(self.guide_tab, root_rank, 0, self.rank_dict)
+    
+    def get_valid_rows(self, tax_table):
+        # generate a dictionary containing the valid rows present for each rank in the retrieved taxonomies
+        # process tax_guide
+        # assumption (only species need this correction)
+        # chriterion, discard all species with 3 or more words, discard all species with a parent taxon outside the genus rank
+    
+        # locate all species with triple names
+        guide_spp = self.guide_tab.loc[self.guide_tab['rank'] == 'species'].reset_index()
+        species = [sp.split() for sp in guide_spp.SciName.tolist()]
+        triple_spp = guide_spp.loc[[idx for idx, sp in enumerate(species) if len(sp) > 2], 'taxID'].values
+        # locate 'orphaned' species
+        species_parents = guide_spp.parent_taxID.values
+        non_genus_parents = self.guide_tab.loc[(self.guide_tab.taxID.isin(species_parents)) & (self.guide_tab['rank'] != 'genus'), 'taxID'].values
+        orphan_spp = guide_spp.loc[guide_spp.parent_taxID.isin(non_genus_parents), 'taxID'].values
+    
+        invalid_spp = set(np.concatenate([triple_spp, orphan_spp]))
+        
+        tax_table.reset_index(inplace=True)
+    
+        valid_rows = {}
+    
+        for rank, rk_subtab in self.guide_tab.groupby('rank'):
+            rank_ids = set(rk_subtab.taxID)
+            rank_rows = tax_table.loc[tax_table[f'{rank}_id'].isin(rank_ids)].index.to_numpy()
+            valid_rows[rank] = rank_rows
+        valid_rows['species'] = tax_table.loc[~tax_table.species_id.isin(invalid_spp)].index.to_numpy()
+        self.valid_rows = valid_rows
+        
+    def merge_taxons(self, tax_out, taxguide_out, rank_dict_out, valid_rows_out):
+        self.unify_taxids()
+        self.build_rank_dict()
+        merged_taxons = pd.concat(self.tax_tabs.values())
+        self.get_valid_rows(merged_taxons)
         merged_taxons.to_csv(tax_out)
         logger.info(f'Unified taxonomies stored to {tax_out}')
         # drop duplicated records (if any)
         merged_taxons.loc[np.invert(merged_taxons.index.duplicated())]
         self.guide_tab.to_csv(taxguide_out)
+        with open(rank_dict_out, 'wb') as rank_dict_handle:
+            pickle.dump(self.rank_dict, rank_dict_handle)
+        with open(valid_rows_out, 'wb') as valid_rows_handle:
+            pickle.dump(self.valid_rows, valid_rows_handle)

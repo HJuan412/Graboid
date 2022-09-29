@@ -396,6 +396,8 @@ def main(mode, args):
         file_catalog['tax'] = db_director.tax_file
         file_catalog['guide'] = db_director.guide_file
         file_catalog['acclist'] = db_director.acc_file
+        file_catalog['ranks'] = db_director.rank_file
+        file_catalog['valid'] = db_director.valid_file
         with open(catalog_path, 'wb') as catalog_handle:
             pickle.dump(file_catalog, catalog_handle)
             

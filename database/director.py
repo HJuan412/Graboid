@@ -122,3 +122,5 @@ class Director:
         self.acc_file = self.merger.acc_out
         self.tax_file = self.merger.tax_out
         self.guide_file = self.merger.taxguide_out
+        self.rank_file = self.merger.rank_dict_out
+        self.valid_file = self.merger.valid_rows_out

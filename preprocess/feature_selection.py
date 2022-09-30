@@ -173,7 +173,7 @@ class Selector:
     def load_diff_tab(self, file):
         self.diff_tab = pd.read_csv(file, index_col = [0, 1])
     
-    def select_sites(self, start, end, nsites, rank):
+    def select_sites(self, nsites, rank, cols=None, start=None, end=None):
         # get the nsites more informative sites per taxon for the current rank
         # must run this AFTER generate diff_tab
         # should run this after select_taxons
@@ -183,7 +183,8 @@ class Selector:
         # get sites, first nsites columns in the order table
         sub_order = []
         for row in self.order_tab:
-            sub_order.append(row[np.logical_and(row >= start, row < end)])
+            # sub_order.append(row[np.logical_and(row >= start, row < end)])
+            sub_order.append(row[np.isin(row, cols)])
         sub_order = np.array(sub_order)
         order_subtab = sub_order[self.order_tax[:,0] == rk,:nsites]
         # adjust offset, discard sites outside the matrix bounds
@@ -191,22 +192,15 @@ class Selector:
         
         return selected_sites
     
-        # self.sites = selected_sites
-        # if self.seqs:
-        #     selected_matrix = self.matrix[self.seqs, selected_sites]
-        #     selected_tax = self.tax_tab.iloc[self.seqs]
-        #     return selected_matrix, selected_tax
-        
-        # selected_matrix = self.matrix[:, selected_sites]
-        # return selected_matrix
-    
-    def get_sites(self, n_range, start, end, rank):
+    def get_sites(self, n_range, rank, cols=None, start=None, end=None):
         # for a given range of sites, generate a dictionary containing the new sites selected at each n
         # used for exploring multiple n values in calibration and classification, (avoids repeating calculations)
         sites = {}
         total_sites = np.array([], dtype = np.int8)
         for n in n_range:
-            n_sites = self.select_sites(start, end, n, rank)
+            # TODO: test fix for site selection
+            # n_sites = self.select_sites(start, end, n, rank)
+            n_sites = self.select_sites(n, rank, cols)
             new_sites = n_sites[np.in1d(n_sites, total_sites, invert=True)]
             if len(new_sites) > 0:
                 sites[n] = new_sites

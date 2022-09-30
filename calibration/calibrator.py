@@ -340,7 +340,8 @@ class Calibrator:
                 # not enough sequences passed the filter, skip iteration
                 print(f'Window {start} - {end}. Not enoug sequences to perform calibration ({n_seqs}, min = {self.min_seqs}), skipping')
                 continue
-            n_sites = self.selector.get_sites(n_range, start, end, self.rank)
+            # n_sites = self.selector.get_sites(n_range, start, end, self.rank)
+            n_sites = self.selector.get_sites(n_range, self.rank, window.cols)
             y = window.eff_tax
             # distance container, 3d array, paired distance matrix for every value of n
             dist_mat = np.zeros((n_seqs, n_seqs, len(n_range)), dtype=np.float32)

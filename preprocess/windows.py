@@ -293,7 +293,7 @@ class Window:
         cols = filter_matrix(self.matrix[rows], col_thresh, axis = 0)
         
         self.rows = rows
-        self.cols = cols + start
+        self.cols = cols + self.start
         self.shape = (len(rows), len(cols))
         # self.window = window
         if len(rows) > 0:

@@ -73,7 +73,7 @@ def check_fasta(fasta_file):
             nseqs += 1
     return nseqs
 
-def build_blastdb(ref_seq, ref_name=None, clear=False):
+def build_blastdb(ref_seq, ref_dir='.', ref_name=None, clear=False):
     # build a blast database
     # ref_seq : fasta file containing the reference sequences
     # ref_dir : directory to where the generated db files will be stored
@@ -83,11 +83,13 @@ def build_blastdb(ref_seq, ref_name=None, clear=False):
     # check database directory
     if ref_name is None:
         ref_name = re.sub('.*/', '', re.sub('\..*', '', ref_seq))
-    db_out = f'{ref_name}/{ref_name}'
-    check, db_files = blast.check_db_dir(ref_name)
+    db_dir = f'{ref_dir}/{ref_name}'
+    db_out = f'{ref_dir}/{ref_name}/{ref_name}'
+    
+    check, db_files = blast.check_db_dir(db_out)
     if check and not clear:
         # base exists and clear is False
-        logger.info('A blast database of the name {ref_name} already. To overwrite it run this function again with clear set as True')
+        logger.info('A blast database of the name {ref_name} already exists in the specified route. To overwrite it run this function again with clear set as True')
         return db_out
 
     # clear previous db_files (if present)
@@ -101,9 +103,9 @@ def build_blastdb(ref_seq, ref_name=None, clear=False):
         return
     
     # build the blast database
-    os.mkdir(ref_name)
+    os.makedirs(db_dir, exist_ok=True)
     blast.makeblastdb(ref_seq, db_out)
-    logger.info(f'Generated blast reference databse at directory {ref_name}')
+    logger.info(f'Generated blast reference databse at directory {db_dir}')
     return db_out
     
 #%% classes
@@ -173,7 +175,7 @@ def main(fasta_file, out_name=None, evalue=0.005, threads=1, keep=False, out_dir
     # procure blast database
     if not ref_seq is None:
         db_dir = build_blastdb(ref_seq, ref_name)
-    elif  db_dir is None:
+    elif db_dir is None:
         print('Can\'t perform BLAST. Either provide a reference sequence file as --base_seq or a BLAST database as --db_dir')
         return
     

@@ -115,7 +115,6 @@ class Director:
         
         # attributes
         self.db_dir = None
-        self.blast_report = None
         self.mat_file = None
         self.acc_file = None
         self.dims = None

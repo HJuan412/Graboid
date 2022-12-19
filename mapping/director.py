@@ -11,8 +11,8 @@ Direct dataset_construction
 import argparse
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 import logging
-from mapping import blast
-from mapping import matrix
+import blast
+import matrix
 import os
 import re
 
@@ -51,11 +51,11 @@ parser.add_argument('-t', '--threads',
                     default=1,
                     help='Number of threads to be used in the BLAST alignment. Default: 1',
                     type=int)
-parser.add_argument('-od', '-out_dir',
+parser.add_argument('-od', '--out_dir',
                     default='',
                     help='Output directory for the generated files',
                     type=str)
-parser.add_argument('-wd', '-wrn_dir',
+parser.add_argument('-wd', '--wrn_dir',
                     default='',
                     help='Output directory for the generated warnings',
                     type=str)

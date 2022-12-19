@@ -205,7 +205,7 @@ if __name__ == '__main__':
                         evalue=args.evalue,
                         threads=args.threads,
                         out_dir=args.out_dir,
-                        warn_dir=args.warn_dir,
+                        warn_dir=args.wrn_dir,
                         ref_seq=args.ref_seq,
                         ref_name=args.ref_name,
                         db_dir=args.db_dir)

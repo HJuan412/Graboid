@@ -13,34 +13,21 @@ import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import re
 
 #%% set logger
 logger = logging.getLogger('Graboid.mapper.Matrix')
 
 #%% vars
-bases = 'nacgturykmswbdhv'
+bases = 'nacgtrykmswbdhv'
+r_bases = 'ntgcarykmswbdhv'
 tr_dict = {base:idx for idx, base in enumerate(bases)} | {base:idx for idx, base in enumerate(bases.upper())}
-tr_dict['-'] = 0
+tr_dict.update({'-':0, 'u':4, 'U':4})
 # compliment dict, used to translate revese complement sequences
-rc_dict = tr_dict.copy()
-rc_dict['a'] = 4
-rc_dict['A'] = 4
-rc_dict['c'] = 3
-rc_dict['C'] = 3
-rc_dict['g'] = 2
-rc_dict['G'] = 2
-rc_dict['t'] = 1
-rc_dict['T'] = 1
-rc_dict['u'] = 1
-rc_dict['U'] = 1
+rc_dict = {base:idx for idx, base in enumerate(r_bases)} | {base:idx for idx, base in enumerate(r_bases.upper())}
+rc_dict.update({'-':0, 'u':1, 'U':1})
 
 #%% functions
-def make_transdict():
-    translation_dict = {}
-    translation_dict['lower'] = {base:idx for idx, base in enumerate(bases)}
-    translation_dict['upper'] = {base:idx for idx, base in enumerate(bases.upper())}
-    return translation_dict
-
 # read blast file
 def read_blast(blast_file, evalue = 0.005):
     # read blast file, register match orientations, flip reversed matches, sort by qseqid and qstart, subtract 1 from qstart and sstart to adjust for python indexing
@@ -49,34 +36,28 @@ def read_blast(blast_file, evalue = 0.005):
                             sep = '\t',
                             header = None,
                             names = colnames)
-    # blast_tab.rename(columns = columns, inplace = True)
-    blast_tab = blast_tab.loc[blast_tab['evalue'] <= evalue]
-    smat = blast_tab[['sstart', 'send']].values
     
+    # check for empty report
+    if len(blast_tab) == 0:
+        logger.warning(f'Blast report {blast_file} is empty. Verify that the blast parameters are correct.')
+    # filter blast report for evalue
+    blast_tab = blast_tab.loc[blast_tab['evalue'] <= evalue]
+    if len(blast_tab) == 0:
+        logger.warning(f'No matches in the blast report {blast_file} passed the filter (evalue <= {evalue})')
+    # process match coordinates
+    subject_coords = blast_tab[['sstart', 'send']].values    
     # get orients (0: forward, 1:reverse)
-    orients = (smat[:,0] > smat[:,1]).reshape((-1,1)).astype(int)
+    orients = (subject_coords[:,0] > subject_coords[:,1]).reshape((-1,1)).astype(int)
     # flip inverted matches
-    smat = np.sort(smat, 1)
-    # adjust for python indexing
+    subject_coords = np.sort(subject_coords, 1)
+    # adjust for python indexing (shift 1 position to the left)
     blast_tab.qstart -= 1
-    smat[:,0] -= 1
+    subject_coords[:,0] -= 1
     # update values
-    blast_tab[['sstart', 'send']] = smat
+    blast_tab[['sstart', 'send']] = subject_coords
     blast_tab['orient'] = orients
     blast_tab.sort_values(['qseqid', 'qstart'], ignore_index=True, inplace=True)
     return blast_tab
-
-def make_guide(values):
-    # buils a guide to the position of the matches for each sequence in the blast report
-    # used to speed up matrix construction
-    # returns list of lists [acc, idx of first match, idx of last match]
-    accs, idxs0 = np.unique(values, return_index = True)
-    order = np.argsort(idxs0)
-    accs = accs[order]
-    idxs0 = idxs0[order]
-    idxs1 = np.append(idxs0[1:], len(values))
-    guide = [[acc, idx0, idx1] for acc, idx0, idx1 in zip(accs, idxs0, idxs1)]
-    return guide
 
 def get_mat_dims(blast_tab):
     # get total dimensions for the sequence matrix
@@ -99,17 +80,6 @@ def read_seqfile(seq_file):
             seq_dict[acc] = seq
             
     return seq_dict
-
-# DEPRECATED
-def get_seqs(seq_file, blast_tab):
-    # get matched sequences and convert to numerical values
-    accs = blast_tab.qseqid.unique()
-    seq_dict = read_seqfile(seq_file)
-    # filtered_seqs = {}
-    # for acc in accs:
-    #     filtered_seqs[acc] = np.array([tr_dict[base] for base in seq_dict[acc]], dtype = np.int8)
-    filtered_seqs = {seq_dict[acc] for acc in accs}
-    return filtered_seqs
 
 def get_numseq(seq, trans_dict):
     # turn sequence to numeric code
@@ -151,20 +121,17 @@ class MatBuilder:
         self.acc_file = None
         
     def generate_outnames(self, seq_file, out_name=None):
-        file_name = seq_file.split('/')[-1].split('.')[0]
-        if not out_name is None:
-            self.mat_file = f'{self.out_dir}/{out_name}.npz'
-            self.acc_file = f'{self.out_dir}/{out_name}.accs'
-        else:
-            self.mat_file = f'{self.out_dir}/{file_name}.npz'
-            self.acc_file = f'{self.out_dir}/{file_name}.accs'
+        if out_name is None:
+            # no name given, take the seq file's original name
+            out_name = re.sub('.*/', '', re.sub('\..*', '', seq_file))
+        self.mat_file = f'{self.out_dir}/{out_name}.npz'
+        self.acc_file = f'{self.out_dir}/{out_name}.accs'
         
     def build(self, blast_file, seq_file, out_name=None, evalue=0.005, keep=False):
         # load blast report
         print('Reading blast report...')
         blast_tab = read_blast(blast_file, evalue)
         if len(blast_tab) == 0:
-            logger.warning(f'No matches in the blast report {blast_file} passed the filter (evalue <= {evalue})')
             return
         
         # get dimensions
@@ -174,35 +141,40 @@ class MatBuilder:
         
         # get coordinates
         coord_mat = blast_tab[['qstart', 'qend', 'sstart', 'send', 'orient']].to_numpy()
-        # offset subject coordinates (substract the lower bound of the match coordinates)
+        # offset subject coordinates (substract the lower bound of the subject coordinates)
+        # columns 0 and 1 are the coordinates to extract from the query sequene
+        # columns 2 and 3 are their position on the matrix (corrected with the offset)
+        # column 4 indicates the sequence orientation
         coord_mat[:, [2,3]] -= offset
         
         # get filtered sequences
         print('Retrieving sequences...')
-        # sequences = get_seqs(seq_file, blast_tab)
         sequences = read_seqfile(seq_file)
         
         # build matrix
         print('Building matrix...')
+        acclist = []
         matrix = np.zeros((nrows, ncols), dtype=np.int8)
         for q_idx, (qry, qry_tab) in enumerate(blast_tab.groupby('qseqid')):
+            # get acc and indexes for each sequence
             seq = sequences[qry]
             coords = coord_mat[qry_tab.index]
             for match in coords:
-                # if orient (row 4) is 0, get original sequence, else get reversed
+                # if orient (row 4) is 0, get original sequence, else get reversed complemened
                 if match[4] == 0:
                     numseq = get_numseq(seq[match[0]:match[1]], tr_dict)
                 else:
                     numseq = get_numseq(seq[match[0]:match[1]][::-1], rc_dict)
                 matrix[q_idx, match[2]:match[3]] = numseq
-            self.acclist.append(qry)
+            acclist.append(qry)
+        self.acclist = acclist
         
         # generate out_files
         self.generate_outnames(seq_file, out_name)
         
         # store output
-        # np.save(self.mat_file, matrix, allow_pickle=False)
-        np.savez(self.mat_file, bounds=bounds, matrix=matrix) # save the matrix along with the bounds array
+        # save the matrix along with the bounds array
+        np.savez(self.mat_file, bounds=bounds, matrix=matrix)
         with open(self.acc_file, 'w') as list_handle:
             list_handle.write('\n'.join(self.acclist))
         logger.info(f'Stored matrix of dimensions {matrix.shape} in {self.mat_file}')
@@ -211,4 +183,4 @@ class MatBuilder:
         if keep:
             # use this to retrieve generating directly from this method
             return matrix, bounds, self.acclist
-        return None
+        return

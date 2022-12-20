@@ -86,6 +86,18 @@ def get_numseq(seq, trans_dict):
     numseq = np.array([trans_dict[base] for base in seq], dtype = np.int8)
     return numseq
 
+def load_map(map_path):
+    # load a map and a corresponding accession list
+    # returns accession list, alignment map, alignment bounds
+    map_file = map_path + '.npz'
+    acc_file = map_path + '.accs'
+    map_npz = np.load(map_file)
+    with open(acc_file, 'r') as acc_handle:
+        accs = acc_handle.read().splitlines()
+    
+    return accs, map_npz['matrix'], map_npz['bounds']
+        
+    
 #%%
 def plot_coverage_data(blast_file, evalue = 0.005, figsize=(12,7)):
     # TODO: save plot to file

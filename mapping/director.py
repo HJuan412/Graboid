@@ -25,6 +25,7 @@ parser = argparse.ArgumentParser(prog='Graboid MAPPING',
                                  usage='%(prog)s ARGS [-h]',
                                  description='Graboid MAPPING aligns the downloaded sequences to a specified reference sequence. Alignment is stored as a numeric matrix with an accession list')
 parser.add_argument('-f', '--fasta_file',
+                    nargs='+',
                     help='Fasta file with the sequences to map',
                     type=str)
 parser.add_argument('-r', '--ref_seq',
@@ -39,10 +40,10 @@ parser.add_argument('-db', '--db_dir',
                     default=None,
                     help='OPTIONAL. BLAST database, alternative to reference sequence',
                     type=str)
-parser.add_argument('-o', '--out_name',
-                    default=None,
-                    help='OPTIONAL. Name for the generated BLAST report and alignment matrix',
-                    type=str)
+# parser.add_argument('-o', '--out_name',
+#                     default=None,
+#                     help='OPTIONAL. Name for the generated BLAST report and alignment matrix. Disabled if multiple files are given',
+#                     type=str)
 parser.add_argument('-e', '--evalue',
                     default=0.005,
                     help='E-value threshold for the BLAST matches. Default: 0.005',
@@ -61,7 +62,7 @@ parser.add_argument('-wd', '--wrn_dir',
                     type=str)
 
 #%% aux functions
-def make_dirs(base_dir):
+def make_dirs(base_dir): # TODO: delete this?
     os.makedirs(f'{base_dir}/data', exist_ok=True)
     os.makedirs(f'{base_dir}/warnings', exist_ok=True)
 
@@ -141,6 +142,8 @@ class Director:
         # fasta file is the file to be mapped
         # out_name, optional file name for the generated matrix, otherwise generated automatically
         # evalue is the max evalue threshold for the blast report
+        # db_dir points to the blast database: should be <path to db files>/<db prefix>
+        # keep signals the director to conserve the generated map
         
         # check blast database
         check, db_files = blast.check_db_dir(db_dir)
@@ -164,6 +167,7 @@ class Director:
         self.mat_file = self.mapper.mat_file
         self.acc_file = self.mapper.acc_file
         print('Done!')
+        logger.info(f'Generated alignment map files: {self.mat_file} (alignment matrix) and {self.acc_file} (accession index)')
         if keep:
             self.matrix = map_data[0]
             self.bounds = map_data[1]
@@ -201,12 +205,13 @@ def main(fasta_file, out_name=None, evalue=0.005, threads=1, keep=False, out_dir
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    map_director = main(fasta_file=args.fasta_file,
-                        out_name=args.out_name,
-                        evalue=args.evalue,
-                        threads=args.threads,
-                        out_dir=args.out_dir,
-                        warn_dir=args.wrn_dir,
-                        ref_seq=args.ref_seq,
-                        ref_name=args.ref_name,
-                        db_dir=args.db_dir)
+    for fasta in args.fasta_file:
+        main(fasta_file=fasta,
+             # out_name=args.out_name,
+             evalue=args.evalue,
+             threads=args.threads,
+             out_dir=args.out_dir,
+             warn_dir=args.wrn_dir,
+             ref_seq=args.ref_seq,
+             ref_name=args.ref_name,
+             db_dir=args.db_dir)

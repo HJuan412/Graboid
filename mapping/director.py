@@ -171,10 +171,10 @@ class Director:
         return
 
 #%% main body
-def main(fasta_file, out_name=None, evalue=0.005, threads=1, keep=False, out_dir='', warn_dir='', ref_seq=None, ref_name=None, db_dir=None):
+def main(fasta_file, out_name=None, evalue=0.005, threads=1, keep=False, out_dir='', warn_dir='', ref_seq=None, ref_name=None, db_dir=None, ref_dir='.'):
     # procure blast database
     if not ref_seq is None:
-        db_dir = build_blastdb(ref_seq, ref_name)
+        db_dir = build_blastdb(ref_seq, ref_dir, ref_name)
     elif db_dir is None:
         print('Can\'t perform BLAST. Either provide a reference sequence file as --base_seq or a BLAST database as --db_dir')
         return

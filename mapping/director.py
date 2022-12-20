@@ -36,14 +36,10 @@ parser.add_argument('-rn', '--ref_name',
                     default=None,
                     help='OPTIONAL. Name for the generated BLAST database',
                     type=str)
-parser.add_argument('-db', '--db_dir',
+parser.add_argument('-gb', '--gb_dir',
                     default=None,
-                    help='OPTIONAL. BLAST database, alternative to reference sequence',
+                    help='Graboid working directory. Directory containing the generated files',
                     type=str)
-# parser.add_argument('-o', '--out_name',
-#                     default=None,
-#                     help='OPTIONAL. Name for the generated BLAST report and alignment matrix. Disabled if multiple files are given',
-#                     type=str)
 parser.add_argument('-e', '--evalue',
                     default=0.005,
                     help='E-value threshold for the BLAST matches. Default: 0.005',
@@ -52,14 +48,9 @@ parser.add_argument('-t', '--threads',
                     default=1,
                     help='Number of threads to be used in the BLAST alignment. Default: 1',
                     type=int)
-parser.add_argument('-od', '--out_dir',
-                    default='',
-                    help='Output directory for the generated files',
-                    type=str)
-parser.add_argument('-wd', '--wrn_dir',
-                    default='',
-                    help='Output directory for the generated warnings',
-                    type=str)
+parser.add_argument('-ow', '--overwrite',
+                    action='store_true',
+                    help='Overwrite existing files in case of collision')
 
 #%% aux functions
 def make_dirs(base_dir): # TODO: delete this?
@@ -88,10 +79,13 @@ def build_blastdb(ref_seq, ref_dir='.', ref_name=None, clear=False):
     db_out = f'{ref_dir}/{ref_name}/{ref_name}'
     
     check, db_files = blast.check_db_dir(db_out)
-    if check and not clear:
-        # base exists and clear is False
-        logger.info('A blast database of the name {ref_name} already exists in the specified route. To overwrite it run this function again with clear set as True')
-        return db_out
+    if check:
+        # base exists 
+        if clear:
+            logger.info(f'Overwriting database {ref_name} using file {ref_seq}')
+        else:
+            logger.info('A blast database of the name {ref_name} already exists in the specified route. To overwrite it run this function again with clear set as True')
+            return db_out
 
     # clear previous db_files (if present)
     for file in db_files:
@@ -100,13 +94,13 @@ def build_blastdb(ref_seq, ref_dir='.', ref_name=None, clear=False):
     # check sequences in ref_seq
     n_refseqs = check_fasta(ref_seq)
     if n_refseqs != 1:
-        logger.error(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
-        return
+        print(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
+        return None
     
     # build the blast database
     os.makedirs(db_dir, exist_ok=True)
     blast.makeblastdb(ref_seq, db_out)
-    logger.info(f'Generated blast reference databse at directory {db_dir}')
+    logger.info(f'Generated blast databse {ref_name} using {ref_seq} at directory {db_dir}')
     return db_out
     
 #%% classes
@@ -205,13 +199,26 @@ def main(fasta_file, out_name=None, evalue=0.005, threads=1, keep=False, out_dir
 
 if __name__ == '__main__':
     args = parser.parse_args()
+    # build needed directories (if needed)
+    if not os.path.isdir(args.gb_dir):
+        print(f'Specified graboid directory {args.gb_dir} does not exist. A new one will be created')
+    blastdb_dir = args.gb_dir + '/blast_dbs'
+    map_dir = args.gb_dir + '/alignments/queries'
+    warn_dir = args.gb_dir + '/warnings'
+    os.makedirs(blastdb_dir, exist_ok=True)
+    os.makedirs(map_dir, exist_ok=True)
+    os.makedirs(warn_dir, exist_ok=True)
+    
+    # locate or create the blast database
+    db_dir = build_blastdb(args.ref_seq, blastdb_dir, args.ref_name, args.overwrite)
+    if db_dir is None:
+        print('Failed to locate or create blast database. Aborting.')
+    
+    # execute main
     for fasta in args.fasta_file:
-        main(fasta_file=fasta,
-             # out_name=args.out_name,
-             evalue=args.evalue,
-             threads=args.threads,
-             out_dir=args.out_dir,
-             warn_dir=args.wrn_dir,
-             ref_seq=args.ref_seq,
-             ref_name=args.ref_name,
-             db_dir=args.db_dir)
+        main(fasta_file = fasta,
+             evalue = args.evalue,
+             threads = args.threads,
+             out_dir = map_dir,
+             warn_dir = warn_dir,
+             db_dir = db_dir)

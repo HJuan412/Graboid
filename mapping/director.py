@@ -213,12 +213,12 @@ if __name__ == '__main__':
     db_dir = build_blastdb(args.ref_seq, blastdb_dir, args.ref_name, args.overwrite)
     if db_dir is None:
         print('Failed to locate or create blast database. Aborting.')
-    
-    # execute main
-    for fasta in args.fasta_file:
-        main(fasta_file = fasta,
-             evalue = args.evalue,
-             threads = args.threads,
-             out_dir = map_dir,
-             warn_dir = warn_dir,
-             db_dir = db_dir)
+    else:
+        # execute main
+        for fasta in args.fasta_file:
+            main(fasta_file = fasta,
+                 evalue = args.evalue,
+                 threads = args.threads,
+                 out_dir = map_dir,
+                 warn_dir = warn_dir,
+                 db_dir = db_dir)

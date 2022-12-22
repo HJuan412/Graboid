@@ -64,7 +64,7 @@ def read_blast(blast_file, evalue = 0.005):
 def get_mat_dims(blast_tab):
     # get total dimensions for the sequence matrix
     nrows = len(blast_tab.qseqid.unique())
-    subject_coords = blast_tab[['sstart', 'send']].to_numpy()
+    subject_coords = blast_tab[['sstart', 'send']].to_numpy().astype(int)
     subject_coords.sort(axis=1)
     lower = subject_coords[:,0].min()
     upper = subject_coords[:,1].max()

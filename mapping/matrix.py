@@ -158,7 +158,7 @@ class MatBuilder:
         offset = lower # lower value already shifted 1 to the left by read_blast
         
         # get coordinates
-        coord_mat = blast_tab[['qstart', 'qend', 'sstart', 'send', 'orient']].to_numpy()
+        coord_mat = blast_tab[['qstart', 'qend', 'sstart', 'send', 'orient']].to_numpy().astype(int)
         # get coverage
         coverage = get_coverage(coord_mat[:, [2,3]], marker_len)
         # offset subject coordinates (substract the lower bound of the subject coordinates)

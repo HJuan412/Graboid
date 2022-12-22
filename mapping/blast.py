@@ -39,7 +39,7 @@ def blast(query, ref, out_file, threads=1):
         logger.warning(f'No matches found for file {query} on database {ref}')
         return
     ref_row = pd.Series(index=blast_tab.columns)
-    ref_row.at[['qseqid', 'length']] = ['Reference', ref_marker_len]
+    ref_row.at[['qseqid', 'length', 'evalue']] = ['Reference', ref_marker_len, 100] # evalue of 100 means this row is always filtered out
     pd.concat([blast_tab, ref_row]).to_csv(out_file, index=False)
 
 def makeblastdb(ref_file, db_prefix):

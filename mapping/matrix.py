@@ -31,19 +31,21 @@ rc_dict.update({'-':0, 'u':1, 'U':1})
 # read blast file
 def read_blast(blast_file, evalue = 0.005):
     # read blast file, register match orientations, flip reversed matches, sort by qseqid and qstart, subtract 1 from qstart and sstart to adjust for python indexing
-    colnames = 'qseqid pident length qstart qend sstart send evalue'.split(' ')
-    blast_tab = pd.read_csv(blast_file,
-                            sep = '\t',
-                            header = None,
-                            names = colnames)
+    # blast file preformatted (comma separated), contains column names and last row with qseqid = Reference, length = reference marker length
+    # returns processed blast table and used marker length
+    blast_tab = pd.read_csv(blast_file)
+    marker_len = 0
     
     # check for empty report
     if len(blast_tab) == 0:
         logger.warning(f'Blast report {blast_file} is empty. Verify that the blast parameters are correct.')
+    marker_len = blast_tab.iloc[-1].loc['length']
+    
     # filter blast report for evalue
     blast_tab = blast_tab.loc[blast_tab['evalue'] <= evalue]
     if len(blast_tab) == 0:
         logger.warning(f'No matches in the blast report {blast_file} passed the filter (evalue <= {evalue})')
+        
     # process match coordinates
     subject_coords = blast_tab[['sstart', 'send']].values    
     # get orients (0: forward, 1:reverse)
@@ -57,7 +59,7 @@ def read_blast(blast_file, evalue = 0.005):
     blast_tab[['sstart', 'send']] = subject_coords
     blast_tab['orient'] = orients
     blast_tab.sort_values(['qseqid', 'qstart'], ignore_index=True, inplace=True)
-    return blast_tab
+    return blast_tab, marker_len
 
 def get_mat_dims(blast_tab):
     # get total dimensions for the sequence matrix
@@ -97,7 +99,11 @@ def load_map(map_path):
     
     return accs, map_npz['matrix'], map_npz['bounds']
         
-    
+def get_coverage(coords, ref_len):
+    coverage = np.zeros(ref_len)
+    for coo in coords:
+        coverage[coo[0]:coo[1]] += 1
+    return coverage
 #%%
 def plot_coverage_data(blast_file, evalue = 0.005, figsize=(12,7)):
     # TODO: save plot to file
@@ -142,17 +148,19 @@ class MatBuilder:
     def build(self, blast_file, seq_file, out_name=None, evalue=0.005, keep=False):
         # load blast report
         print('Reading blast report...')
-        blast_tab = read_blast(blast_file, evalue)
+        blast_tab, marker_len = read_blast(blast_file, evalue)
         if len(blast_tab) == 0:
             return
         
-        # get dimensions
+        # get dimensions & coverage
         nrows, ncols, lower, upper = get_mat_dims(blast_tab)
         bounds = np.array([lower, upper])
         offset = lower # lower value already shifted 1 to the left by read_blast
         
         # get coordinates
         coord_mat = blast_tab[['qstart', 'qend', 'sstart', 'send', 'orient']].to_numpy()
+        # get coverage
+        coverage = get_coverage(coord_mat[:, 2,3], marker_len)
         # offset subject coordinates (substract the lower bound of the subject coordinates)
         # columns 0 and 1 are the coordinates to extract from the query sequene
         # columns 2 and 3 are their position on the matrix (corrected with the offset)
@@ -185,8 +193,8 @@ class MatBuilder:
         self.generate_outnames(seq_file, out_name)
         
         # store output
-        # save the matrix along with the bounds array
-        np.savez(self.mat_file, bounds=bounds, matrix=matrix)
+        # save the matrix along with the bounds and coverage array (coverage array done over the entire length of the marker reference)
+        np.savez(self.mat_file, bounds=bounds, matrix=matrix, coverage=coverage)
         with open(self.acc_file, 'w') as list_handle:
             list_handle.write('\n'.join(self.acclist))
         logger.info(f'Stored matrix of dimensions {matrix.shape} in {self.mat_file}')

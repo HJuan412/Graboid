@@ -32,15 +32,16 @@ def blast(query, ref, out_file, threads=1):
                         num_threads=threads)
     cline()
     # retrieve reference marker data
-    bdbcmd_cline = f'blastdbcmd -db {ref} -dbtype nucl -entry all -outfmt "%l"'.split()
-    ref_marker_len = int(re.sub('\\n', '', subprocess.run(bdbcmd_cline).stdout.decode()))
+    bdbcmd_cline = f'blastdbcmd -db {ref} -dbtype nucl -entry all -outfmt %l'.split()
+    print(bdbcmd_cline)
+    ref_marker_len = int(re.sub('\\n', '', subprocess.run(bdbcmd_cline, capture_output=True).stdout.decode()))
     blast_tab = pd.read_csv(out_file, sep='\t', header=None, names='qseqid pident length qstart qend sstart send evalue'.split())
     if len(blast_tab) == 0:
         logger.warning(f'No matches found for file {query} on database {ref}')
         return
     ref_row = pd.Series(index=blast_tab.columns)
-    ref_row.at[['qseqid', 'length', 'evalue']] = ['Reference', ref_marker_len, 100] # evalue of 100 means this row is always filtered out
-    pd.concat([blast_tab, ref_row]).to_csv(out_file, index=False)
+    ref_row.at['qseqid', 'length', 'evalue'] = ['Reference', ref_marker_len, 100] # evalue of 100 means this row is always filtered out
+    pd.concat([blast_tab, ref_row.to_frame().T]).to_csv(out_file, index=False)
 
 def makeblastdb(ref_file, db_prefix):
     # build the reference BLAST database

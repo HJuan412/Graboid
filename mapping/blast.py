@@ -33,7 +33,6 @@ def blast(query, ref, out_file, threads=1):
     cline()
     # retrieve reference marker data
     bdbcmd_cline = f'blastdbcmd -db {ref} -dbtype nucl -entry all -outfmt %l'.split()
-    print(bdbcmd_cline)
     ref_marker_len = int(re.sub('\\n', '', subprocess.run(bdbcmd_cline, capture_output=True).stdout.decode()))
     blast_tab = pd.read_csv(out_file, sep='\t', header=None, names='qseqid pident length qstart qend sstart send evalue'.split())
     if len(blast_tab) == 0:

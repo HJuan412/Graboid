@@ -38,8 +38,9 @@ def blast(query, ref, out_file, threads=1):
     if len(blast_tab) == 0:
         logger.warning(f'No matches found for file {query} on database {ref}')
         return
-    blast_tab.at['Reference', ['sstart', 'send']] = [0, ref_marker_len]
-    blast_tab.to_csv(out_file, index=False)
+    ref_row = pd.Series(index=blast_tab.columns)
+    ref_row.at[['qseqid', 'length']] = ['Reference', ref_marker_len]
+    pd.concat([blast_tab, ref_row]).to_csv(out_file, index=False)
 
 def makeblastdb(ref_file, db_prefix):
     # build the reference BLAST database

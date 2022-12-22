@@ -12,8 +12,9 @@ from Bio.Blast.Applications import NcbiblastnCommandline as blast_cline
 from Bio.Blast.Applications import NcbimakeblastdbCommandline as makeblast_cline
 from glob import glob
 import logging
-import os
+import pandas as pd
 import re
+import subprocess
 
 #%% set logger
 logger = logging.getLogger('Graboid.mapper.blast')
@@ -30,6 +31,15 @@ def blast(query, ref, out_file, threads=1):
                         ungapped=True,
                         num_threads=threads)
     cline()
+    # retrieve reference marker data
+    bdbcmd_cline = f'blastdbcmd -db {ref} -dbtype nucl -entry all -outfmt "%l"'.split()
+    ref_marker_len = int(re.sub('\\n', '', subprocess.run(bdbcmd_cline).stdout.decode()))
+    blast_tab = pd.read_csv(out_file, sep='\t', header=None, names='qseqid pident length qstart qend sstart send evalue'.split())
+    if len(blast_tab) == 0:
+        logger.warning(f'No matches found for file {query} on database {ref}')
+        return
+    blast_tab.at['Reference', ['sstart', 'send']] = [0, ref_marker_len]
+    blast_tab.to_csv(out_file, index=False)
 
 def makeblastdb(ref_file, db_prefix):
     # build the reference BLAST database

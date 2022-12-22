@@ -160,7 +160,7 @@ class MatBuilder:
         # get coordinates
         coord_mat = blast_tab[['qstart', 'qend', 'sstart', 'send', 'orient']].to_numpy()
         # get coverage
-        coverage = get_coverage(coord_mat[:, 2,3], marker_len)
+        coverage = get_coverage(coord_mat[:, [2,3]], marker_len)
         # offset subject coordinates (substract the lower bound of the subject coordinates)
         # columns 0 and 1 are the coordinates to extract from the query sequene
         # columns 2 and 3 are their position on the matrix (corrected with the offset)

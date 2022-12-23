@@ -11,8 +11,8 @@ Direct dataset_construction
 import argparse
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 import logging
-import blast
-import matrix
+from mapping import blast
+from mapping import matrix
 import os
 import re
 

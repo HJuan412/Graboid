@@ -82,10 +82,12 @@ class Director:
         return self.loader.bounds
     
     def set_ref_data(self, mat_file, acc_file, tax_file):
+        # TODO: change args to a single ref_dir that should contain the three files
         self.loader.set_files(mat_file, acc_file, tax_file)
         self.get_overlap()
     
     def set_taxguide(self, guide_file):
+        # TODO: merge this with set_ref_data
         self.taxguide = pd.read_csv(guide_file, index_col=0)
     
     def set_order(self, order_file):
@@ -475,3 +477,37 @@ class DirectorOLD:
             return final_report, sites_report
         final_report.to_csv(f'{self.out_dir}/{out_path}.csv')
         sites_report.to_csv(f'{self.out_dir}/{out_path}.sites')
+
+#%% main body
+def main(w_start=0, w_end=-1, k=1, n=0, cl_mode='knn', rank=None, out_file='', query_file='', query_name='', ref_dir='', dist_mat=None, out_dir='', tmp_dir='', warn_dir='', threads=1):
+    # main classification function: requires
+    # query data (map)
+    # reference data (map)
+    # k
+    # n
+    # weight method (knn, wknn, dwknn)
+    # dist matrix (id, k2p)
+    # out file
+    
+    classifier = Director(out_dir, tmp_dir, warn_dir)
+    # get reference data
+    try:
+        classifier.set_ref_data(ref_dir)
+        # TODO: this goes inside get_ref_data
+        # classifier.set_taxguide(guide_file)
+        # classifier.set_order(order_file)
+        # classifier.set_db(db_dir)
+        # TODO: method should return True if successful, False if not, use that instead of try, except
+    except KeyError:
+        print('No db directory found in')
+        return
+    # handle query data
+
+    classifier.set_query(query_file, query_name, threads)
+    classifier.set_dist_mat(dist_mat)
+    classifier.classify(w_start, w_end, k, n, cl_mode, rank, out_file)
+    
+    return
+
+if __name__ == '__main__':
+    pass

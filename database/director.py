@@ -10,6 +10,7 @@ Director for database creation and updating
 #%% libraries
 import logging
 import os
+import re
 import shutil
 
 from Bio import Entrez
@@ -18,6 +19,8 @@ from database import lister as lstr
 from database import fetcher as ftch
 from database import taxonomist as txnm
 from database import merger as mrgr
+from mapping import director as mp
+from preprocess import feature_selection as fsele
 
 #%% set logger
 logger = logging.getLogger('Graboid.database')
@@ -28,9 +31,6 @@ logger.setLevel(logging.DEBUG)
 def set_entrez(email, apikey):
     Entrez.email = email
     Entrez.api_key = apikey
-# handle fasta
-def fasta_name(fasta):
-    return fasta.split('/')[-1].split('.')[0]
 
 def move_file(file, dest, mv=False):
     if mv:
@@ -38,7 +38,7 @@ def move_file(file, dest, mv=False):
     else:
         shutil.copy(file, dest)
 
-#%% Main
+#%%
 class Director:
     def __init__(self, out_dir, tmp_dir, warn_dir):
         self.out_dir = out_dir
@@ -51,9 +51,6 @@ class Director:
         self.fetcher = ftch.Fetcher(tmp_dir)
         self.taxonomist = txnm.Taxonomist(tmp_dir)
         self.merger = mrgr.Merger(out_dir)
-        
-        # get outfiles
-        self.get_out_files()
     
     def clear_tmp(self):
         tmp_files = self.get_tmp_files()
@@ -61,13 +58,18 @@ class Director:
             os.remove(file)
     
     def set_ranks(self, ranks=['phylum', 'class', 'order', 'family', 'genus', 'species']):
+        # set taxonomic ranks to retrieve for the training data.
+        # propagate to taxonomist and merger
         fmt_ranks = [rk.lower() for rk in ranks]
         logger.INFO(f'Taxonomic ranks set as {" ".join(fmt_ranks)}')
         self.taxonomist.set_ranks(fmt_ranks)
         self.merger.set_ranks(fmt_ranks)
 
-    def direct_fasta(self, fasta_file, chunksize=500, max_attempts=3, mv = False):
-        seq_path = f'{self.out_dir}/{fasta_name(fasta_file)}.fasta'
+    def direct_fasta(self, fasta_file, chunksize=500, max_attempts=3, mv=False):
+        # direct database construction from a prebuilt fasta file
+        # sequences should have a valid genbank accession
+        fasta_name = re.sub('.*/', '', re.sub('\..*', '', fasta_file))
+        seq_path = f'{self.out_dir}/{fasta_name}.fasta'
         if mv:
             shutil.move(fasta_file, seq_path)
         else:
@@ -89,6 +91,7 @@ class Director:
         print('Done!')
     
     def direct(self, taxon, marker, databases, chunksize=500, max_attempts=3):
+        # build database from zero, needs a valid taxon (ideally at a high level such as phylum or class) and marker gene
         print('Surveying databases...')
         for db in databases:
             self.surveyor.survey(taxon, marker, db, max_attempts)
@@ -117,10 +120,83 @@ class Director:
             tmp_files.append(file)
         return tmp_files
     
-    def get_out_files(self):
-        self.seq_file = self.merger.seq_out
-        self.acc_file = self.merger.acc_out
-        self.tax_file = self.merger.tax_out
-        self.guide_file = self.merger.taxguide_out
-        self.rank_file = self.merger.rank_dict_out
-        self.valid_file = self.merger.valid_rows_out
+    @property
+    def seq_file(self):
+        return self.merger.seq_out
+    @property
+    def acc_file(self):
+        return self.merger.acc_out
+    @property
+    def tax_file(self):
+        return self.merger.tax_out
+    @property
+    def guide_file(self):
+        return self.merger.taxguide_out
+    @property
+    def rank_file(self):
+        return self.merger.rank_dict_out
+    @property
+    def valid_file(self):
+        return self.merger.valid_rows_out
+
+#%% main body
+def main(out_dir, tmp_dir, warn_dir, email, api_key, ranks=None, bold=False, taxon=None, marker=None, fasta=None, chunksize=500, max_attempts=3, mv=False, keep_tmp=False, evalue=0.005, threads=1, keep=False):
+    # fetch fasta files, align to reference, build map, quantify information
+    # store everything to an EMPTY directory
+    if len(os.listdir(out_dir)) > 0:
+        print(f'Error: Designated output directory {out_dir} is not empty')
+        return
+    os.makedirs(out_dir + '/' + tmp_dir)
+    os.makedirs(out_dir + '/' + warn_dir)
+    
+    # fetch sequences
+    db_director = Director(out_dir, tmp_dir, warn_dir)
+    try:
+        set_entrez(email, api_key)
+    except AttributeError:
+        print('Missing email adress and/or API key')
+    # user specified ranks to use
+    if not ranks is None:
+        db_director.set_ranks(ranks)
+    # set databases
+    databases = ['NCBI']
+    if bold:
+        databases.append('BOLD')
+    
+    if not fasta is None:
+        # build db using fasta file (overrides taxon, mark)
+        db_director.direct_fasta(fasta,
+                                 chunksize,
+                                 max_attempts,
+                                 mv)
+    elif not (taxon is None or marker is None):
+        #build db using tax & mark
+        db_director.direct(taxon,
+                           marker,
+                           databases,
+                           chunksize,
+                           max_attempts)
+    else:
+        print('No search parameters provided. Either set a path to a fasta file in the --fasta argument or a taxon and a marker in the --taxon and --marker arguments')
+        return
+    
+    # clear temporal files
+    if not keep_tmp:
+        db_director.clear_tmp()
+    
+    # build map
+    map_director = mp.Director(out_dir, warn_dir)
+    map_director.direct(fasta_file=db_director.seq_file,
+                        db_dir=out_dir,
+                        evalue=evalue,
+                        threads=threads,
+                        keep=keep)
+    
+    # quantify information
+    selector = fsele.Selector(out_dir)
+    selector.set_matrix(map_director.matrix, map_director.bounds, db_director.tax_file)
+    selector.build_tabs()
+    selector.save_order_mat()
+
+if __name__ == '__main__':
+    pass

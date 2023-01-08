@@ -8,6 +8,7 @@ Director for database creation and updating
 """
 
 #%% libraries
+import argparse
 import logging
 import os
 import re
@@ -139,15 +140,18 @@ class Director:
     def valid_file(self):
         return self.merger.valid_rows_out
 
-#%% main body
-def main(out_dir, tmp_dir, warn_dir, email, api_key, ranks=None, bold=False, taxon=None, marker=None, fasta=None, chunksize=500, max_attempts=3, mv=False, keep_tmp=False, evalue=0.005, threads=1, keep=False):
+#%% main function
+def main(out_dir, email, api_key, ref_seq, ranks=None, bold=False, taxon=None, marker=None, fasta=None, chunksize=500, max_attempts=3, mv=False, evalue=0.005, threads=1, keep=False):
     # fetch fasta files, align to reference, build map, quantify information
     # store everything to an EMPTY directory
     if len(os.listdir(out_dir)) > 0:
         print(f'Error: Designated output directory {out_dir} is not empty')
         return
-    os.makedirs(out_dir + '/' + tmp_dir)
-    os.makedirs(out_dir + '/' + warn_dir)
+    tmp_dir = out_dir + '/tmp'
+    warn_dir = out_dir + '/warning'
+    ref_dir = out_dir + '/ref'
+    os.makedirs(tmp_dir)
+    os.makedirs(warn_dir)
     
     # fetch sequences
     db_director = Director(out_dir, tmp_dir, warn_dir)
@@ -181,16 +185,20 @@ def main(out_dir, tmp_dir, warn_dir, email, api_key, ranks=None, bold=False, tax
         return
     
     # clear temporal files
-    if not keep_tmp:
+    if not keep:
         db_director.clear_tmp()
     
     # build map
+    mp.build_blastdb(ref_seq = ref_seq,
+                     ref_dir = out_dir,
+                     ref_name = 'ref',
+                     clear = True)
     map_director = mp.Director(out_dir, warn_dir)
-    map_director.direct(fasta_file=db_director.seq_file,
-                        db_dir=out_dir,
-                        evalue=evalue,
-                        threads=threads,
-                        keep=keep)
+    map_director.direct(fasta_file = db_director.seq_file,
+                        db_dir = ref_dir,
+                        evalue = evalue,
+                        threads = threads,
+                        keep = keep)
     
     # quantify information
     selector = fsele.Selector(out_dir)
@@ -198,5 +206,81 @@ def main(out_dir, tmp_dir, warn_dir, email, api_key, ranks=None, bold=False, tax
     selector.build_tabs()
     selector.save_order_mat()
 
+#%% main execution
+parser = argparse.ArgumentParser(prog='Graboid DATABASE',
+                                 usage='%(prog)s MODE_ARGS [-h]',
+                                 description='Graboid DATABASE downloads records from the specified taxon/marker pair from the NCBI and BOLD databases')
+parser.add_argument('-o', '--out_dir',
+                    help='Output directory for the generated database files',
+                    type=str)
+parser.add_argument('-T', '--taxon',
+                    help='Taxon to search for (use this in place of --fasta)',
+                    type=str)
+parser.add_argument('-M', '--marker',
+                    help='Marker sequence to search for (use this in place of --fasta)',
+                    type=str)
+parser.add_argument('-F', '--fasta',
+                    help='Pre-constructed fasta file (use this in place of --taxon and --marker)',
+                    type=str)
+parser.add_argument('--bold',
+                    help='Include the BOLD database in the search',
+                    action='store_true')
+parser.add_argument('-r', '--ranks',
+                    help='Set taxonomic ranks to include in the taxonomy table. Default: Phylum Class Order Family Genus Species',
+                    nargs='*')
+parser.add_argument('-c', '--chunksize',
+                    default=500,
+                    help='Number of records to download per pass. Default: 500',
+                    type=int)
+parser.add_argument('-m', '--max_attempts',
+                    default=3,
+                    help='Max number of attempts to download a chunk of records. Default: 3',
+                    type=int)
+parser.add_argument('--mv',
+                    help='If a fasta file was provided, move it to the output directory',
+                    action='store_true')
+parser.add_argument('--keep',
+                    help='Keep temporal files',
+                    action='store_true')
+parser.add_argument('--email',
+                    help='Provide an email adress and an API key in order to use the NCBI Entrez utilities',
+                    type=str)
+parser.add_argument('--api_key',
+                    help='API key associated to the provided email adress',
+                    type=str)
+parser.add_argument('-r', '--ref_seq',
+                    default=None,
+                    help='Marker sequence to be used as base of the alignment',
+                    type=str)
+parser.add_argument('-e', '--evalue',
+                    default=0.005,
+                    help='E-value threshold for the BLAST matches. Default: 0.005',
+                    type=float)
+parser.add_argument('-t', '--threads',
+                    default=1,
+                    help='Number of threads to be used in the BLAST alignment. Default: 1',
+                    type=int)
+
 if __name__ == '__main__':
+    args = parser.parse_args()
+    # check sequences in ref_seq
+    n_refseqs = mp.check_fasta(args.ref_seq)
+    if n_refseqs != 1:
+        print(f'Reference file must contain ONE sequence. File {args.ref_seq} contains {n_refseqs}')
+        pass
+    main(out_dir = args.out_dir,
+         email = args.email,
+         api_key = args.api_key,
+         ranks = args.rank,
+         bold = args.bold,
+         taxon = args.taxon,
+         marker = args.marker,
+         fasta = args.fasta,
+         chunksize = args.chunksize,
+         max_attempts = args.max_attempts,
+         mv = args.mv,
+         ref_seq = args.ref_seq,
+         evalue = args.evalue,
+         threads = args.threads,
+         keep = args.keep)
     pass

@@ -87,7 +87,6 @@ class Director:
         
         print('Building output files...')
         self.merger.merge_from_fasta(seq_path, self.taxonomist.out_files['NCBI'])
-        self.get_out_files()
         self.taxonomist.out_files = {} # clear out_files container so the generated file is not found by get_tmp_files
         print('Done!')
     
@@ -105,7 +104,6 @@ class Director:
         self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
         print('Merging sequences...')
         self.merger.merge(self.fetcher.seq_files, self.taxonomist.out_files)
-        self.get_out_files()
         print('Done!')
     
     def get_tmp_files(self):

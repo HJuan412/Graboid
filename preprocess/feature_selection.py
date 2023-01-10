@@ -127,8 +127,8 @@ def get_plateaus(coverage, dropoff=0.05, min_width=10, min_height=0.1):
     valid_plt_ends = plt_ends[np.argwhere(plt_widths >= min_width).flatten()]
     
     # store valid plateaus
-    for plt in valid_plt_ends:
-        plateau = cov_idxs[:plt]
+    for plat in valid_plt_ends:
+        plateau = cov_idxs[:plat]
         plt_coverage = min(coverage[plateau])
         plateaus.append([plateau, plt_coverage])
     return plateaus

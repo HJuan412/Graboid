@@ -9,7 +9,9 @@ Director for the classification of sequences of unknown taxonomic origin
 #%%
 from classification import classification
 from classification import cost_matrix
+from glob import glob
 import logging
+from mapping import blast
 from mapping import director as mpdir
 from preprocess import feature_selection as fsele
 from preprocess import windows
@@ -80,20 +82,58 @@ class Director:
     def ref_bounds(self):
         return self.loader.bounds
     
-    def set_ref_data(self, mat_file, acc_file, tax_file):
-        # TODO: change args to a single ref_dir that should contain the three files
-        self.loader.set_files(mat_file, acc_file, tax_file)
-        self.get_overlap()
+    def set_train_data(self, data_dir):
+        # locate the training files (matrix, accession list, taxonomy table, information scores) needed for classification
+        mat_file = glob(data_dir + '/*.mat')[0] # TODO: change outname suffix from npz to mat in mapper
+        tax_file = glob(data_dir + '/*.tax')[0]
+        guide_file = glob(data_dir + '/*.taxguide')[0]
+        acc_file = glob(data_dir + '/*.accs')[0]
+        order_file = data_dir + '/order.npz'
+        diff_file = data_dir + 'diff.csv'
+        db_dir = data_dir + '/ref'
+        
+        # set the loader with the learning data
+        if not self.loader.set_files(mat_file, acc_file, tax_file):
+            return False
+        # load the taxguide
+        try:
+            self.taxguide = pd.read_csv(guide_file, index_col=0)
+        except FileNotFoundError:
+            print(f'Error: No valid ".taxguide" file found in {data_dir} directory')
+            return False
+        # load information files
+        try:
+            self.selector.load_order_mat(order_file)
+        except FileNotFoundError:
+            print(f'Error: Order file "order.npz" not found in {data_dir} directory')
+            return False
+        try:
+            self.selector.load_diff_tab(diff_file)
+        except FileNotFoundError:
+            print(f'Error: Difference file "diff.npz" not found in {data_dir} directory')
+            return False
+        
+        # establish db_dir as the blast database (must contain 6 *.n* files)
+        check, db_files = blast.check_db_dir(db_dir)
+        n_files = len(db_files)
+        if not check:
+            print(f'Error: Found {n_files} files in {db_dir}. Must contain 6')
+            return
+        self.db_dir = db_dir
     
-    def set_taxguide(self, guide_file):
-        # TODO: merge this with set_ref_data
-        self.taxguide = pd.read_csv(guide_file, index_col=0)
+    # TODO: remove these methods after testing set_train_data
+    # def set_ref_data(self, mat_file, acc_file, tax_file):
+    #     self.loader.set_files(mat_file, acc_file, tax_file)
+    #     self.get_overlap()
     
-    def set_order(self, order_file):
-        self.selector.load_order_mat(order_file)
+    # def set_taxguide(self, guide_file):
+    #     self.taxguide = pd.read_csv(guide_file, index_col=0)
     
-    def set_db(self, db_dir):
-        self.mapper.set_blastdb(db_dir)
+    # def set_order(self, order_file):
+    #     self.selector.load_order_mat(order_file)
+    
+    # def set_db(self, db_dir):
+    #     self.mapper.set_blastdb(db_dir)
     
     def set_dist_mat(self, mat_code):
         matrix = cost_matrix.get_matrix(mat_code)
@@ -207,11 +247,7 @@ def main(w_start=0, w_end=-1, k=1, n=0, cl_mode='knn', rank=None, out_file='', q
     classifier = Director(out_dir, tmp_dir, warn_dir)
     # get reference data
     try:
-        classifier.set_ref_data(ref_dir)
-        # TODO: this goes inside get_ref_data
-        # classifier.set_taxguide(guide_file)
-        # classifier.set_order(order_file)
-        # classifier.set_db(db_dir)
+        classifier.set_train_data(ref_dir)
         # TODO: method should return True if successful, False if not, use that instead of try, except
     except KeyError:
         print('No db directory found in')

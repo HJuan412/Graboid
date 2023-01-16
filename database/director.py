@@ -28,6 +28,14 @@ from preprocess import feature_selection as fsele
 logger = logging.getLogger('Graboid.database')
 logger.setLevel(logging.DEBUG)
 
+db_logger = logging.getLogger('Database_summary')
+db_logger.setLevel(logging.INFO)
+formatter = logging.Formatter('%(message)s')
+db_logger.setFormatter(formatter)
+sh = logging.StreamHandler()
+sh.setLevel(logging.INFO)
+db_logger.addHandler(sh)
+
 #%% functions
 # Entrez
 def set_entrez(email, apikey):
@@ -130,6 +138,9 @@ class Director:
     @property
     def valid_file(self):
         return self.merger.valid_rows_out
+    @property
+    def nseqs(self):
+        return self.merger.nseqs
 
 #%% main function
 def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold=True, cp_fasta=False, chunksize=500, max_attempts=3, evalue=0.005, threads=1, keep=False, clear=False):
@@ -153,6 +164,11 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     #     keep : keep the temporal files
     #     clear : clear the db_name directory (if it exists)
     
+    # check sequences in ref_seq
+    n_refseqs = mp.check_fasta(ref_seq)
+    if n_refseqs != 1:
+        print(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
+        return
     # prepare output directories
     # check db_name (if it exists, check clear (if true, overwrite, else interrupt))
     db_dir = DATA.DATAPATH + '/' + db_name
@@ -167,9 +183,16 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     tmp_dir = db_dir + '/tmp'
     warn_dir = db_dir + '/warning'
     ref_dir = db_dir + '/ref'
+    ref_file = ref_dir + '/ref.fasta'
     os.makedirs(tmp_dir)
     os.makedirs(warn_dir)
     os.makedirs(ref_dir)
+    shutil.copyfile(ref_seq, ref_file)
+    
+    # add db_logger handler
+    fh = logging.FileHandler(db_dir + '/summary')
+    fh.setLevel(logging.INFO)
+    db_logger.addHandler(fh)
     
     # get sequence data (taxon & marker or fasta)
     # setup director
@@ -201,7 +224,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
         db_director.clear_tmp()
         
     # build map
-    mp.build_blastdb(ref_seq = ref_seq,
+    mp.build_blastdb(ref_seq = ref_file,
                      ref_dir = db_dir,
                      ref_name = 'ref',
                      clear = True)
@@ -211,12 +234,28 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
                         evalue = evalue,
                         threads = threads,
                         keep = keep)
+    
     # quantify information
     selector = fsele.Selector(db_dir)
     selector.set_matrix(map_director.matrix, map_director.bounds, db_director.tax_file)
     selector.build_tabs()
     selector.save_order_mat()
+    
     # write summaries
+    # Database summary
+    print('Finished building database!')
+    db_logger.info(f'Database name: {db_name}')
+    db_logger.info(f'Database location: {db_dir}')
+    db_logger.info(f'Reference sequence (length): {ref_seq}(len)')
+    db_logger.info(f'N sequences: {db_director.nseqs}')
+    db_logger.info('Taxa:')
+    db_logger.info(f'\tBase taxon (lvl): ')
+    for tax in taxa:
+        db_logger.info(f'Rank (N taxa): ')
+    db_logger.info('Windows:')
+    for win in windows:
+        db_logger.info(f'\tCoordinates (length): ')
+        db_logger.info(f'\tAverage coverage (std):')
 
 #%% main execution
 parser = argparse.ArgumentParser(prog='Graboid DATABASE',
@@ -295,4 +334,3 @@ if __name__ == '__main__':
          evalue = args.evalue,
          threads = args.threads,
          keep = args.keep)
-    pass

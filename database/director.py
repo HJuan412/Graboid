@@ -15,6 +15,7 @@ import re
 import shutil
 
 from Bio import Entrez
+from DATA import DATA
 from database import surveyor as surv
 from database import lister as lstr
 from database import fetcher as ftch
@@ -32,12 +33,6 @@ logger.setLevel(logging.DEBUG)
 def set_entrez(email, apikey):
     Entrez.email = email
     Entrez.api_key = apikey
-
-def move_file(file, dest, mv=False):
-    if mv:
-        shutil.move(file, dest)
-    else:
-        shutil.copy(file, dest)
 
 #%%
 class Director:
@@ -66,14 +61,12 @@ class Director:
         self.taxonomist.set_ranks(fmt_ranks)
         self.merger.set_ranks(fmt_ranks)
 
-    def direct_fasta(self, fasta_file, chunksize=500, max_attempts=3, mv=False):
+    def direct_fasta(self, fasta_file, chunksize=500, max_attempts=3, cp_fasta=False):
         # direct database construction from a prebuilt fasta file
         # sequences should have a valid genbank accession
         fasta_name = re.sub('.*/', '', re.sub('\..*', '', fasta_file))
         seq_path = f'{self.out_dir}/{fasta_name}.fasta'
-        if mv:
-            shutil.move(fasta_file, seq_path)
-        else:
+        if cp_fasta:
             shutil.copy(fasta_file, seq_path)
         logger.info(f'Moved fasta file {fasta_file} to location {self.out_dir}')
         # generate taxtmp file
@@ -139,38 +132,60 @@ class Director:
         return self.merger.valid_rows_out
 
 #%% main function
-def main(out_dir, email, api_key, ref_seq, ranks=None, bold=False, taxon=None, marker=None, fasta=None, chunksize=500, max_attempts=3, mv=False, evalue=0.005, threads=1, keep=False):
-    # fetch fasta files, align to reference, build map, quantify information
-    # store everything to an EMPTY directory
-    if len(os.listdir(out_dir)) > 0:
-        print(f'Error: Designated output directory {out_dir} is not empty')
-        return
-    tmp_dir = out_dir + '/tmp'
-    warn_dir = out_dir + '/warning'
-    ref_dir = out_dir + '/ref'
+def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold=True, cp_fasta=False, chunksize=500, max_attempts=3, evalue=0.005, threads=1, keep=False, clear=False):
+    # Arguments:
+    # required:
+    #     db_name : name for the generated database
+    #     ref_seq : reference sequence to build the alignment upon
+    #     taxon & marker or fasta : search criteria or sequence file
+    # optional:
+    #   # data
+    #     ranks : taxonomic ranks to be used. Default: Phylum, Class, Order, Family, Genus, Species
+    #     bold : Search BOLD database. Valid when fasta = None
+    #     cp_fasta : Copy fasta file to tmp_dir. Valid when fasta != None
+    #   # ncbi
+    #     chunksize : Number of sequences to retrieve each pass
+    #     max_attempts : Number of retries for failed passes
+    #   # mapping
+    #     evalue : evalue threshold when building the alignment
+    #     threads : threads to use when building the alignment
+    #   # cleanup
+    #     keep : keep the temporal files
+    #     clear : clear the db_name directory (if it exists)
+    
+    # prepare output directories
+    # check db_name (if it exists, check clear (if true, overwrite, else interrupt))
+    db_dir = DATA.DATAPATH + '/' + db_name
+    if db_name in DATA.DBASES:
+        print(f'A database with the name {db_name} already exists...')
+        if not clear:
+            print('Choose a diferent name or set "clear" as True')
+            return
+        print(f'Removing existing database: {db_name}...')
+        os.rmdir(db_dir)
+    # create directories
+    tmp_dir = db_dir + '/tmp'
+    warn_dir = db_dir + '/warning'
+    ref_dir = db_dir + '/ref'
     os.makedirs(tmp_dir)
     os.makedirs(warn_dir)
+    os.makedirs(ref_dir)
     
-    # fetch sequences
-    db_director = Director(out_dir, tmp_dir, warn_dir)
-    try:
-        set_entrez(email, api_key)
-    except AttributeError:
-        print('Missing email adress and/or API key')
+    # get sequence data (taxon & marker or fasta)
+    # setup director
+    db_director = Director(db_dir, tmp_dir, warn_dir)
     # user specified ranks to use
     if not ranks is None:
         db_director.set_ranks(ranks)
     # set databases
-    databases = ['NCBI']
-    if bold:
-        databases.append('BOLD')
-    
+    databases = ['NCBI', 'BOLD'] if bold else ['NCBI']
+    # retrieve sequences + taxonomies
     if not fasta is None:
         # build db using fasta file (overrides taxon, mark)
         db_director.direct_fasta(fasta,
                                  chunksize,
                                  max_attempts,
-                                 mv)
+                                 cp_fasta)
     elif not (taxon is None or marker is None):
         #build db using tax & mark
         db_director.direct(taxon,
@@ -181,28 +196,27 @@ def main(out_dir, email, api_key, ref_seq, ranks=None, bold=False, taxon=None, m
     else:
         print('No search parameters provided. Either set a path to a fasta file in the --fasta argument or a taxon and a marker in the --taxon and --marker arguments')
         return
-    
     # clear temporal files
     if not keep:
         db_director.clear_tmp()
-    
+        
     # build map
     mp.build_blastdb(ref_seq = ref_seq,
-                     ref_dir = out_dir,
+                     ref_dir = db_dir,
                      ref_name = 'ref',
                      clear = True)
-    map_director = mp.Director(out_dir, warn_dir)
+    map_director = mp.Director(db_dir, warn_dir)
     map_director.direct(fasta_file = db_director.seq_file,
                         db_dir = ref_dir,
                         evalue = evalue,
                         threads = threads,
                         keep = keep)
-    
     # quantify information
-    selector = fsele.Selector(out_dir)
+    selector = fsele.Selector(db_dir)
     selector.set_matrix(map_director.matrix, map_director.bounds, db_director.tax_file)
     selector.build_tabs()
     selector.save_order_mat()
+    # write summaries
 
 #%% main execution
 parser = argparse.ArgumentParser(prog='Graboid DATABASE',

@@ -78,11 +78,12 @@ class Merger():
         self.tax_out = None
         self.taxguide_out = None
         self.set_ranks()
+        self.nseqs = 0
     
     def get_files(self, seqfiles, taxfiles):
         self.seqfiles = seqfiles
         self.taxfiles = taxfiles
-        # seqfiles and taxiles should be dictionaries with database:filename key:value pairs
+        # seqfiles and taxfiles should be dictionaries with database:filename key:value pairs
         if isinstance(seqfiles, list):
             self.seqfiles = detect_files(seqfiles)
         if isinstance(taxfiles, list):
@@ -132,6 +133,8 @@ class Merger():
             SeqIO.write(records, seq_handle, 'fasta')
         acc_tab.to_csv(self.acc_out)
         logger.info(f'Merged {len(records)} sequence records to {self.seq_out}')
+        # update sequence count
+        self.nseqs = len(records)
     
     def merge_taxons(self):
         mtax = MergerTax(self.taxfiles, self.ranks)
@@ -163,6 +166,8 @@ class Merger():
         guide_tab = flatten_taxtab(tax_tab, self.ranks)
         guide_tab.to_csv(self.taxguide_out)
         logger.info(f'Generated files {header}.acclist and {header.taxguide} in directory {self.out_dir}')
+        # update sequence count
+        self.nseqs = len(acc_list)
 
 class MergerTax():
     def __init__(self, tax_files, ranks):

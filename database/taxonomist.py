@@ -240,7 +240,8 @@ class Taxonomist:
         self.ranks = ranklist
     
     def taxing(self, taxid_files, chunksize=500, max_attempts=3):
-        # taxid_files dict with {database:taxid_file}
+        # taxid_files : dict with {database:taxid_file}
+        # tadid_file : pandas dataframe with index = accessions, columns = taxid if NCBI or full taxonomy if BOLD
         # check that summ_file container is not empty
         if len(taxid_files) == 0:
             logger.error('No valid taxid files detected')

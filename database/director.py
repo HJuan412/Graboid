@@ -60,8 +60,10 @@ class Director:
         for file in os.listdir(self.tmp_dir):
             os.remove(file)
     
-    def set_ranks(self, ranks=['phylum', 'class', 'order', 'family', 'genus', 'species']):
+    def set_ranks(self, ranks=None):
         # set taxonomic ranks to retrieve for the training data.
+        if ranks is None:
+            ranks=['phylum', 'class', 'order', 'family', 'genus', 'species']
         # propagate to taxonomist and merger
         fmt_ranks = [rk.lower() for rk in ranks]
         logger.INFO(f'Taxonomic ranks set as {" ".join(fmt_ranks)}')
@@ -183,8 +185,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     # setup director
     db_director = Director(db_dir, tmp_dir, warn_dir)
     # user specified ranks to use
-    if not ranks is None:
-        db_director.set_ranks(ranks)
+    db_director.set_ranks(ranks)
     # set databases
     databases = ['NCBI', 'BOLD'] if bold else ['NCBI']
     # retrieve sequences + taxonomies

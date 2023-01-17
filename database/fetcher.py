@@ -154,7 +154,7 @@ class Fetcher():
         self.acc_tab = pd.read_csv(acc_file, index_col = 0)
         
         # generate header for output files
-        out_header = acc_file.split('/')[-1].split('.')[0]
+        out_header = re.sub('.*/', '', re.sub('\..*', '', acc_file))
         self.out_header = f'{self.out_dir}/{out_header}'
         self.failed_file = f'{self.out_dir}/{out_header}_failed.acc'
     

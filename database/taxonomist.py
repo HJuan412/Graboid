@@ -16,6 +16,7 @@ import http
 import logging
 import numpy as np
 import pandas as pd
+import re
 
 #%% setup logger
 logger = logging.getLogger('Graboid.database.taxonomist')
@@ -56,8 +57,7 @@ def extract_tax_data(record):
 #%% classes
 class Taxer:
     def generate_outfiles(self):
-        header = self.taxid_file.split('/')[-1].split('.')[0]
-        self.tax_out = f'{self.out_dir}/{header}.tax'
+        self.tax_out = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '.tax', self.taxid_file))
     
     def fill_blanks(self):
         # fills missing records with the last known taxon name or id
@@ -128,10 +128,10 @@ class TaxonomistNCBI(Taxer):
                     tax_records = Entrez.read(tax_handle)
                     break
                 except IOError:
-                    logger.debug('Interrupted taxing due to conection error')
+                    logger.Error('Interrupted taxing due to conection error')
                     continue
                 except http.client.client.Incomplete:
-                    logger.debug('Interrupted taxing due to bad file')
+                    logger.Error('Interrupted taxing due to bad file')
                     continue
             if len(tax_records) != len(chunk):
                 failed += list(chunk)

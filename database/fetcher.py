@@ -17,6 +17,7 @@ import http
 import logging
 import numpy as np
 import pandas as pd
+import re
 
 #%% setup logger
 logger = logging.getLogger('Graboid.database.fetcher')
@@ -217,8 +218,7 @@ class Fetcher():
     
     def fetch_tax_from_fasta(self, fasta_file):
         # generate output file
-        header = fasta_file.split('/')[-1].split('.fasta')[0]
-        out_file = f'{self.out_dir}/{header}.taxtmp'
+        out_file = re.sub('.*/', self.out_dir + '/', re.sub('.fasta', '.taxtmp', fasta_file))
         self.tax_files['NCBI'] = out_file
         
         # get list of accessions
@@ -228,11 +228,8 @@ class Fetcher():
         taxs = {'Accession':[], 'TaxID':[]}
         summ_handle = Entrez.esummary(db='nucleotide', id=acc_list, retmode='xml')
         summ_recs = Entrez.read(summ_handle)
+        taxids = [int(summ['TaxId']) for summ in summ_recs]
         
-        for acc, summ in zip(acc_list, summ_recs):
-            taxs['Accession'].append(acc)
-            taxs['TaxID'].append(int(summ['TaxId']))
-        
+        taxs = pd.DataFrame({'Accession':acc_list, 'TaxID':taxids})        
         # save tax table to csv
-        taxs = pd.DataFrame(taxs)
         taxs.to_csv(out_file, header=False, index=False)

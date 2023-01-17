@@ -80,15 +80,16 @@ class TaxonomistNCBI(Taxer):
         self.taxid_file = taxid_file
         self.ranks = ranks
         self.out_dir = out_dir
-        
-        self.generate_outfiles()
-        self.read_taxid_file()
-        self.make_tax_tables()
-        
         self.logger = logging.getLogger('Graboid.database.taxonomist.NCBI')
-        
+        self.generate_outfiles()
+        try:
+            self.read_taxid_file()
+        except Exception as exep:
+            self.logger.error(exep)
+            raise
+        self.make_tax_tables()
         self.failed = []
-    
+        
     def read_taxid_file(self):
         # reads the acc:taxid table
         self.taxid_list = None
@@ -99,8 +100,7 @@ class TaxonomistNCBI(Taxer):
         
         # generates a warning if taxid_list is empty
         if len(taxid_list) == 0:
-            self.logger.error(f'Summary file {self.in_file} is empty')
-            return
+            raise Exception(f'Summary file {self.in_file} is empty')
 
         self.taxid_list = taxid_list[1] # index are the accession codes
         # get a reversed taxid list and a list of unique taxes
@@ -180,16 +180,17 @@ class TaxonomistBOLD(Taxer):
     # generates the taxomoic tables for the records downloaded from BOLD
     def __init__(self, taxid_file, ranks, out_dir):
         self.taxid_file = taxid_file
-        self.ranks = ranks
         self.out_dir = out_dir
-
+        self.logger = logging.getLogger('Graboid.database.taxonomist.BOLD')
         self.generate_outfiles()
         self.__set_marker_vars()
+        try:
+            self.read_taxid_file()
+        except Exception as exep:
+            self.logger.error(exep)
+            raise
+        self.ranks = ranks
         
-        self.read_taxid_file()
-        
-        self.logger = logging.getLogger('Graboid.database.taxonomist.BOLD')
-
     def __set_marker_vars(self):
         # BOLD records may have variations of the marker name (18S/18s, COI-3P/COI-5P)
         marker = self.taxid_file.split('/')[-1].split('_')[1]
@@ -197,11 +198,10 @@ class TaxonomistBOLD(Taxer):
     
     def read_taxid_file(self):
         bold_tab = pd.read_csv(self.taxid_file, index_col = 0)
-
         if len(bold_tab) == 0:
-            self.logger.error(f'Summary file {self.in_file} is empty')
             self.bold_tab = None
-            return
+            # interrupt execution and let constructor know
+            raise Exception(f'Summary file {self.in_file} is empty')
         self.bold_tab = bold_tab
         
     def get_tax_tab(self):

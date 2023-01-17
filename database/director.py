@@ -62,13 +62,26 @@ class Director:
     
     def set_ranks(self, ranks=None):
         # set taxonomic ranks to retrieve for the training data.
+        # this method ensures the taxonomic ranks are sorted in descending order, regarless of how they were input by the user
+        # also checks that ranks are valid
+        valid_ranks = 'domain subdomain superkingdom kingdom phylum subphylum superclass class subclass division subdivision superorder order suborder superfamily family subfamily genus subgenus species subspecies'.split()
         if ranks is None:
             ranks=['phylum', 'class', 'order', 'family', 'genus', 'species']
+        else:
+            rks_formatted = set([rk.lower() for rk in ranks])
+            rks_sorted = []
+            for rk in valid_ranks:
+                if rk in rks_formatted:
+                    rks_sorted.append(rk)
+            ranks = rks_sorted
+            if len(ranks) == 0:
+                self.logger.warning("Couldn't read given ranks. Using default values instead")
+                ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']
+                
         # propagate to taxonomist and merger
-        fmt_ranks = [rk.lower() for rk in ranks]
-        logger.INFO(f'Taxonomic ranks set as {" ".join(fmt_ranks)}')
-        self.taxonomist.set_ranks(fmt_ranks)
-        self.merger.set_ranks(fmt_ranks)
+        logger.INFO(f'Taxonomic ranks set as {" ".join(ranks)}')
+        self.taxonomist.set_ranks(ranks)
+        self.merger.set_ranks(ranks)
 
     def direct_fasta(self, fasta_file, chunksize=500, max_attempts=3, cp_fasta=False):
         # direct database construction from a prebuilt fasta file

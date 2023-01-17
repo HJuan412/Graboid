@@ -94,22 +94,20 @@ class NCBIFetcher:
             if len(seq_recs) != len(chunk):
                 failed += chunk
                 continue
-            seqs = []
-            taxs = {'Accession':[], 'TaxID':[]}
             
-            # generate seq records and acc:taxid series
+            # generate seq records and retrieve taxids
+            seqs = []
+            taxids = []
             for acc, seq in zip(chunk, seq_recs):
                 seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
-                taxs['Accession'].append(acc)
-                taxs['TaxID'].append(seq['TSeq_taxid'])
-                
+                taxids.append(seq['TSeq_taxid'])
+            
             # save seq recods to fasta
             with open(self.out_seqs, 'a') as out_handle0:
                 SeqIO.write(seqs, out_handle0, 'fasta')
             # save tax table to csv
-            taxs = pd.DataFrame(taxs)
-            taxs.to_csv(self.out_taxs, header = False, index = False, mode='a')
-            
+            taxs = pd.DataFrame({'Accession':chunk, 'TaxID':taxids})
+            taxs.to_csv(self.out_taxs, header = chunk_n == 0, index = False, mode='a')
         return failed
 
 class BOLDFetcher:
@@ -225,11 +223,10 @@ class Fetcher():
         acc_list = get_accs_from_fasta(fasta_file)
         
         # retrieve taxIDs and build TaxID tab
-        taxs = {'Accession':[], 'TaxID':[]}
         summ_handle = Entrez.esummary(db='nucleotide', id=acc_list, retmode='xml')
         summ_recs = Entrez.read(summ_handle)
         taxids = [int(summ['TaxId']) for summ in summ_recs]
         
-        taxs = pd.DataFrame({'Accession':acc_list, 'TaxID':taxids})        
+        taxs = pd.DataFrame({'Accession':acc_list, 'TaxID':taxids})
         # save tax table to csv
         taxs.to_csv(out_file, header=False, index=False)

@@ -136,15 +136,12 @@ class Merger():
         # update sequence count
         self.nseqs = len(records)
     
-    def merge_taxons(self):
-        mtax = MergerTax(self.taxfiles, self.ranks)
-        mtax.merge_taxons(self.tax_out, self.taxguide_out, self.rank_dict_out, self.valid_rows_out)
-    
     def merge(self, seqfiles, taxfiles):
         self.get_files(seqfiles, taxfiles)
         self.generate_outfiles()
         self.merge_seqs()
-        self.merge_taxons()
+        mtax = MergerTax(self.taxfiles, self.ranks)
+        mtax.merge_taxons(self.tax_out, self.taxguide_out, self.rank_dict_out, self.valid_rows_out)
     
     def merge_from_fasta(self, seqfile, taxfile):
         # Used when a fasta file was provided, generate acclist and taxguide

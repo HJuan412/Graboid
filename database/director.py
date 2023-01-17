@@ -57,8 +57,7 @@ class Director:
         self.merger = mrgr.Merger(out_dir)
     
     def clear_tmp(self):
-        tmp_files = self.get_tmp_files()
-        for file in tmp_files:
+        for file in os.listdir(self.tmp_dir):
             os.remove(file)
     
     def set_ranks(self, ranks=['phylum', 'class', 'order', 'family', 'genus', 'species']):
@@ -88,7 +87,6 @@ class Director:
         
         print('Building output files...')
         self.merger.merge_from_fasta(seq_path, self.taxonomist.out_files['NCBI'])
-        self.taxonomist.out_files = {} # clear out_files container so the generated file is not found by get_tmp_files
         print('Done!')
     
     def direct(self, taxon, marker, databases, chunksize=500, max_attempts=3):
@@ -106,19 +104,6 @@ class Director:
         print('Merging sequences...')
         self.merger.merge(self.fetcher.seq_files, self.taxonomist.out_files)
         print('Done!')
-    
-    def get_tmp_files(self):
-        tmp_files = []
-        for file in self.surveyor.out_files.values():
-            tmp_files.append(file)
-        tmp_files.append(self.lister.out_file)
-        for file in self.fetcher.seq_files.values():
-            tmp_files.append(file)
-        for file in self.fetcher.tax_files.values():
-            tmp_files.append(file)
-        for file in self.taxonomist.out_files.values():
-            tmp_files.append(file)
-        return tmp_files
     
     @property
     def seq_file(self):

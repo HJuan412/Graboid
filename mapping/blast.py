@@ -65,17 +65,15 @@ class Blaster:
         self.report = None
         self.out_dir = out_dir
     
-    def blast(self, fasta_file, db_dir, out_name=None, threads=1):
+    def blast(self, fasta_file, db_dir, threads=1):
         self.report = None
         check, db_files = check_db_dir(db_dir)
         if not check:
             logger.error(f'Incomplete BLAST database ({len(db_files)} files found)')
-            return
+            raise Exception(f'Incomplete BLAST database ({len(db_files)} files found)')
         
         # set output name
-        if out_name is None:
-            out_name = re.sub('.*/', '', re.sub('\..*', '', fasta_file))
-        blast_out = f'{self.out_dir}/{out_name}.BLAST'
+        blast_out = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '.BLAST', fasta_file))
         
         # perform BLAST
         print(f'Blasting {fasta_file}')
@@ -84,5 +82,5 @@ class Blaster:
             self.report = blast_out
             logger.info(f'Generated blast report at {blast_out}')
         except:
-            # TODO develop warning
             logger.error(f'Unable to blast {fasta_file}')
+            raise

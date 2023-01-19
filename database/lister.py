@@ -12,23 +12,12 @@ from database import bold_marker_vars
 import logging
 import pandas as pd
 import os
+import re
 
 #%% set logger
 logger = logging.getLogger('Graboid.database.lister')
-#%% variables
-valid_databases = ['BOLD', 'NCBI']
-#%% functions
-# summary detection
-def detect_summ(file_list):
-    # given a list of summary files, identify the database to which each belongs
-    # works under the assumption that there is a single file per database
-    summ_files = {}
-    for file in file_list:
-        database = file.split('_')[-1].split('.')[0]
-        if database in valid_databases:
-            summ_files[database] = file
-    return summ_files
 
+#%% functions
 # data loading
 # using these readfuncs makes it easier to incorporate new databases in the future
 def read_BOLD_summ(summ_file):
@@ -53,7 +42,7 @@ def read_summ(summ_file, database):
         accs = bold_tab['sampleid'].tolist()
     
     if len(accs) == 0:
-        logger.error(f'No records present in {summ_file}')
+        raise Exception(f'No records present in {summ_file}')
     return accs
 
 # summary manipulation
@@ -104,41 +93,45 @@ def clear_repeats(merged_tab):
 class Lister:
     # this class compares summaries of multiple database and generates a consensus
     # prioritizes NCBI in case of conflict
-
+    valid_databases = ['BOLD', 'NCBI']
     def __init__(self, out_dir):
         self.summ_files = {}
         self.out_file = None
         self.out_dir = out_dir
     
     def get_summ_files(self, summ_files):
-        self.summ_files = summ_files
-        # check that summaries are a list 
-        if isinstance(self.summ_files, list):
-            self.summ_files = detect_summ(summ_files)
-    
-    def generate_outfile(self):
-        # generates a file name of the form out_dir/taxon_marker.acc
-        for sample_file in self.summ_files.values():
-            header = sample_file.split('/')[-1].split('_')[:-1]
-            header = '_'.join(header)
-            self.out_file = f'{self.out_dir}/{header}.acc'
-            break
+        self.summ_files = {}
+        for db, file in summ_files.items():
+            if db in self.valid_databases:
+                self.summ_files.update({db:file})
+                sample_file = file
+            else:
+                logger.warning(f'Database {db} not valid. File {file} will be ignored')
+        if len(self.summ_files) == 0:
+            raise Exception('No valid survey files detected')
+        # generate the output file
+        self.out_file = re.sub('.*/', self.out_dir + '/', re.sub('__.*', '.acc', sample_file))
     
     def build_list(self, summ_files):
         # summ_files dict with {database:summ_file}
         # generates a consensus list of accession codes from the summary files
-        if len(summ_files) == 0:
-            logger.error('No valid summaries detected')
-            return
-        
+        # detect summary files
         self.get_summ_files(summ_files)
-        self.generate_outfile()
+        
         # read summ_files
         acc_tabs = []
         for db, file in summ_files.items():
-            db_accs = read_summ(file, db)
+            try:
+                db_accs = read_summ(file, db)
+            except Exception as excp:
+                logger.warning(excp)
+                continue
             acc_subtab = build_acc_subtab(db_accs, db)
             acc_tabs.append(acc_subtab)
+        
+        if len(acc_tabs) == 0:
+            logger.warning('No records located. Repeat survey step')
+            raise Exception('No records located. Repeat survey step')
         # merge subtabs
         merged = pd.concat(acc_tabs)
         merged_clear = clear_repeats(merged)

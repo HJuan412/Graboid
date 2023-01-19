@@ -23,15 +23,12 @@ class SurveyTool:
     def __init__(self, taxon, marker, out_dir):
         self.taxon = taxon
         self.marker = marker
-        self.database = self.get_dbase()
+        self.out_dir = out_dir
+        self.out_file = f'{out_dir}/{taxon}_{marker}__{self.database}.summ' # database identifier separated by __
         self.get_logger()
-        self.generate_outfile(out_dir)
         self.attempt = 1
         self.max_attempts = 3
         self.done = False
-    
-    def generate_outfile(self, out_dir):
-        self.out_file = f'{out_dir}/{self.taxon}_{self.marker}_{self.database}.summ'
     
     def survey(self, max_attempts=3):
         self.max_attempts = max_attempts
@@ -70,6 +67,9 @@ class SurveyWAPI(SurveyTool):
 # Specific survey tools
 # each of these uses a survey method to attempt to download a summary
 class SurveyBOLD(SurveyWAPI):
+    @property
+    def database(self):
+        return 'BOLD'
     # consider using the full data retrieval API
     def get_logger(self):
         self.logger = logging.getLogger('Graboid.database.surveyor.BOLD')
@@ -82,22 +82,23 @@ class SurveyBOLD(SurveyWAPI):
         return apiurl
 
 class SurveyENA(SurveyWAPI):
+    @property
+    def database(self):
+        return 'ENA'
     def get_logger(self):
         self.logger = logging.getLogger('Graboid.database.surveyor.BOLD.surveyor.ENA')
-    def get_dbase(self):
-        return 'ENA'
 
     def get_url(self):
         apiurl = f'https://www.ebi.ac.uk/ena/browser/api/tsv/textsearch?domain=embl&result=sequence&query=%22{self.taxon}%22%20AND%20%22{self.marker}%22'
         return apiurl
 
 class SurveyNCBI(SurveyTool):
+    @property
+    def database(self):
+        return 'NCBI'
     # This surveyor uses the Entrez package instead of an API, defines its own survey method
     def get_logger(self):
         self.logger = logging.getLogger('Graboid.database.surveyor.NCBI')
-    
-    def get_dbase(self):
-        return 'NCBI'
 
     def attempt_dl(self):
         self.attempt = 1
@@ -112,6 +113,7 @@ class SurveyNCBI(SurveyTool):
                 break
             except:
                 self.attempt += 1
+                self.logger.warning(f'Download of {self.taxon} {self.marker} interrupted, {self.ntries - self.attempt} attempts remaining')
 
 class Surveyor:
     # This class manages the download process for all taxon - marker - database trio
@@ -128,13 +130,15 @@ class Surveyor:
     def survey(self, taxon, marker, database, max_attempts=3):
         # Survey each given database for the taxon / marker duo.
         # ntries determines the number of attempts
-        if not database in Surveyor.tooldict.keys():
+        try:
+            tool = Surveyor.tooldict[database](taxon, marker, self.out_dir)
+        except KeyError:
             logger.error(f'Database name {database} is not valid')
-            return
-        
-        tool = Surveyor.tooldict[database](taxon, marker, self.out_dir)
+            raise
+            
         print(f'Surveying database {database} for {taxon} {marker}')
-        
         tool.survey(max_attempts)
         if tool.done:
             self.out_files[database] = tool.out_file
+        else:
+            raise Exception(f'Failed survey for {taxon} {marker} in {database} database')

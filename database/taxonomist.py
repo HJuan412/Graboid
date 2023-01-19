@@ -193,7 +193,7 @@ class TaxonomistBOLD(Taxer):
         
     def __set_marker_vars(self):
         # BOLD records may have variations of the marker name (18S/18s, COI-3P/COI-5P)
-        marker = self.taxid_file.split('/')[-1].split('_')[1]
+        marker = re.sub('.*/', '', self.taxid_file).split('_')[1]
         self.marker_vars = list(marker)
     
     def read_taxid_file(self):
@@ -219,10 +219,10 @@ class TaxonomistBOLD(Taxer):
         
         self.tax_tab0.to_csv(self.tax_out)
 
-taxer_dict = {'BOLD':TaxonomistBOLD,
-              'NCBI':TaxonomistNCBI}
-
 class Taxonomist:
+    # class attribute dictionary containing usable taxonomist tools
+    taxer_dict = {'BOLD':TaxonomistBOLD,
+                  'NCBI':TaxonomistNCBI}
     def __init__(self, out_dir):
         self.taxid_files = {}
         self.set_ranks()
@@ -244,11 +244,10 @@ class Taxonomist:
         # tadid_file : pandas dataframe with index = accessions, columns = taxid if NCBI or full taxonomy if BOLD
         # check that summ_file container is not empty
         if len(taxid_files) == 0:
-            logger.error('No valid taxid files detected')
-            return
+            raise Exception('No valid taxid files detected')
         
         for database, taxid_file in taxid_files.items():
-            taxer = taxer_dict[database](taxid_file, self.ranks, self.out_dir)
+            taxer = self.taxer_dict[database](taxid_file, self.ranks, self.out_dir)
             taxer.taxing(chunksize, max_attempts)
             logger.info(f'Finished retrieving taxonomy data from {database} database. Saved to {taxer.tax_out}')
             self.out_files[database] = taxer.tax_out

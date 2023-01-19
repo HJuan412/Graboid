@@ -14,7 +14,6 @@ import logging
 from mapping import blast
 from mapping import matrix
 import os
-import re
 
 #%% set logger
 logger = logging.getLogger('Graboid.mapper')
@@ -53,39 +52,32 @@ parser.add_argument('-ow', '--overwrite',
                     help='Overwrite existing files in case of collision')
 
 #%% aux functions
-def make_dirs(base_dir): # TODO: delete this?
-    os.makedirs(f'{base_dir}/data', exist_ok=True)
-    os.makedirs(f'{base_dir}/warnings', exist_ok=True)
-
 def check_fasta(fasta_file):
     # checks the given file contains at least one fasta sequence
     nseqs = 0
+    seqlen = 0
     with open(fasta_file, 'r') as fasta_handle:
-        for rec in sfp(fasta_handle):
+        for title, seq in sfp(fasta_handle):
             nseqs += 1
-    return nseqs
+            seqlen = len(seq)
+    return nseqs, seqlen
 
-def build_blastdb(ref_seq, ref_dir='.', ref_name=None, clear=False):
+def build_blastdb(ref_seq, db_dir, clear=False):
     # build a blast database
     # ref_seq : fasta file containing the reference sequences
-    # ref_dir : directory to where the generated db files will be stored
-    # ref_name : optional name for the generated db files
+    # db_dir : directory to where the generated db files will be stored
     # clear : overwrite existing db files
     
-    # check database directory
-    if ref_name is None:
-        ref_name = re.sub('.*/', '', re.sub('\..*', '', ref_seq))
-    db_dir = f'{ref_dir}/{ref_name}'
-    db_out = f'{ref_dir}/{ref_name}/{ref_name}'
-    
-    check, db_files = blast.check_db_dir(db_out)
+    # check database directory    
+    check, db_files = blast.check_db_dir(db_dir)
+    db_name = db_dir.split('/')[-2]
     if check:
         # base exists 
         if clear:
-            logger.info(f'Overwriting database {ref_name} using file {ref_seq}')
+            logger.info(f'Overwriting database {db_name} using file {ref_seq}')
         else:
-            logger.info('A blast database of the name {ref_name} already exists in the specified route. To overwrite it run this function again with clear set as True')
-            return db_out
+            logger.info('A blast database of the name {db_name} already exists in the specified route. To overwrite it run this function again with clear set as True')
+            return
 
     # clear previous db_files (if present)
     for file in db_files:
@@ -94,14 +86,11 @@ def build_blastdb(ref_seq, ref_dir='.', ref_name=None, clear=False):
     # check sequences in ref_seq
     n_refseqs = check_fasta(ref_seq)
     if n_refseqs != 1:
-        print(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
-        return None
+        raise Exception(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
     
     # build the blast database
-    os.makedirs(db_dir, exist_ok=True)
-    blast.makeblastdb(ref_seq, db_out)
-    logger.info(f'Generated blast databse {ref_name} using {ref_seq} at directory {db_dir}')
-    return db_out
+    blast.makeblastdb(ref_seq, db_dir)
+    logger.info(f'Generated blast databse {db_name} using the file {ref_seq} in directory {db_dir}')
     
 #%% classes
 class Director:

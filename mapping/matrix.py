@@ -38,7 +38,8 @@ def read_blast(blast_file, evalue = 0.005):
     
     # check for empty report
     if len(blast_tab) == 0:
-        logger.warning(f'Blast report {blast_file} is empty. Verify that the blast parameters are correct.')
+        raise Exception(f'Blast report {blast_file} is empty. Verify that the blast parameters are correct.')
+
     marker_len = blast_tab.iloc[-1].loc['length']
     
     # filter blast report for evalue
@@ -100,7 +101,7 @@ def load_map(map_path):
     return accs, map_npz['matrix'], map_npz['bounds']
         
 def get_coverage(coords, ref_len):
-    coverage = np.zeros(ref_len)
+    coverage = np.zeros(ref_len, dtype=np.int32)
     for coo in coords:
         coverage[coo[0]:coo[1]] += 1
     return coverage
@@ -138,19 +139,18 @@ class MatBuilder:
         self.mat_file = None
         self.acc_file = None
         
-    def generate_outnames(self, seq_file, out_name=None):
-        if out_name is None:
-            # no name given, take the seq file's original name
-            out_name = re.sub('.*/', '', re.sub('\..*', '', seq_file))
-        self.mat_file = f'{self.out_dir}/{out_name}.npz'
-        self.acc_file = f'{self.out_dir}/{out_name}.accs'
-        
-    def build(self, blast_file, seq_file, out_name=None, evalue=0.005, keep=False):
+    def build(self, blast_file, seq_file, evalue=0.005, keep=False):
+        # generate out names
+        out_name = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '__map', seq_file))
+        self.mat_file = out_name + '.npz'
+        self.acc_file = out_name + '.accs'
         # load blast report
         print('Reading blast report...')
-        blast_tab, marker_len = read_blast(blast_file, evalue)
-        if len(blast_tab) == 0:
-            return
+        try:
+            blast_tab, marker_len = read_blast(blast_file, evalue)
+        except Exception as excp:
+            logger.warning(excp)
+            raise
         
         # get dimensions & coverage
         nrows, ncols, lower, upper = get_mat_dims(blast_tab)
@@ -188,9 +188,6 @@ class MatBuilder:
                 matrix[q_idx, match[2]:match[3]] = numseq
             acclist.append(qry)
         self.acclist = acclist
-        
-        # generate out_files
-        self.generate_outnames(seq_file, out_name)
         
         # store output
         # save the matrix along with the bounds and coverage array (coverage array done over the entire length of the marker reference)

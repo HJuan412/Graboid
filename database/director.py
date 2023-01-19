@@ -141,6 +141,15 @@ class Director:
     @property
     def nseqs(self):
         return self.merger.nseqs
+    @property
+    def base_rank(self):
+        return self.merger.base_rank
+    @property
+    def base_taxa(self):
+        return ' '.join(self.merger.base_taxa)
+    @property
+    def rank_counts(self):
+        return self.merger.rank_counts.loc[self.merger.ranks]
 
 #%% main function
 def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold=True, cp_fasta=False, chunksize=500, max_attempts=3, evalue=0.005, threads=1, keep=False, clear=False):
@@ -248,9 +257,10 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     db_logger.info(f'Reference sequence (length): {ref_seq}(len)')
     db_logger.info(f'N sequences: {db_director.nseqs}')
     db_logger.info('Taxa:')
-    db_logger.info(f'\tBase taxon (lvl): ')
-    for tax in taxa:
-        db_logger.info(f'Rank (N taxa): ')
+    db_logger.info(f'\tBase taxon (lvl): {db_director.base_taxa} ({db_director.base_rank})')
+    db_logger.info('Rank (N taxa):')
+    for rk, count in db_director.rank_counts.iteritems():
+        db_logger.info(f'\t{rk} ({count})')
     db_logger.info('Windows:')
     for win in windows:
         db_logger.info(f'\tCoordinates (length): ')

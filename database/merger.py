@@ -56,7 +56,7 @@ def flatten_taxtab(tax_tab, ranks=['phylum', 'class', 'order', 'family', 'genus'
     return flattened_tab
 
 def dissect_guide(guide, current_rank, rank_n, rank_dict):
-    # generate a rank dict (assign an irdered index to each taxonomic rank in the retrieved taxonomy)
+    # generate a rank dict (assign an ordered index to each taxonomic rank in the retrieved taxonomy)
     # update dict
     rank_dict.update({current_rank:rank_n})
     # get child ranks
@@ -217,9 +217,6 @@ class MergerTax():
                     for pair in correction_vals:
                         rk_vals[rk_vals == pair[1]] = pair[0]
                     tax_tab[rk+'_id'] = rk_vals
-                    # for idx, row in rk_subtab.iterrows():
-                    #     # replace taxID values
-                    #     tax_tab.at[tax_tab[rk+'_id'] == row['tab']] = row['guide']
                         
             # incorporate non redundant taxons to the guide_tab
             guide_tab = pd.concat([guide_tab, tab.loc[diff]])
@@ -229,6 +226,10 @@ class MergerTax():
     def build_rank_dict(self):
         root = set(self.guide_tab.parent_taxID).difference(set(self.guide_tab.taxID))
         root_rank = self.guide_tab.loc[self.guide_tab.parent_taxID.isin(root), 'rank'].iloc[0]
+        base_rank = self.ranks[0]
+        self.base_taxa = self.guide_tab.loc[self.guide_tab['rank'] == base_rank].index.tolist()
+        self.base_rank = base_rank
+        self.rank_counts = self.guide_tab.value_counts('rank')
         self.rank_dict = {}
         
         dissect_guide(self.guide_tab, root_rank, 0, self.rank_dict)

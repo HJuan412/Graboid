@@ -82,44 +82,50 @@ class Director:
         logger.INFO(f'Taxonomic ranks set as {" ".join(ranks)}')
         self.taxonomist.set_ranks(ranks)
         self.merger.set_ranks(ranks)
-
-    def direct_fasta(self, fasta_file, chunksize=500, max_attempts=3, cp_fasta=False):
-        # direct database construction from a prebuilt fasta file
-        # sequences should have a valid genbank accession
-        fasta_name = re.sub('.*/', '', re.sub('\..*', '', fasta_file))
-        seq_path = f'{self.out_dir}/{fasta_name}.fasta'
-        if cp_fasta:
-            shutil.copy(fasta_file, seq_path)
-        logger.info(f'Moved fasta file {fasta_file} to location {self.out_dir}')
-        # generate taxtmp file
-        print(f'Retrieving TaxIDs for {fasta_file}...')
-        self.fetcher.fetch_tax_from_fasta(fasta_file)
-        
-        print('Reconstructing taxonomies...')
-        # taxonomy needs no merging so it is saved directly to out_dir
-        self.taxonomist.out_dir = self.out_dir # dump tax table to out_dir
-        self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
-        
-        print('Building output files...')
-        self.merger.merge_from_fasta(seq_path, self.taxonomist.out_files['NCBI'])
-        print('Done!')
     
-    def direct(self, taxon, marker, databases, chunksize=500, max_attempts=3):
-        # build database from zero, needs a valid taxon (ideally at a high level such as phylum or class) and marker gene
+    def retrieve_fasta(self, fasta_file, chunksize=500, max_attempts=3):
+        # retrieve sequence data from a prebuilt fasta file
+        # sequences should have a valid genbank accession
+        print('Retrieving sequences from file {fasta_file}')
+        seq_path = re.sub('.*/', self.out_dir + '/', re.sub('.fa.*', '__fasta.seqtmp', fasta_file))
+        os.symlink(fasta_file, seq_path)
+        # create a symbolic link to the fasta file to follow file nomenclature system without moving the original file
+        print(f'Retrieving TaxIDs from {fasta_file}...')
+        self.fetcher.fetch_tax_from_fasta(seq_path)
+    
+    def retrieve_download(self, taxon, marker, databases, chunksize=500, max_attempts=3):
+        # retrieve sequence data from databases
+        # needs a valid taxon (ideally at a high level such as phylum or class) and marker gene
+        if taxon is None:
+            raise Exception('No taxon provided')
+        if marker is None:
+            raise Exception('No marker provided')
+        if databases is None:
+            raise Exception('No databases provided')
         print('Surveying databases...')
         for db in databases:
             self.surveyor.survey(taxon, marker, db, max_attempts)
         print('Building accession lists...')
         self.lister.build_list(self.surveyor.out_files)
         print('Fetching sequences...')
-        self.fetcher.set_bold_file(self.surveyor.out_files['BOLD'])
-        self.fetcher.fetch(self.lister.out_file, chunksize, max_attempts)
+        self.fetcher.fetch(self.lister.out_file, self.surveyor.out_files, chunksize, max_attempts)
+        
+    def process(self, chunksize=500, max_attempts=3):
         print('Reconstructing taxonomies...')
         self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
-        print('Merging sequences...')
+
         self.merger.merge(self.fetcher.seq_files, self.taxonomist.out_files)
         print('Done!')
-    
+        
+    def direct(self, taxon, marker, databases, fasta_file, chunksize=500, max_attempts=3):
+        # retrieve sequence and taxonomy data
+        if fasta_file is None:
+            self.retrieve_download(taxon, marker, databases, chunksize, max_attempts)
+        else:
+            self.retrieve_fasta(fasta_file, chunksize, max_attempts)
+        # process data
+        self.process(chunksize, max_attempts)
+        
     @property
     def seq_file(self):
         return self.merger.seq_out
@@ -176,16 +182,15 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     # check sequences in ref_seq
     n_refseqs = mp.check_fasta(ref_seq)
     if n_refseqs != 1:
-        print(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
-        return
+        raise Exception(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
+        
     # prepare output directories
     # check db_name (if it exists, check clear (if true, overwrite, else interrupt))
     db_dir = DATA.DATAPATH + '/' + db_name
     if db_name in DATA.DBASES:
         print(f'A database with the name {db_name} already exists...')
         if not clear:
-            print('Choose a diferent name or set "clear" as True')
-            return
+            raise Exception('Choose a diferent name or set "clear" as True')
         print(f'Removing existing database: {db_name}...')
         os.rmdir(db_dir)
     # create directories
@@ -211,22 +216,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     # set databases
     databases = ['NCBI', 'BOLD'] if bold else ['NCBI']
     # retrieve sequences + taxonomies
-    if not fasta is None:
-        # build db using fasta file (overrides taxon, mark)
-        db_director.direct_fasta(fasta,
-                                 chunksize,
-                                 max_attempts,
-                                 cp_fasta)
-    elif not (taxon is None or marker is None):
-        #build db using tax & mark
-        db_director.direct(taxon,
-                           marker,
-                           databases,
-                           chunksize,
-                           max_attempts)
-    else:
-        print('No search parameters provided. Either set a path to a fasta file in the --fasta argument or a taxon and a marker in the --taxon and --marker arguments')
-        return
+    db_director.direct(taxon, marker, databases, fasta, chunksize, max_attempts)
     # clear temporal files
     if not keep:
         db_director.clear_tmp()

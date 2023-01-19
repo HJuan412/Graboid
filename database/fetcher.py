@@ -217,6 +217,7 @@ class Fetcher():
     def fetch_tax_from_fasta(self, fasta_file):
         # generate output file
         out_file = re.sub('.*/', self.out_dir + '/', re.sub('.fasta', '.taxtmp', fasta_file))
+        self.seq_files['NCBI'] = fasta_file
         self.tax_files['NCBI'] = out_file
         
         # get list of accessions

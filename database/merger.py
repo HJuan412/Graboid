@@ -10,11 +10,11 @@ Compare and merge temporal sequence files
 
 #%% libraries
 from Bio import SeqIO
-from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 import logging
 import numpy as np
 import pandas as pd
 import pickle
+import re
 
 #%% setup logger
 logger = logging.getLogger('Graboid.database.merger')
@@ -22,17 +22,6 @@ logger = logging.getLogger('Graboid.database.merger')
 #%% variables
 valid_databases = ['BOLD', 'NCBI']
 #%% functions
-def detect_files(file_list):
-    # NOTE: this function behaves exactly like lister.detect_summ(), may need more analogs to it in the future, may define a generic one in a tools module
-    # given a list of taxID files, identify the database to which each belongs
-    # works under the assumption that there is a single file per database
-    files = {}
-    for file in file_list:
-        database = file.split('_')[-1].split('.')[0]
-        if database in valid_databases:
-            files[database] = file
-    return files
-
 def flatten_taxtab(tax_tab, ranks=['phylum', 'class', 'order', 'family', 'genus', 'species']):
     # generates a two column tax from the tax tab, containing the taxID, rank and parent taxID of each taxon
     # tax name kept as index
@@ -71,40 +60,32 @@ def dissect_guide(guide, current_rank, rank_n, rank_dict):
     
 #%% classes
 class Merger():
-    def __init__(self, out_dir):
+    def __init__(self, out_dir, ranks=None):
         self.out_dir = out_dir
-        self.seq_out = None
-        self.acc_out = None
-        self.tax_out = None
-        self.taxguide_out = None
-        self.set_ranks()
+        self.set_ranks(ranks)
         self.nseqs = 0
     
     def get_files(self, seqfiles, taxfiles):
         self.seqfiles = seqfiles
         self.taxfiles = taxfiles
-        # seqfiles and taxfiles should be dictionaries with database:filename key:value pairs
-        if isinstance(seqfiles, list):
-            self.seqfiles = detect_files(seqfiles)
-        if isinstance(taxfiles, list):
-            self.taxfiles = detect_files(taxfiles)
-        
+        # seqfiles and taxfiles should be dictionaries with database:filename key:value pairs        
         self.generate_outfiles()
     
     def generate_outfiles(self):
         for sample in self.seqfiles.values():
-            header = sample.split('/')[-1].split('_')[:-1]
-            header = '_'.join(header)
-            self.seq_out = f'{self.out_dir}/{header}.fasta'
-            self.acc_out = f'{self.out_dir}/{header}.acclist'
-            self.tax_out = f'{self.out_dir}/{header}.tax'
-            self.taxguide_out = f'{self.out_dir}/{header}.taxguide'
-            self.rank_dict_out = f'{self.out_dir}/{header}.ranks'
-            self.valid_rows_out = f'{self.out_dir}/{header}.rows'
+            header = re.sub('.*/', self.out_dir + '/', re.sub('__.*', '', sample))
+            self.seq_out = header + '.fasta'
+            self.acc_out = header + '.acclist'
+            self.tax_out = header +  '.tax'
+            self.taxguide_out = header + '.taxguide'
+            self.rank_dict_out = header + '.ranks'
+            self.valid_rows_out = header + '.rows'
             break
         
-    def set_ranks(self, ranklist=['phylum', 'class', 'order', 'family', 'genus', 'species']):
-        self.ranks = ranklist
+    def set_ranks(self, ranks=None):
+        if ranks is None:
+            self.ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']
+        self.ranks = ranks
         
     def merge_seqs(self):
         # reads given sequence files and extracts accessions
@@ -121,11 +102,12 @@ class Merger():
             
             if len(id_list) == 0:
                 logger.warning('No records found in file {seqfile}')
+                continue
                 
             acc_subtab = pd.DataFrame(id_list, columns = ['Accession'])
             acc_subtab['Database'] = database
             acc_tabs.append(acc_subtab)
-        
+            
         acc_tab = pd.concat(acc_tabs)
         
         # save merged seqs to self.seq_out and accession table to self.acc_out
@@ -142,29 +124,6 @@ class Merger():
         self.merge_seqs()
         mtax = MergerTax(self.taxfiles, self.ranks)
         mtax.merge_taxons(self.tax_out, self.taxguide_out, self.rank_dict_out, self.valid_rows_out)
-    
-    def merge_from_fasta(self, seqfile, taxfile):
-        # Used when a fasta file was provided, generate acclist and taxguide
-        header = seqfile.split('/')[-1].split('.')[0]
-        self.acc_out = f'{self.out_dir}/{header}.acclist'
-        self.tax_out = f'{self.out_dir}/{header}.tax'
-        self.taxguide_out = f'{self.out_dir}/{header}.taxguide'
-        # generate acc list
-        acc_list = []
-        with open(seqfile, 'r') as seq_handle:
-            for acc, seq in sfp(seq_handle):
-                acc_list.append(acc)
-        
-        acc_tab = pd.DataFrame(acc_list, columns = ['Accession'])
-        acc_tab['Database'] = 'NCBI'
-        acc_tab.to_csv(self.acc_out)
-        # generate taxguide
-        tax_tab = pd.read_csv(taxfile, index_col = 0)
-        guide_tab = flatten_taxtab(tax_tab, self.ranks)
-        guide_tab.to_csv(self.taxguide_out)
-        logger.info(f'Generated files {header}.acclist and {header.taxguide} in directory {self.out_dir}')
-        # update sequence count
-        self.nseqs = len(acc_list)
 
 class MergerTax():
     def __init__(self, tax_files, ranks):

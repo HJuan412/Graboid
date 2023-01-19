@@ -49,6 +49,7 @@ def fetch_seqs(acc_list, database, out_header, bold_file=None, chunk_size=500, m
 #%% classes
 class NCBIFetcher:
     # This class handles record download from NCBI
+    # bold_file kept for compatibility
     def __init__(self, out_header, bold_file=None):
         # out_header is used to generate the names for the output files
         self.out_seqs = f'{out_header}.seqtmp'
@@ -133,54 +134,45 @@ fetch_dict = {'BOLD':BOLDFetcher,
               'NCBI':NCBIFetcher}
 
 class Fetcher():
+    # class attribute containing valid fetcher tools
+    fetch_dict = {'BOLD':BOLDFetcher,
+                  'NCBI':NCBIFetcher}
     def __init__(self, out_dir):
-        self.out_header = ''
         self.out_dir = out_dir
         self.seq_files = {}
         self.tax_files = {}
         self.bold_file = None
     
-    def load_accfile(self, acc_file):
+    def load_acctab(self, acc_file):
         self.acc_file = acc_file
         self.acc_tab = pd.read_csv(acc_file, index_col = 0)
         
         # generate header for output files
-        out_header = re.sub('.*/', '', re.sub('\..*', '', acc_file))
-        self.out_header = f'{self.out_dir}/{out_header}'
-        self.failed_file = f'{self.out_dir}/{out_header}_failed.acc'
-    
-    def set_bold_file(self, bold_file):
-        # Bold summary file needed to extract sequences and taxonomic data from
-        self.bold_file = bold_file
-        
-    def check_accs(self):
+        self.out_header = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '', acc_file))
+        self.failed_file = self.out_header +'_failed.acc'
+        # check that acc tab is not empty
         if len(self.acc_tab) == 0:
-            logger.warning(f'Accession table from {self.acc_file} is empty')
-            return False
-        if 'BOLD' in self.acc_tab['Database']:
-            if self.bold_file is None:
-                logger.error(f'BOLD records detected in {self.acc_file} but no BOLD.summ file was provided')
-                return False
-        return True
+            raise Exception(f'Accession table from {self.acc_file} is empty')
 
-    def fetch(self, acc_file, chunk_size=500, max_attempts=3):
+    def fetch(self, acc_tab, summ_files, chunk_size=500, max_attempts=3):
         # Fetches sequences and taxonomies, splits acc lists into chunks of chunk_size elements
         # for each chunk, try to download up to max_attempts times
         
-        self.load_accfile(acc_file)
-
-        if not self.check_accs():
-            # acc_table is empty
-            return
+        # load and check files
+        try:
+            self.load_acctab(acc_tab)
+        except Exception as excp:
+            logger.warning(excp)
+            raise
         
         failed = [] # here we store accessions that failed to download
         
         # split the acc_table by database
         for database, sub_tab in self.acc_tab.groupby('Database'):
             acc_list = sub_tab['Accession'].to_list()
-            out_header = f'{self.out_header}_{database}'
-            # set fetcher
-            fetcher = fetch_dict[database](out_header, self.bold_file)
+            out_header = f'{self.out_header}__{database}'
+            # set fetcher, include corresponding summary file (does nothing for mcbi fetcher)
+            fetcher = fetch_dict[database](out_header, summ_files[database])
             # update out file containers
             self.seq_files[database] = fetcher.out_seqs
             self.tax_files[database] = fetcher.out_taxs
@@ -206,6 +198,8 @@ class Fetcher():
         logger.info(f'Finished retrieving {total_records - failed_records} of {total_records} records.')
         if failed_records > 0:
             logger.info(f'{failed_records} saved to {self.failed_files}')
+        if len(failed) == len(self.acc_tab):
+            raise Exception('Failed to retrieve sequences')
     
     def fetch_tax_from_fasta(self, fasta_file):
         # generate output file

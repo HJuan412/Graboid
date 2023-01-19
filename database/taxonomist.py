@@ -223,9 +223,9 @@ class Taxonomist:
     # class attribute dictionary containing usable taxonomist tools
     taxer_dict = {'BOLD':TaxonomistBOLD,
                   'NCBI':TaxonomistNCBI}
-    def __init__(self, out_dir):
+    def __init__(self, out_dir, ranks=None):
         self.taxid_files = {}
-        self.set_ranks()
+        self.set_ranks(ranks)
         self.out_dir = out_dir
         
         self.out_files = {}
@@ -236,8 +236,10 @@ class Taxonomist:
         if isinstance(self.taxid_files, list):
             self.taxid_files = detect_taxidfiles(taxid_files)
     
-    def set_ranks(self, ranklist=['phylum', 'class', 'order', 'family', 'genus', 'species']):
-        self.ranks = ranklist
+    def set_ranks(self, ranks=None):
+        if ranks is None:
+            self.ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']
+        self.ranks = ranks
     
     def taxing(self, taxid_files, chunksize=500, max_attempts=3):
         # taxid_files : dict with {database:taxid_file}

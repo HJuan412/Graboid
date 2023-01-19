@@ -53,7 +53,7 @@ def makeblastdb(ref_file, db_prefix):
 
 def check_db_dir(db_dir):
     # counts the database files present at the given location, check returns True if six .n* files are found
-    db_files = glob(f'{db_dir}*.n*')
+    db_files = glob(db_dir + '/*.n*')
     check = False
     if len(db_files) == 6:
         check = True

@@ -46,13 +46,6 @@ def fetch_seqs(acc_list, database, out_header, bold_file=None, chunk_size=500, m
             failed += chunk
     return failed
 
-def get_accs_from_fasta(fasta_file):
-    # this function is used to retrieve accessions when a fasta file is already provided
-    accs = []
-    with open(fasta_file, 'r') as fasta_handle:
-        for acc, seq in sfp(fasta_handle):
-            accs.append(acc)
-    return accs
 #%% classes
 class NCBIFetcher:
     # This class handles record download from NCBI
@@ -221,8 +214,11 @@ class Fetcher():
         self.tax_files['NCBI'] = out_file
         
         # get list of accessions
-        acc_list = get_accs_from_fasta(fasta_file)
+        with open(fasta_file, 'r') as fasta_handle:
+            acc_list = [re.sub(' .*', '', acc) for acc, seq in sfp(fasta_handle)]
         
+        if len(acc_list) == 0:
+            raise Exception(f'No valid accession codes could be retrieved from file {fasta_file}')
         # retrieve taxIDs and build TaxID tab
         summ_handle = Entrez.esummary(db='nucleotide', id=acc_list, retmode='xml')
         summ_recs = Entrez.read(summ_handle)

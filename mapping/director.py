@@ -94,7 +94,7 @@ def build_blastdb(ref_seq, db_dir, clear=False):
     
 #%% classes
 class Director:
-    def __init__(self, out_dir='', warn_dir=''):
+    def __init__(self, out_dir, warn_dir):
         # directories
         self.out_dir = out_dir
         self.warn_dir = warn_dir
@@ -115,15 +115,20 @@ class Director:
     @property
     def blast_report(self):
         return self.blaster.report
+    @property
+    def map_file(self):
+        return self.mapper.mat_file
+    @property
+    def acc_file(self):
+        return self.mapper.acc_file
     
     def get_files(self, seq_file, seq_name=None):
         # use this to check if a map file already exists
         self.mapper.generate_outnames(seq_file, seq_name=None)
         return self.mapper.mat_file, self.mapper.acc_file
         
-    def direct(self, fasta_file, db_dir, out_name=None, evalue=0.005, threads=1, keep=False):
+    def direct(self, fasta_file, db_dir, evalue=0.005, threads=1, keep=False):
         # fasta file is the file to be mapped
-        # out_name, optional file name for the generated matrix, otherwise generated automatically
         # evalue is the max evalue threshold for the blast report
         # db_dir points to the blast database: should be <path to db files>/<db prefix>
         # keep signals the director to conserve the generated map
@@ -132,23 +137,20 @@ class Director:
         check, db_files = blast.check_db_dir(db_dir)
         if not check:
             logger.error(f'Found {len(db_files)} files in {db_dir}. Must contain 6')
-            return
+            raise Exception(f'Found {len(db_files)} files in {db_dir}. Must contain 6')
         self.db_dir = db_dir
         
         print(f'Performing blast alignment of {fasta_file}...')
         # perform BLAST
-        self.blaster.blast(fasta_file, db_dir, out_name, threads)
+        self.blaster.blast(fasta_file, db_dir, threads)
         if self.blast_report is None:
-            logger.error('No blast report found. What happened?')
-            return
+            raise Exception('No blast report found. What happened?')
         print('BLAST is Done!')
         
         # generate matrix
         print('Building alignment matrix...')
         # if keep == True, keep generated matrix, bounds and acclist in map_data, otherwise map_data is None
-        map_data = self.mapper.build(self.blast_report, fasta_file, out_name, evalue, keep)
-        self.mat_file = self.mapper.mat_file
-        self.acc_file = self.mapper.acc_file
+        map_data = self.mapper.build(self.blast_report, fasta_file, evalue, keep)
         print('Done!')
         logger.info(f'Generated alignment map files: {self.mat_file} (alignment matrix) and {self.acc_file} (accession index)')
         if keep:

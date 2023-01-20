@@ -180,7 +180,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     #     clear : clear the db_name directory (if it exists)
     
     # check sequences in ref_seq
-    n_refseqs = mp.check_fasta(ref_seq)
+    n_refseqs, seqlen = mp.check_fasta(ref_seq)
     if n_refseqs != 1:
         raise Exception(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
         
@@ -223,8 +223,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
         
     # build map
     mp.build_blastdb(ref_seq = ref_file,
-                     ref_dir = db_dir,
-                     ref_name = 'ref',
+                     db_dir = ref_dir,
                      clear = True)
     map_director = mp.Director(db_dir, warn_dir)
     map_director.direct(fasta_file = db_director.seq_file,
@@ -244,7 +243,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     print('Finished building database!')
     db_logger.info(f'Database name: {db_name}')
     db_logger.info(f'Database location: {db_dir}')
-    db_logger.info(f'Reference sequence (length): {ref_seq}(len)')
+    db_logger.info(f'Reference sequence (length): {ref_seq}({seqlen})')
     db_logger.info(f'N sequences: {db_director.nseqs}')
     db_logger.info('Taxa:')
     db_logger.info(f'\tBase taxon (lvl): {db_director.base_taxa} ({db_director.base_rank})')

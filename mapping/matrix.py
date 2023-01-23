@@ -45,7 +45,7 @@ def read_blast(blast_file, evalue = 0.005):
     # filter blast report for evalue
     blast_tab = blast_tab.loc[blast_tab['evalue'] <= evalue]
     if len(blast_tab) == 0:
-        logger.warning(f'No matches in the blast report {blast_file} passed the filter (evalue <= {evalue})')
+        raise Exception(f'No matches in the blast report {blast_file} passed the filter (evalue <= {evalue})')
         
     # process match coordinates
     subject_coords = blast_tab[['sstart', 'send']].values    
@@ -98,7 +98,7 @@ def load_map(map_path):
     with open(acc_file, 'r') as acc_handle:
         accs = acc_handle.read().splitlines()
     
-    return accs, map_npz['matrix'], map_npz['bounds']
+    return accs, map_npz['matrix'], map_npz['bounds'], map_npz['coverage']
         
 def get_coverage(coords, ref_len):
     coverage = np.zeros(ref_len, dtype=np.int32)
@@ -148,6 +148,7 @@ class MatBuilder:
         print('Reading blast report...')
         try:
             blast_tab, marker_len = read_blast(blast_file, evalue)
+            self.marker_len = marker_len
         except Exception as excp:
             logger.warning(excp)
             raise
@@ -191,7 +192,7 @@ class MatBuilder:
         
         # store output
         # save the matrix along with the bounds and coverage array (coverage array done over the entire length of the marker reference)
-        np.savez(self.mat_file, bounds=bounds, matrix=matrix, coverage=coverage)
+        np.savez_compressed(self.mat_file, bounds=bounds, matrix=matrix, coverage=coverage)
         with open(self.acc_file, 'w') as list_handle:
             list_handle.write('\n'.join(self.acclist))
         logger.info(f'Stored matrix of dimensions {matrix.shape} in {self.mat_file}')

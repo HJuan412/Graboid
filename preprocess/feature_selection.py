@@ -138,36 +138,18 @@ class Selector:
         self.out_dir = out_dir
         self.order_file = f'{out_dir}/order.npz'
         self.diff_file = f'{out_dir}/diff.csv'
-        self.taxa = None
-        self.seqs = None
-        self.set_ranks()
-        
-    def set_matrix(self, matrix, bounds, tax_tab=None):
-        self.matrix = matrix
-        self.bounds = bounds
-        if not tax_tab is None:
-            self.tax_tab = get_taxid_tab(tax_tab)
     
-    def filter_taxons(self, min_seqs=10, rank='genus'):
-        tax_counts = self.tax_tab[rank].value_counts(ascending = False)
-    
+    def build_tabs(self, matrix, bounds, coverage, tax_file, min_seqs=0, rank='genus'):
+        # filter taxa below the min_seqs sequence threshold at the given rank
+        tax_tab = get_taxid_tab(tax_file)
+        ranks = {rk:idx for idx, rk in enumerate(tax_tab.columns)}
+        tax_counts = tax_tab[rank].value_counts()
         selected = tax_counts.loc[tax_counts >= min_seqs]
         taxa = selected.index.to_numpy(dtype = int)
-        seqs = np.argwhere(self.tax_tab[rank].isin(taxa).values).flatten()
+        seqs = np.argwhere(tax_tab[rank].isin(taxa).values).flatten()
         
-        self.taxa = taxa
-        self.seqs = seqs
-    
-    def build_tabs(self):
-        # Get the entropy difference for each base/taxon/rank.
-        # Uses filtered matrix if a filter has been applied
-        # Define matrix and tax table to utilize
-        if self.seqs:
-            sub_mat = self.matrix[self.seqs]
-            sub_tax = self.tax_tab.loc[self.seqs, self.taxa]
-        else:
-            sub_mat = self.matrix
-            sub_tax = self.tax_tab
+        sub_mat = matrix[seqs]
+        sub_tax = tax_tab.loc[seqs]
         
         # Quantify information per site per taxon per rank
         self.diff_tab = get_ent_diff(sub_mat, sub_tax)
@@ -175,7 +157,7 @@ class Selector:
         # Get ordered bases for each taxon
         taxons = []
         orders = []
-        for rk, rk_idx in self.ranks.items():
+        for rk, rk_idx in ranks.items():
             sub_diff = self.diff_tab.loc[rk]
             for idx, (tax, row) in enumerate(sub_diff.iterrows()):
                 taxons.append([rk_idx, tax])
@@ -185,23 +167,20 @@ class Selector:
         # order_tab is a matrix containing the sites ordered in function of decreasing entropy difference (firts elements are the most informative)
         self.order_tax = np.array(taxons, dtype = np.int32)
         self.order_tab = np.array(orders, dtype=np.int16)
-        self.order_bounds = self.bounds
-    
-    def set_ranks(self, ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']):
-        self.ranks = {rk:idx for idx, rk in enumerate(ranks)}
-    
-    def save_order_mat(self):
-        with open(self.order_file, 'wb') as out_handle:
-            np.savez(out_handle, order_tab = self.order_tab, order_bounds = self.order_bounds, order_tax = self.order_tax)
+        self.order_bounds = bounds
+        
+        # save data
+        np.savez_compressed(self.order_file,
+                            order = self.order_tab,
+                            bounds = self.order_bounds,
+                            taxs = self.order_tax)
+        self.diff_tab.to_csv(self.diff_file)
     
     def load_order_mat(self, file):
         order_data = np.load(file)
         self.order_tab = order_data['order_tab']
         self.order_bounds = order_data['order_bounds']
         self.order_tax = order_data['order_tax']
-    
-    def save_diff_tab(self):
-        self.diff_tab.to_csv(self.diff_file)
     
     def load_diff_tab(self, file):
         self.diff_tab = pd.read_csv(file, index_col = [0, 1])

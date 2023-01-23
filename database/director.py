@@ -158,7 +158,7 @@ class Director:
         return self.merger.rank_counts.loc[self.merger.ranks]
 
 #%% main function
-def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold=True, cp_fasta=False, chunksize=500, max_attempts=3, evalue=0.005, threads=1, keep=False, clear=False):
+def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold=True, cp_fasta=False, chunksize=500, max_attempts=3, evalue=0.005, min_seqs=10, filt_rank='genus', threads=1, keep=False, clear=False):
     # Arguments:
     # required:
     #     db_name : name for the generated database
@@ -174,6 +174,8 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     #     max_attempts : Number of retries for failed passes
     #   # mapping
     #     evalue : evalue threshold when building the alignment
+    #     min_seqs : minimum sequence thresholds at the given filt_rank, to conserve a taxon
+    #     filt_rank : taxonomic rank at which to apply the min_seqs threshold
     #     threads : threads to use when building the alignment
     #   # cleanup
     #     keep : keep the temporal files
@@ -229,14 +231,16 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     map_director.direct(fasta_file = db_director.seq_file,
                         db_dir = ref_dir,
                         evalue = evalue,
-                        threads = threads,
-                        keep = keep)
+                        threads = threads)
     
     # quantify information
     selector = fsele.Selector(db_dir)
-    selector.set_matrix(map_director.matrix, map_director.bounds, db_director.tax_file)
-    selector.build_tabs()
-    selector.save_order_mat()
+    selector.build_tabs(map_director.matrix,
+                        map_director.bounds,
+                        map_director.coverage,
+                        db_director.tax_file, # TODO: check that this tax file is the correct one in db_director
+                        min_seqs = min_seqs,
+                        rank = filt_rank)
     
     # write summaries
     # Database summary

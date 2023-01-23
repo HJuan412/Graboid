@@ -9,6 +9,7 @@ Build an alignment matrix from the blast report
 
 #%% libraries
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
+from glob import glob
 import logging
 import matplotlib.pyplot as plt
 import numpy as np
@@ -89,11 +90,11 @@ def get_numseq(seq, trans_dict):
     numseq = np.array([trans_dict[base] for base in seq], dtype = np.int8)
     return numseq
 
-def load_map(map_path):
+def load_map(map_dir):
     # load a map and a corresponding accession list
     # returns accession list, alignment map, alignment bounds
-    map_file = map_path + '.npz'
-    acc_file = map_path + '.accs'
+    map_file = glob(map_dir + '*npz')[0]
+    acc_file = glob(map_dir + '*.accs')[0]
     map_npz = np.load(map_file)
     with open(acc_file, 'r') as acc_handle:
         accs = acc_handle.read().splitlines()

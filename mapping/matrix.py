@@ -93,8 +93,8 @@ def get_numseq(seq, trans_dict):
 def load_map(map_dir):
     # load a map and a corresponding accession list
     # returns accession list, alignment map, alignment bounds
-    map_file = glob(map_dir + '*npz')[0]
-    acc_file = glob(map_dir + '*.accs')[0]
+    map_file = glob(map_dir + '*__map.npz')[0]
+    acc_file = glob(map_dir + '*__map.accs')[0]
     map_npz = np.load(map_file)
     with open(acc_file, 'r') as acc_handle:
         accs = acc_handle.read().splitlines()

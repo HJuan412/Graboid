@@ -133,18 +133,14 @@ class Director:
         # db_dir points to the blast database: should be <path to db files>/<db prefix>
         # keep signals the director to conserve the generated map
         
-        # check blast database
-        check, db_files = blast.check_db_dir(db_dir)
-        if not check:
-            logger.error(f'Found {len(db_files)} files in {db_dir}. Must contain 6')
-            raise Exception(f'Found {len(db_files)} files in {db_dir}. Must contain 6')
         self.db_dir = db_dir
         
         print(f'Performing blast alignment of {fasta_file}...')
         # perform BLAST
-        self.blaster.blast(fasta_file, db_dir, threads)
-        if self.blast_report is None:
-            raise Exception('No blast report found. What happened?')
+        try:
+            self.blaster.blast(fasta_file, db_dir, threads)
+        except Exception:
+            raise
         print('BLAST is Done!')
         
         # generate matrix

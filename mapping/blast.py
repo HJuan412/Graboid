@@ -36,10 +36,11 @@ def blast(query, ref, out_file, threads=1):
     ref_marker_len = int(re.sub('\\n', '', subprocess.run(bdbcmd_cline, capture_output=True).stdout.decode()))
     blast_tab = pd.read_csv(out_file, sep='\t', header=None, names='qseqid pident length qstart qend sstart send evalue'.split())
     if len(blast_tab) == 0:
-        logger.warning(f'No matches found for file {query} on database {ref}')
-        return
+        raise Exception(f'Blast search of file {query} on database {ref} yielded no results')
     ref_row = pd.Series(index=blast_tab.columns)
+    # add the reference length as an extra row in the report
     ref_row.at['qseqid', 'length', 'evalue'] = ['Reference', ref_marker_len, 100] # evalue of 100 means this row is always filtered out
+    # overwrite blast report with column names and reference row
     pd.concat([blast_tab, ref_row.to_frame().T]).to_csv(out_file, index=False)
 
 def makeblastdb(ref_file, db_prefix):
@@ -54,10 +55,10 @@ def makeblastdb(ref_file, db_prefix):
 def check_db_dir(db_dir):
     # counts the database files present at the given location, check returns True if six .n* files are found
     db_files = glob(db_dir + '/*.n*')
-    check = False
     if len(db_files) == 6:
-        check = True
-    return check, db_files
+        db_name = re.sub('\..n.*', '', db_files[0])
+        return db_name
+    raise Exception(f'Incomplete BLAST database ({len(db_files)} files found)')
 
 #%% classes
 class Blaster:
@@ -67,10 +68,11 @@ class Blaster:
     
     def blast(self, fasta_file, db_dir, threads=1):
         self.report = None
-        check, db_files = check_db_dir(db_dir)
-        if not check:
-            logger.error(f'Incomplete BLAST database ({len(db_files)} files found)')
-            raise Exception(f'Incomplete BLAST database ({len(db_files)} files found)')
+        try:
+            db_name = check_db_dir(db_dir)
+        except Exception as excp:
+            logger.error(excp)
+            raise
         
         # set output name
         blast_out = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '.BLAST', fasta_file))
@@ -78,9 +80,9 @@ class Blaster:
         # perform BLAST
         print(f'Blasting {fasta_file}')
         try:
-            blast(fasta_file, db_dir, blast_out, threads)
+            blast(fasta_file, db_name, blast_out, threads)
             self.report = blast_out
             logger.info(f'Generated blast report at {blast_out}')
-        except:
-            logger.error(f'Unable to blast {fasta_file}')
+        except Exception as excp:
+            logger.error(excp)
             raise

@@ -119,17 +119,28 @@ class Director:
     @property
     def acc_file(self):
         return self.mapper.acc_file
+    @property
+    def matrix(self):
+        return self.mapper.matrix
+    @property
+    def bounds(self):
+        return self.mapper.bounds
+    @property
+    def coverage(self):
+        return self.mapper.coverage
+    @property
+    def acclist(self):
+        return self.mapper.acclist
     
     def get_files(self, seq_file, seq_name=None):
         # use this to check if a map file already exists
         self.mapper.generate_outnames(seq_file, seq_name=None)
         return self.mapper.mat_file, self.mapper.acc_file
         
-    def direct(self, fasta_file, db_dir, evalue=0.005, threads=1, keep=False):
+    def direct(self, fasta_file, db_dir, evalue=0.005, threads=1):
         # fasta file is the file to be mapped
         # evalue is the max evalue threshold for the blast report
         # db_dir points to the blast database: should be <path to db files>/<db prefix>
-        # keep signals the director to conserve the generated map
         
         self.db_dir = db_dir
         
@@ -143,14 +154,9 @@ class Director:
         
         # generate matrix
         print('Building alignment matrix...')
-        # if keep == True, keep generated matrix, bounds and acclist in map_data, otherwise map_data is None
-        map_data = self.mapper.build(self.blast_report, fasta_file, evalue, keep)
+        self.mapper.build(self.blast_report, fasta_file, evalue)
         print('Done!')
         logger.info(f'Generated alignment map files: {self.mat_file} (alignment matrix) and {self.acc_file} (accession index)')
-        if keep:
-            self.matrix = map_data[0]
-            self.bounds = map_data[1]
-            self.acclist = map_data[2]
         return
 
 #%% main body

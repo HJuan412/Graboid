@@ -135,12 +135,15 @@ def plot_coverage_data(blast_file, evalue = 0.005, figsize=(12,7)):
 class MatBuilder:
     def __init__(self, out_dir):
         self.out_dir = out_dir
-        
-        self.acclist = []
         self.mat_file = None
         self.acc_file = None
         
-    def build(self, blast_file, seq_file, evalue=0.005, keep=False):
+        self.matrix = None
+        self.bounds = None
+        self.coverage = None
+        self.acclist = None
+        
+    def build(self, blast_file, seq_file, evalue=0.005):
         # generate out names
         out_name = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '__map', seq_file))
         self.mat_file = out_name + '.npz'
@@ -189,7 +192,6 @@ class MatBuilder:
                     numseq = get_numseq(seq[match[0]:match[1]][::-1], rc_dict)
                 matrix[q_idx, match[2]:match[3]] = numseq
             acclist.append(qry)
-        self.acclist = acclist
         
         # store output
         # save the matrix along with the bounds and coverage array (coverage array done over the entire length of the marker reference)
@@ -199,7 +201,8 @@ class MatBuilder:
         logger.info(f'Stored matrix of dimensions {matrix.shape} in {self.mat_file}')
         logger.info(f'Stored accession_list in {self.acc_file}')
         
-        if keep:
-            # use this to retrieve generating directly from this method
-            return matrix, bounds, self.acclist
+        self.matrix = matrix
+        self.bounds = bounds
+        self.coverage = coverage
+        self.acclist = acclist
         return

@@ -243,7 +243,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     print('Finished building database!')
     db_logger.info(f'Database name: {db_name}')
     db_logger.info(f'Database location: {db_dir}')
-    db_logger.info(f'Reference sequence (length): {ref_seq}({seqlen})')
+    db_logger.info(f'Reference sequence (length): {ref_seq}({map_director.marker_len})')
     db_logger.info(f'N sequences: {db_director.nseqs}')
     db_logger.info('Taxa:')
     db_logger.info(f'\tBase taxon (lvl): {db_director.base_taxa} ({db_director.base_rank})')

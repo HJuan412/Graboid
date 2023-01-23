@@ -180,7 +180,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     #     clear : clear the db_name directory (if it exists)
     
     # check sequences in ref_seq
-    n_refseqs, seqlen = mp.check_fasta(ref_seq)
+    n_refseqs = mp.check_fasta(ref_seq)
     if n_refseqs != 1:
         raise Exception(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
         

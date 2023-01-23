@@ -55,12 +55,10 @@ parser.add_argument('-ow', '--overwrite',
 def check_fasta(fasta_file):
     # checks the given file contains at least one fasta sequence
     nseqs = 0
-    seqlen = 0
     with open(fasta_file, 'r') as fasta_handle:
         for title, seq in sfp(fasta_handle):
             nseqs += 1
-            seqlen = len(seq)
-    return nseqs, seqlen
+    return nseqs
 
 def build_blastdb(ref_seq, db_dir, clear=False):
     # build a blast database

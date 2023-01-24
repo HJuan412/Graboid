@@ -98,40 +98,6 @@ def plot_gain(table, rank, criterium='diff', figsize=(7,10)):
     ax.set_title(f'Entropy difference for rank {rank} ({len(sub_tab)} taxons)')
     ax.margins(x = 0.05, y = 0.01)
 
-def get_plateaus(coverage, dropoff=0.05, min_width=10, min_height=0.1):
-    # coverage : coverage array
-    # dropoff : dropoff threshold to end a plateau
-    # min_width : minimum weight to consider a plateau
-    # min_height : mimimum coverage to consider (places below this coverage score will be ignored)
-    # ASSUMPTION: All sequences at a given plateau are included in the preceeding (higher) plateaus
-    plateaus = []
-    
-    # sort coverages
-    cov_idxs = np.argsort(coverage)[::-1]
-    sorted_coverage = coverage[cov_idxs]
-    
-    # crop low coverage places
-    max_cov = max(coverage)
-    min_cov = max_cov * min_height
-    cutoff = min(np.argwhere(sorted_coverage < min_cov).flatten()) + 1
-    cov_idxs = cov_idxs[:cutoff]
-    sorted_coverage = sorted_coverage[:cutoff]
-    
-    # define plateaus
-    diff_thresh = max_cov * dropoff
-    diff_cov = -np.diff(sorted_coverage, prepend=[max_cov])
-    # get positions where the shift is greater than diff_thresh
-    plt_ends = np.argwhere(diff_cov >= diff_thresh).flatten()
-    # get plateau widths (starting from the end of the previous plateau)
-    plt_widths = np.diff(plt_ends, prepend=[0])
-    valid_plt_ends = plt_ends[np.argwhere(plt_widths >= min_width).flatten()]
-    
-    # store valid plateaus
-    for plat in valid_plt_ends:
-        plateau = cov_idxs[:plat]
-        plt_coverage = min(coverage[plateau])
-        plateaus.append([plateau, plt_coverage])
-    return plateaus
 #%%
 class Selector:
     def __init__(self, out_dir):

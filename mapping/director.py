@@ -91,40 +91,46 @@ def build_blastdb(ref_seq, db_dir, clear=False):
     blast.makeblastdb(ref_seq, db_dir)
     logger.info(f'Generated blast databse {db_name} using the file {ref_seq} in directory {db_dir}')
 
-def get_plateaus(coverage, dropoff=0.05, min_width=10, min_height=0.1):
-    # coverage : coverage array
-    # dropoff : dropoff threshold to end a plateau
-    # min_width : minimum weight to consider a plateau
-    # min_height : mimimum coverage to consider (places below this coverage score will be ignored)
-    # ASSUMPTION: All sequences at a given plateau are included in the preceeding (higher) plateaus
-    plateaus = []
+def get_mesas(coverage, dropoff=0.05, min_height=0.1, min_width=2):
+    # returns an array with columns [mesa start, mesa end, mesa width, mesa average height]
+    # dropoff : percentage of a mesa's max height to determine dropoff threshold (mesa's edge)
+    # min_width : minimum width of a mesa
+    # if min_height is a percentage of the max coverage, calculate and replace
+    if isinstance(min_height, float):
+        min_height = max(coverage) * min_height
+    # edge values of 0 inserted into cov to indicate the ends of the alignment
+    cov = np.insert([.0,.0], 1, coverage.astype(float))
+    diffs = np.diff(cov).astype(float)
+    mesas = []
+    # get index of highest location and its height
+    top = np.argmax(cov)
+    height = coverage[top]
+    while height > min_height:
+        drop_threshold = height * dropoff
+        # get upper bound
+        # first crossing of the threshold AFTER top (at least 1 position to the right of top)
+        upper = top + np.argmax(abs(diffs[top:]) >= drop_threshold)
+        upper = min(upper, len(coverage))
+        # get lower bound
+        # last crossing of the threshold BEFORE upper
+        lower = upper - np.argmax(abs(diffs[:upper][::-1]) >= drop_threshold) - 1
+        lower = max(lower, 0)
+        mean_height = coverage[lower:upper].mean()
+        mesas.append([lower, upper, mean_height])
+        # replace mesa values from coverage & diff arrays with -inf so it is never chosen as top and always breaks a window
+        # displaced 1 to the right to account for leading value inserted
+        cov[lower + 1:upper + 1] = -np.inf
+        diffs[lower + 1:upper + 1] = -np.inf
+        top = np.argmax(cov)
+        height = cov[top]
     
-    # sort coverages
-    cov_idxs = np.argsort(coverage)[::-1]
-    sorted_coverage = coverage[cov_idxs]
-    
-    # crop low coverage places
-    max_cov = max(coverage)
-    min_cov = max_cov * min_height
-    cutoff = min(np.argwhere(sorted_coverage < min_cov).flatten()) + 1
-    cov_idxs = cov_idxs[:cutoff]
-    sorted_coverage = sorted_coverage[:cutoff]
-    
-    # define plateaus
-    diff_thresh = max_cov * dropoff
-    diff_cov = -np.diff(sorted_coverage, prepend=[max_cov])
-    # get positions where the shift is greater than diff_thresh
-    plt_ends = np.argwhere(diff_cov >= diff_thresh).flatten()
-    # get plateau widths (starting from the end of the previous plateau)
-    plt_widths = np.diff(plt_ends, prepend=[0])
-    valid_plt_ends = plt_ends[np.argwhere(plt_widths >= min_width).flatten()]
-    
-    # store valid plateaus
-    for plat in valid_plt_ends:
-        plateau = cov_idxs[:plat]
-        plt_coverage = min(coverage[plateau])
-        plateaus.append([plateau, plt_coverage])
-    return plateaus
+    mesas = np.array(mesas)
+    # filter messas by min_width & sort by position, add widths
+    mesas = np.insert(mesas, 2, np.diff(mesas[:,:2]).flatten(), 1)
+    mesas = mesas[mesas[:,2] > min_width]
+    mesas = mesas[np.argsort(mesas[:,0]).flatten()]
+    return mesas
+
 #%% classes
 class Director:
     def __init__(self, out_dir, warn_dir):
@@ -172,7 +178,7 @@ class Director:
         self.mapper.generate_outnames(seq_file, seq_name=None)
         return self.mapper.mat_file, self.mapper.acc_file
         
-    def direct(self, fasta_file, db_dir, evalue=0.005, threads=1):
+    def direct(self, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, threads=1):
         # fasta file is the file to be mapped
         # evalue is the max evalue threshold for the blast report
         # db_dir points to the blast database: should be <path to db files>/<db prefix>
@@ -187,9 +193,10 @@ class Director:
             raise
         print('BLAST is Done!')
         
-        # generate matrix
+        # generate matrix, register mesas
         print('Building alignment matrix...')
         self.mapper.build(self.blast_report, fasta_file, evalue)
+        self.mesas = get_mesas(self.coverage, dropoff, min_height)
         print('Done!')
         logger.info(f'Generated alignment map files: {self.mat_file} (alignment matrix) and {self.acc_file} (accession index)')
         return

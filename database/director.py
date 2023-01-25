@@ -235,6 +235,9 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     map_director.direct(fasta_file = db_director.seq_file,
                         db_dir = ref_dir,
                         evalue = evalue,
+                        dropoff=dropoff,
+                        min_height=min_height,
+                        min_width=min_width,
                         threads = threads)
     
     # quantify information

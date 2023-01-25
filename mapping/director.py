@@ -178,7 +178,7 @@ class Director:
         self.mapper.generate_outnames(seq_file, seq_name=None)
         return self.mapper.mat_file, self.mapper.acc_file
         
-    def direct(self, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, threads=1):
+    def direct(self, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1):
         # fasta file is the file to be mapped
         # evalue is the max evalue threshold for the blast report
         # db_dir points to the blast database: should be <path to db files>/<db prefix>

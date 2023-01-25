@@ -158,7 +158,7 @@ class Director:
         return self.merger.rank_counts.loc[self.merger.ranks]
 
 #%% main function
-def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold=True, cp_fasta=False, chunksize=500, max_attempts=3, evalue=0.005, min_seqs=10, filt_rank='genus', threads=1, keep=False, clear=False):
+def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold=True, cp_fasta=False, chunksize=500, max_attempts=3, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, min_seqs=10, filt_rank='genus', threads=1, keep=False, clear=False):
     # Arguments:
     # required:
     #     db_name : name for the generated database
@@ -174,6 +174,10 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     #     max_attempts : Number of retries for failed passes
     #   # mapping
     #     evalue : evalue threshold when building the alignment
+    #     # mesas
+    #       dropoff : percentage of mesa height drop to determine bound
+    #       min_height : minimum sequence coverage to consider for a mesa candidate
+    #       min_width : minimum weight needed for a candidate to register
     #     min_seqs : minimum sequence thresholds at the given filt_rank, to conserve a taxon
     #     filt_rank : taxonomic rank at which to apply the min_seqs threshold
     #     threads : threads to use when building the alignment
@@ -254,10 +258,11 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
     db_logger.info('Rank (N taxa):')
     for rk, count in db_director.rank_counts.iteritems():
         db_logger.info(f'\t{rk} ({count})')
-    db_logger.info('Windows:')
-    for win in windows:
-        db_logger.info(f'\tCoordinates (length): ')
-        db_logger.info(f'\tAverage coverage (std):')
+    db_logger.info('Mesas:')
+    for idx, mesa in enumerate(map_director.mesas):
+        db_logger.info(f'\tMesa {idx}')
+        db_logger.info(f'\t\tCoordinates (length): {int(mesa[0])} - {int(mesa[1])} ({int(mesa[2])} bases)')
+        db_logger.info(f'\t\tAverage coverage: {mesa[3]}')
 
 #%% main execution
 parser = argparse.ArgumentParser(prog='Graboid DATABASE',

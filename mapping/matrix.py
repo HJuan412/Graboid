@@ -183,7 +183,7 @@ class MatBuilder:
         self.coverage = None
         self.acclist = None
         
-    def build(self, blast_file, seq_file, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2):
+    def build(self, blast_file, seq_file, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, keep=True):
         # generate out names
         out_name = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '__map', seq_file))
         self.mat_file = out_name + '.npz'
@@ -242,9 +242,10 @@ class MatBuilder:
         logger.info(f'Stored matrix of dimensions {matrix.shape} in {self.mat_file}')
         logger.info(f'Stored accession_list in {self.acc_file}')
         
-        self.matrix = matrix
-        self.bounds = bounds
-        self.coverage = coverage
-        self.mesas = mesas
-        self.acclist = acclist
+        if keep:
+            self.matrix = matrix
+            self.bounds = bounds
+            self.coverage = coverage
+            self.mesas = mesas
+            self.acclist = acclist
         return

@@ -242,6 +242,7 @@ class WindowLoader:
         self.matrix = matrix_data['matrix']
         self.bounds = matrix_data['bounds']
         self.coverage = matrix_data['coverage']
+        self.mesas = matrix_data['mesas']
         self.dims = self.matrix.shape
         # load acclist & tax tab
         with open(acc_file, 'r') as acc_handle:

@@ -237,30 +237,16 @@ class WindowLoader:
         # load matrix
         try:
             matrix_data = np.load(mat_file)
-        except FileNotFoundError:
-            print(f'Error: matrix file {mat_file} not found')
-            return False
         except ValueError:
-            print(f'Error: matrix file {mat_file} is not a valid numpy file')
-            return False
+            raise Exception(f'Error: matrix file {mat_file} is not a valid numpy file')
         self.matrix = matrix_data['matrix']
         self.bounds = matrix_data['bounds']
         self.coverage = matrix_data['coverage']
         self.dims = self.matrix.shape
-        # load acclist
-        try:
-            with open(acc_file, 'r') as acc_handle:
+        # load acclist & tax tab
+        with open(acc_file, 'r') as acc_handle:
                 self.acclist = acc_handle.read().splitlines()
-        except FileNotFoundError:
-            print(f'Error: Accession file {acc_file} not found')
-            return False
-        # load tax tab
-        try:
-            self.tax_tab = get_taxid_tab(tax_file)
-        except FileNotFoundError:
-            print(f'Error: Taxonomy table file {tax_file} not found')
-            return False
-        return True
+        self.tax_tab = get_taxid_tab(tax_file)
     
     def get_window(self, start, end, row_thresh=0.2, col_thresh=0.2):
         self.rows = []

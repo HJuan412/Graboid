@@ -88,40 +88,18 @@ class Director:
         # locate the training files (matrix, accession list, taxonomy table, information scores) needed for classification
         mat_file = glob(data_dir + '/*__map.npz')[0]
         tax_file = glob(data_dir + '/*.tax')[0]
-        guide_file = glob(data_dir + '/*.taxguide')[0]
         acc_file = glob(data_dir + '/*__map.accs')[0]
+        guide_file = glob(data_dir + '/*.taxguide')[0]
         order_file = data_dir + '/order.npz'
         diff_file = data_dir + 'diff.csv'
-        db_dir = data_dir + '/ref'
         
         # set the loader with the learning data
-        if not self.loader.set_files(mat_file, acc_file, tax_file):
-            return False
+        self.loader.set_files(mat_file, acc_file, tax_file)
         # load the taxguide
-        try:
-            self.taxguide = pd.read_csv(guide_file, index_col=0)
-        except FileNotFoundError:
-            print(f'Error: No valid ".taxguide" file found in {data_dir} directory')
-            return False
+        self.taxguide = pd.read_csv(guide_file, index_col=0)
         # load information files
-        try:
-            self.selector.load_order_mat(order_file)
-        except FileNotFoundError:
-            print(f'Error: Order file "order.npz" not found in {data_dir} directory')
-            return False
-        try:
-            self.selector.load_diff_tab(diff_file)
-        except FileNotFoundError:
-            print(f'Error: Difference file "diff.npz" not found in {data_dir} directory')
-            return False
-        
-        # establish db_dir as the blast database (must contain 6 *.n* files)
-        check, db_files = blast.check_db_dir(db_dir)
-        n_files = len(db_files)
-        if not check:
-            print(f'Error: Found {n_files} files in {db_dir}. Must contain 6')
-            return
-        self.db_dir = db_dir
+        self.selector.load_order_mat(order_file)
+        self.selector.load_diff_tab(diff_file)
     
     def set_dist_mat(self, mat_code):
         matrix = cost_matrix.get_matrix(mat_code)

@@ -172,11 +172,6 @@ class Director:
     @property
     def acclist(self):
         return self.mapper.acclist
-    
-    def get_files(self, seq_file, seq_name=None):
-        # use this to check if a map file already exists
-        self.mapper.generate_outnames(seq_file, seq_name=None)
-        return self.mapper.mat_file, self.mapper.acc_file
         
     def direct(self, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1):
         # fasta file is the file to be mapped

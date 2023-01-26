@@ -108,19 +108,14 @@ class Director:
             return
         self.cost_mat = matrix
         
-    def set_query(self, fasta_file, query_name=None, threads=1):
+    def set_query(self, map_file, acc_file):
         # load query files
-        # if query is already mapped, load map, else map query
-        query_mat, query_acc = self.mapper.get_files(fasta_file, query_name)
-        try:
-            query_data = np.load(query_mat)
-            self.query_mat = query_data['matrix']
-            self.query_bounds = query_data['bounds']
-            with open(query_acc, 'r') as acc_handle:
-                self.query_accs = acc_handle.read().splitlines()
-        except FileNotFoundError:
-            self.query_mat, self.query_bounds, self.query_accs = self.mapper.direct(fasta_file, threads=threads, keep=True)
-        
+        query_data = np.load(map_file)
+        self.query_mat = query_data['matrix']
+        self.query_bounds = query_data['bounds']
+        self.query_cov = query_data['coverage']
+        with open(acc_file, 'r') as acc_handle:
+            self.query_accs = acc_handle.read().splitlines()
         self.get_overlap()
     
     def get_overlap(self):
@@ -242,9 +237,10 @@ def main0(work_dir, fasta_file, database, overwrite_map=False, evalue=0.005, dro
         new_maps = DATA.MAPS.copy()
         new_maps.update({fasta:{'map':map_file, 'acc':acc_file}})
         DATA.update_maps(new_maps)
-    
+        
     classifier = Director(work_dir, tmp_dir, warn_dir)
     classifier.set_train_data(db_dir)
+    classifier.set_query(map_file, acc_file)
     # designate classsification params
     classifier.set_dist_mat(dist_mat)
     # classify

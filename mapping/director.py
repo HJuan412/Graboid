@@ -91,46 +91,6 @@ def build_blastdb(ref_seq, db_dir, clear=False):
     blast.makeblastdb(ref_seq, db_dir)
     logger.info(f'Generated blast databse {db_name} using the file {ref_seq} in directory {db_dir}')
 
-def get_mesas(coverage, dropoff=0.05, min_height=0.1, min_width=2):
-    # returns an array with columns [mesa start, mesa end, mesa width, mesa average height]
-    # dropoff : percentage of a mesa's max height to determine dropoff threshold (mesa's edge)
-    # min_width : minimum width of a mesa
-    # if min_height is a percentage of the max coverage, calculate and replace
-    if isinstance(min_height, float):
-        min_height = max(coverage) * min_height
-    # edge values of 0 inserted into cov to indicate the ends of the alignment
-    cov = np.insert([.0,.0], 1, coverage.astype(float))
-    diffs = np.diff(cov).astype(float)
-    mesas = []
-    # get index of highest location and its height
-    top = np.argmax(cov)
-    height = coverage[top]
-    while height > min_height:
-        drop_threshold = height * dropoff
-        # get upper bound
-        # first crossing of the threshold AFTER top (at least 1 position to the right of top)
-        upper = top + np.argmax(abs(diffs[top:]) >= drop_threshold)
-        upper = min(upper, len(coverage))
-        # get lower bound
-        # last crossing of the threshold BEFORE upper
-        lower = upper - np.argmax(abs(diffs[:upper][::-1]) >= drop_threshold) - 1
-        lower = max(lower, 0)
-        mean_height = coverage[lower:upper].mean()
-        mesas.append([lower, upper, mean_height])
-        # replace mesa values from coverage & diff arrays with -inf so it is never chosen as top and always breaks a window
-        # displaced 1 to the right to account for leading value inserted
-        cov[lower + 1:upper + 1] = -np.inf
-        diffs[lower + 1:upper + 1] = -np.inf
-        top = np.argmax(cov)
-        height = cov[top]
-    
-    mesas = np.array(mesas)
-    # filter messas by min_width & sort by position, add widths
-    mesas = np.insert(mesas, 2, np.diff(mesas[:,:2]).flatten(), 1)
-    mesas = mesas[mesas[:,2] > min_width]
-    mesas = mesas[np.argsort(mesas[:,0]).flatten()]
-    return mesas
-
 #%% classes
 class Director:
     def __init__(self, out_dir, warn_dir):
@@ -172,6 +132,9 @@ class Director:
     @property
     def acclist(self):
         return self.mapper.acclist
+    @property
+    def mesas(self):
+        return self.mapper.mesas
         
     def direct(self, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1):
         # fasta file is the file to be mapped
@@ -190,8 +153,7 @@ class Director:
         
         # generate matrix, register mesas
         print('Building alignment matrix...')
-        self.mapper.build(self.blast_report, fasta_file, evalue)
-        self.mesas = get_mesas(self.coverage, dropoff, min_height)
+        self.mapper.build(self.blast_report, fasta_file, evalue, dropoff, min_height, min_width)
         print('Done!')
         logger.info(f'Generated alignment map files: {self.mat_file} (alignment matrix) and {self.acc_file} (accession index)')
         return

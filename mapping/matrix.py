@@ -106,6 +106,46 @@ def get_coverage(coords, ref_len):
     for coo in coords:
         coverage[coo[0]:coo[1]] += 1
     return coverage
+
+def get_mesas(coverage, dropoff=0.05, min_height=0.1, min_width=2):
+    # returns an array with columns [mesa start, mesa end, mesa width, mesa average height]
+    # dropoff : percentage of a mesa's max height to determine dropoff threshold (mesa's edge)
+    # min_width : minimum width of a mesa
+    # if min_height is a percentage of the max coverage, calculate and replace
+    if isinstance(min_height, float):
+        min_height = max(coverage) * min_height
+    # edge values of 0 inserted into cov to indicate the ends of the alignment
+    cov = np.insert([.0,.0], 1, coverage.astype(float))
+    diffs = np.diff(cov).astype(float)
+    mesas = []
+    # get index of highest location and its height
+    top = np.argmax(cov)
+    height = coverage[top]
+    while height > min_height:
+        drop_threshold = height * dropoff
+        # get upper bound
+        # first crossing of the threshold AFTER top (at least 1 position to the right of top)
+        upper = top + np.argmax(abs(diffs[top:]) >= drop_threshold)
+        upper = min(upper, len(coverage))
+        # get lower bound
+        # last crossing of the threshold BEFORE upper
+        lower = upper - np.argmax(abs(diffs[:upper][::-1]) >= drop_threshold) - 1
+        lower = max(lower, 0)
+        mean_height = coverage[lower:upper].mean()
+        mesas.append([lower, upper, mean_height])
+        # replace mesa values from coverage & diff arrays with -inf so it is never chosen as top and always breaks a window
+        # displaced 1 to the right to account for leading value inserted
+        cov[lower + 1:upper + 1] = -np.inf
+        diffs[lower + 1:upper + 1] = -np.inf
+        top = np.argmax(cov)
+        height = cov[top]
+    
+    mesas = np.array(mesas)
+    # filter messas by min_width & sort by position, add widths
+    mesas = np.insert(mesas, 2, np.diff(mesas[:,:2]).flatten(), 1)
+    mesas = mesas[mesas[:,2] > min_width]
+    mesas = mesas[np.argsort(mesas[:,0]).flatten()]
+    return mesas
 #%%
 def plot_coverage_data(blast_file, evalue = 0.005, figsize=(12,7)):
     # TODO: save plot to file
@@ -143,7 +183,7 @@ class MatBuilder:
         self.coverage = None
         self.acclist = None
         
-    def build(self, blast_file, seq_file, evalue=0.005):
+    def build(self, blast_file, seq_file, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2):
         # generate out names
         out_name = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '__map', seq_file))
         self.mat_file = out_name + '.npz'
@@ -166,6 +206,7 @@ class MatBuilder:
         coord_mat = blast_tab[['qstart', 'qend', 'sstart', 'send', 'orient']].to_numpy().astype(int)
         # get coverage
         coverage = get_coverage(coord_mat[:, [2,3]], marker_len)
+        mesas = get_mesas(coverage, dropoff, min_height, min_width)
         # offset subject coordinates (substract the lower bound of the subject coordinates)
         # columns 0 and 1 are the coordinates to extract from the query sequene
         # columns 2 and 3 are their position on the matrix (corrected with the offset)
@@ -195,7 +236,7 @@ class MatBuilder:
         
         # store output
         # save the matrix along with the bounds and coverage array (coverage array done over the entire length of the marker reference)
-        np.savez_compressed(self.mat_file, bounds=bounds, matrix=matrix, coverage=coverage)
+        np.savez_compressed(self.mat_file, bounds=bounds, matrix=matrix, coverage=coverage, mesas=mesas)
         with open(self.acc_file, 'w') as list_handle:
             list_handle.write('\n'.join(self.acclist))
         logger.info(f'Stored matrix of dimensions {matrix.shape} in {self.mat_file}')
@@ -204,5 +245,6 @@ class MatBuilder:
         self.matrix = matrix
         self.bounds = bounds
         self.coverage = coverage
+        self.mesas = mesas
         self.acclist = acclist
         return

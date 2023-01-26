@@ -9,14 +9,16 @@ Director for the classification of sequences of unknown taxonomic origin
 #%%
 from classification import classification
 from classification import cost_matrix
+from DATA import DATA
 from glob import glob
 import logging
 from mapping import blast
-from mapping import director as mpdir
+from mapping import director as mp
+import numpy as np
 from preprocess import feature_selection as fsele
 from preprocess import windows
-import numpy as np
 import pandas as pd
+import re
 #%% variables
 mode_dict = {'m':'majority',
              'w':'wknn',
@@ -73,7 +75,7 @@ class Director:
         self.taxa = {}
         self.loader = windows.WindowLoader()
         self.selector = fsele.Selector()
-        self.mapper = mpdir.Director(tmp_dir, warn_dir)
+        self.mapper = mp.Director(tmp_dir, warn_dir)
     
     @property
     def ref_mat(self):
@@ -84,10 +86,10 @@ class Director:
     
     def set_train_data(self, data_dir):
         # locate the training files (matrix, accession list, taxonomy table, information scores) needed for classification
-        mat_file = glob(data_dir + '/*.mat')[0] # TODO: change outname suffix from npz to mat in mapper
+        mat_file = glob(data_dir + '/*__map.npz')[0]
         tax_file = glob(data_dir + '/*.tax')[0]
         guide_file = glob(data_dir + '/*.taxguide')[0]
-        acc_file = glob(data_dir + '/*.accs')[0]
+        acc_file = glob(data_dir + '/*__map.accs')[0]
         order_file = data_dir + '/order.npz'
         diff_file = data_dir + 'diff.csv'
         db_dir = data_dir + '/ref'
@@ -120,20 +122,6 @@ class Director:
             print(f'Error: Found {n_files} files in {db_dir}. Must contain 6')
             return
         self.db_dir = db_dir
-    
-    # TODO: remove these methods after testing set_train_data
-    # def set_ref_data(self, mat_file, acc_file, tax_file):
-    #     self.loader.set_files(mat_file, acc_file, tax_file)
-    #     self.get_overlap()
-    
-    # def set_taxguide(self, guide_file):
-    #     self.taxguide = pd.read_csv(guide_file, index_col=0)
-    
-    # def set_order(self, order_file):
-    #     self.selector.load_order_mat(order_file)
-    
-    # def set_db(self, db_dir):
-    #     self.mapper.set_blastdb(db_dir)
     
     def set_dist_mat(self, mat_code):
         matrix = cost_matrix.get_matrix(mat_code)
@@ -234,6 +222,55 @@ class Director:
         sites_report.to_csv(f'{self.out_dir}/{out_path}.sites')
 
 #%% main body
+def main0(work_dir, fasta_file, database, overwrite_map=False, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, dist_mat=None, threads=1):
+    # generate dirs
+    tmp_dir = work_dir + '/tmp'
+    warn_dir = work_dir + '/warning'
+    # locate database
+    if not database in DATA.DBASES:
+        print(f'Database {database} not found.')
+        print('Current databases include:')
+        for db, desc in DATA.DBASE_LIST.items():
+            print(f'\tDatabase: {db} \t:\t{desc}')
+        raise Exception('Database not found')
+    db_dir = DATA.DATAPATH + '/' + database
+    
+    # map fasta file
+    # see if fasta file is already present, if it is, skip mapping
+    fasta = re.sub('.*/', '', fasta_file)
+    try:
+        DATA.MAPS[database][fasta]
+        map_exists = True
+    except KeyError:
+        map_exists = False
+    
+    if map_exists and not overwrite_map:
+        # use existing map of fasta file
+        map_file = DATA.MAPS[database][fasta]['map']
+        acc_file = DATA.MAPS[database][fasta]['acc']
+    else:
+        # map of fasta file doesn't exist create it
+        map_director = mp.Director(work_dir, warn_dir)
+        map_director.direct(fasta_file = fasta_file,
+                            db_dir = db_dir,
+                            evalue = evalue,
+                            dropoff=dropoff,
+                            min_height=min_height,
+                            min_width=min_width,
+                            threads = threads)
+        map_file = map_director.map_file
+        acc_file = map_director.acc_file
+        # update map record
+        new_maps = DATA.MAPS.copy()
+        new_maps.update({fasta:{'map':map_file, 'acc':acc_file}})
+        DATA.update_maps(new_maps)
+    
+    classifier = Director(work_dir, tmp_dir, warn_dir)
+    classifier.set_train_data(db_dir)
+    # designate classsification params
+    classifier.set_dist_mat(dist_mat)
+    # classify
+    return
 def main(w_start=0, w_end=-1, k=1, n=0, cl_mode='knn', rank=None, out_file='', query_file='', query_name='', ref_dir='', dist_mat=None, out_dir='', tmp_dir='', warn_dir='', threads=1):
     # main classification function: requires
     # query data (map)

@@ -9,6 +9,7 @@ Director for database creation and updating
 
 #%% libraries
 import argparse
+import json
 import logging
 import os
 import re
@@ -158,7 +159,7 @@ class Director:
         return self.merger.rank_counts.loc[self.merger.ranks]
 
 #%% main function
-def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold=True, cp_fasta=False, chunksize=500, max_attempts=3, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, min_seqs=10, filt_rank='genus', threads=1, keep=False, clear=False):
+def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', ranks=None, bold=True, cp_fasta=False, chunksize=500, max_attempts=3, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, min_seqs=10, filt_rank='genus', threads=1, keep=False, clear=False):
     # Arguments:
     # required:
     #     db_name : name for the generated database
@@ -199,6 +200,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
             raise Exception('Choose a diferent name or set "clear" as True')
         print(f'Removing existing database: {db_name}...')
         os.rmdir(db_dir)
+    
     # create directories
     tmp_dir = db_dir + '/tmp'
     warn_dir = db_dir + '/warning'
@@ -249,6 +251,14 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, ranks=None, bold
                         min_seqs = min_seqs,
                         rank = filt_rank)
     
+    # generate db description
+    if description == '':
+        if fasta is None:
+            description = f'Database built from search terms: {taxon} + {marker}. {db_director.nseqs} sequences.'
+        else:
+            description = f'Database built from file: {fasta}. {db_director.nseqs} sequences.'
+    with open(db_dir + 'desc.json', 'w') as handle:
+        json.dump(description, handle)
     # write summaries
     # Database summary
     print('Finished building database!')

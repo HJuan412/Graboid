@@ -12,7 +12,6 @@ from classification import cost_matrix
 from DATA import DATA
 from glob import glob
 import logging
-from mapping import blast
 from mapping import director as mp
 import numpy as np
 from preprocess import feature_selection as fsele
@@ -83,6 +82,31 @@ class Director:
     @property
     def ref_bounds(self):
         return self.loader.bounds
+    @property
+    def ref_cov(self):
+        return self.loader.coverage
+    @property
+    def ref_mesas(self):
+        return self.loader.mesas
+    @property
+    def ref_shape(self):
+        return self.loader.dims
+    @property
+    def ref_tax(self):
+        return self.loader.tax_tab
+    @property
+    def order_tab(self):
+        return self.selector.order_tab
+    @property
+    def order_bounds(self):
+        return self.selector.order_bounds
+    @property
+    def order_tax(self):
+        return self.selector.order_tax
+    
+    def load_diff_tab(self, file):
+        self.diff_tab = pd.read_csv(file, index_col = [0, 1])
+    
     
     def set_train_data(self, data_dir):
         # locate the training files (matrix, accession list, taxonomy table, information scores) needed for classification
@@ -114,19 +138,19 @@ class Director:
         self.query_mat = query_data['matrix']
         self.query_bounds = query_data['bounds']
         self.query_cov = query_data['coverage']
+        self.query_mesas = query_data['mesas']
         with open(acc_file, 'r') as acc_handle:
             self.query_accs = acc_handle.read().splitlines()
-        self.get_overlap()
     
     def get_overlap(self):
-        # method called by set_query and set_ref_data, only completes when both are set
-        try:
-            overlap_low = max(self.query_bounds[0], self.ref_bounds[0])
-            overlap_high = min(self.query_bounds[1], self.ref_bounds[1])
-            if overlap_high > overlap_low:
-                self.overlap = [overlap_low, overlap_high]
-        except TypeError:
-            return
+        # retunrs overlaps array [overlap start, overlap end, query avg coverage, ref avg coverage]
+        overlaps = []
+        for qry in self.query_cov:
+            # get reference mesas that begin BEFORE qry ends and end AFTER qry starts
+            ol_refs = self.ref_cov[(self.ref_cov[:,0] < qry[1]) & (self.ref_cov[:,1] > qry[0])]
+            for ref in ol_refs:
+                overlaps.append([max(ref[0], qry[0]), min(ref[1], qry[1]), qry[3], ref[3]])
+        self.overlaps = np.array(overlaps)
     
     def classify(self, w_start, w_end, k, n, mode='mwd', site_rank='genus', out_path=None):
         # check query data and reference data
@@ -212,17 +236,18 @@ def main0(work_dir, fasta_file, database, overwrite_map=False, evalue=0.005, dro
     # see if fasta file is already present, if it is, skip mapping
     fasta = re.sub('.*/', '', fasta_file)
     try:
-        DATA.MAPS[database][fasta]
+        prev_map = DATA.MAPS[database][fasta]
         map_exists = True
     except KeyError:
         map_exists = False
     
     if map_exists and not overwrite_map:
         # use existing map of fasta file
-        map_file = DATA.MAPS[database][fasta]['map']
-        acc_file = DATA.MAPS[database][fasta]['acc']
+        map_file = prev_map['map']
+        acc_file = prev_map['acc']
     else:
         # map of fasta file doesn't exist create it
+        # TODO: what happens when query fasta can't align to map?
         map_director = mp.Director(work_dir, warn_dir)
         map_director.direct(fasta_file = fasta_file,
                             db_dir = db_dir,
@@ -230,7 +255,8 @@ def main0(work_dir, fasta_file, database, overwrite_map=False, evalue=0.005, dro
                             dropoff=dropoff,
                             min_height=min_height,
                             min_width=min_width,
-                            threads = threads)
+                            threads = threads,
+                            keep=False)
         map_file = map_director.map_file
         acc_file = map_director.acc_file
         # update map record
@@ -241,6 +267,8 @@ def main0(work_dir, fasta_file, database, overwrite_map=False, evalue=0.005, dro
     classifier = Director(work_dir, tmp_dir, warn_dir)
     classifier.set_train_data(db_dir)
     classifier.set_query(map_file, acc_file)
+    classifier.get_overlap()
+    # TODO: ask for a custom calibration or suggest best parameters
     # designate classsification params
     classifier.set_dist_mat(dist_mat)
     # classify

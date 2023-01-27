@@ -154,19 +154,22 @@ class Selector:
     
     def select_sites(self, nsites, rank, cols):
         # select the first nsites more informative sites from the given cols
-        # must run this AFTER generate diff_tab
-        # should run this after select_taxons
+        # returns a list with an array of column indexes per value of nsites
+        # nsites number of sites to select, can be an iterable
+        # rank (name) to select sites by
+        # cols list of column indexes to select
         self.selected_rank = rank
         rk = self.ranks[rank]
         
-        # get the portion of the matrix corresponding to the given rank rows
+        # get the portion of the matrix corresponding to the given rank rows, extract relevant cols
         rank_submat = self.order_tab[self.order_tav[:,0] == rk]
-        # get sites, first nsites columns in the order table
-        selected_sites = set([])
-        for row in rank_submat:
-            rk_cols = row[np.isin(row, cols)][:nsites]
-            selected_sites = selected_sites.union(set(rk_cols))
-        return np.array(selected_sites)
+        cols_submat = np.zeros((len(rank_submat), len(cols)))
+        for idx, row in enumerate(rank_submat):
+            rk_cols = row[np.isin(row, cols)]
+            cols_submat[idx] = rk_cols
+        
+        selected_sites = [np.unique(cols_submat[:n]) for n in list(nsites)]
+        return selected_sites
     
     def get_sites(self, n_range, rank, cols=None, start=None, end=None):
         # for a given range of sites, generate a dictionary containing the new sites selected at each n

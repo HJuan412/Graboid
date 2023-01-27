@@ -14,14 +14,15 @@ import concurrent.futures
 import logging
 import numba as nb
 import numpy as np
+import os
 import pandas as pd
 import pickle
 import time
 from classification import classification
 from classification import cost_matrix
-import os
+from DATA import DATA
+from glob import glob
 from preprocess import feature_selection as fsele
-# from preprocess import taxon_study as tstud
 from preprocess import windows
 
 #%% set
@@ -130,29 +131,56 @@ class Calibrator:
         self.set_dist_mat('id')
         self.report = None
     
-    def set_database(self, mat_file, acc_file, tax_file, order_file):
+    @property
+    def row_thresh(self):
+        return self.__row_thresh
+    @row_thresh.setter
+    def row_thresh(self, row_thresh):
+        self.__row_thresh = max(0., min(1., row_thresh))
+    @property
+    def col_thresh(self):
+        return self.__col_trhesh
+    @col_thresh.setter
+    def col_thresh(self, col_thresh):
+        self.__col_thresh = max(0., min(1., col_thresh))
+    @property
+    def min_seqs(self):
+        return self.__min_seqs
+    @min_seqs.setter
+    def min_seqs(self, min_seqs):
+        self.__min_seqs = max(0, min_seqs)
+    
+    @property
+    def dist_mat(self):
+        return self.__dist_mat
+    @dist_mat.setter
+    def dist_mat(self, mat_code):
+        try:
+            self.__dist_mat = cost_matrix(mat_code)
+        except:
+            raise
+            
+    def set_database(self, database):
+        if not database in DATA.DBASES:
+            print(f'Database {database} not found.')
+            print('Current databases include:')
+            for db, desc in DATA.DBASE_LIST.items():
+                print(f'\tDatabase: {db} \t:\t{desc}')
+            raise Exception('Database not found')
+        self.db_dir = DATA.DATAPATH + '/' + database
+        
+        mat_file = glob(self.db_dir + '/*__map.npz')[0]
+        tax_file = glob(self.db_dir + '/*.tax')[0]
+        acc_file = glob(self.db_dir + '/*__map.accs')[0]
+        order_file = self.db_dir + '/order.npz'
+        diff_file = self.db_dir + 'diff.csv'
+        
+        # set the loader with the learning data
         self.loader = windows.WindowLoader('Graboid.calibrator.windowloader')
         self.loader.set_files(mat_file, acc_file, tax_file)
+        # load information files
         self.selector.load_order_mat(order_file)
-    
-    def set_row_thresh(self, thresh=0.2):
-        self.row_thresh = thresh
-        
-    def set_col_thresh(self, thresh=0.2):
-        self.col_thresh = thresh
-    
-    def set_min_seqs(self, min_seqs=10):
-        self.min_seqs = min_seqs
-    
-    def set_rank(self, rank='genus'):
-        self.rank = rank
-    
-    def set_dist_mat(self, mat_code):
-        matrix = cost_matrix.get_matrix(mat_code)
-        if matrix is None:
-            print('Could not set distance matrix, invalid matrix code')
-            return
-        self.cost_mat = matrix
+        self.selector.load_diff_tab(diff_file)
     
     def check_ready(self):
         # check that the calibration is ready to go
@@ -181,125 +209,6 @@ class Calibrator:
             missing.append('order file')
         ready = len(missing) > 0
         return ready, missing
-    
-    def grid_search_OLD(self, w_size, w_step, max_k, step_k, max_n, step_n, min_k=1, min_n=5, filename=None):
-        if self.loader is None:
-            return
-        # prepare out files
-        if filename is None:
-            filename = time.strftime("report_%d%m%Y-%H%M%S")
-        self.out_file = f'{self.out_dir}/{filename}.csv'
-        self.meta_file = f'{self.out_dir}/{filename}.meta'
-        pd.DataFrame(columns=['Taxon',
-                              'Accuracy',
-                              'Precision',
-                              'Recall',
-                              'F1_score',
-                              'w_start',
-                              'w_end',
-                              'rank',
-                              'n_sites',
-                              'K',
-                              'mode']).to_csv(self.out_file, index=False)
-        # set calibration parameters
-        # set coordinate ranges for the sliding window
-        max_pos = self.loader.dims[1]
-        start_range = np.arange(0, max_pos - w_size, w_step)
-        if start_range[-1] < max_pos - w_size:
-            # add a tail window, if needed, to cover the entire sequence
-            np.append(start_range, max_pos - w_size)
-        end_range = start_range + w_size
-        w_coords = np.array([start_range, end_range]).T
-        
-        # k & n ranges
-        k_range = np.arange(min_k, max_k, step_k)
-        n_range = np.arange(min_n, max_n, step_n)
-        
-        # begin calibration
-        for idx, (start, end) in enumerate(w_coords):
-            print(f'Window {start} - {end} ({idx + 1} of {len(w_coords)})')
-            results = []
-            # extract window and select atributes
-            window = self.loader.get_window(start, end, self.row_thresh, self.col_thresh)
-            if len(window.eff_mat) == 0:
-                continue
-            n_seqs = window.eff_mat.shape[0]
-            quintile = int(n_seqs / 5)
-
-            if n_seqs < self.min_seqs:
-                # not enough sequences passed the filter, skip iteration
-                print(f'Window {start} - {end}. Not enoug sequences to perform calibration ({n_seqs}, min = {self.min_seqs}), skipping')
-                continue
-            
-            n_sites = self.selector.get_sites(n_range, start, end, self.rank)
-            y = window.eff_tax
-            prev_distances = np.zeros((n_seqs, n_seqs-1), dtype = np.float32)
-            reports1 = []
-            for n, sites in n_sites.items():
-                print(f'\t{n} sites')
-                # post collapse, generates the final data matrix and taxonomy table
-                x = window.eff_mat[:, sites]
-                
-                # loo_result tables are plain lists, later to be converted into np.arrays
-                # these store the classifications for each query
-                
-                # iterate trought the data
-                idx_gen = loo_generator(x.shape[0])
-                
-                reports0 = []
-                # outer loop
-                for train_idx, test_idx in idx_gen:
-                    if test_idx % quintile == 0:
-                        print(f'\t\tCalibrated {test_idx} of {n_seqs} ({(test_idx/n_seqs) * 100:.2f}%)')
-                    
-                    # build the datasets
-                    query = x[[test_idx]]
-                    train_data = x[train_idx]
-                    train_tax = y.iloc[train_idx]
-                    query_dists = prev_distances[test_idx]
-                    q_report, new_dists = classification.classify(np.reshape(query, (1,-1)), train_data, self.cost_mat, train_tax, k_range, modes = 'mwd', prev_dists = query_dists, get_winners = True)
-                    # q_report columns: idx, rk, tax, count, _k, average_dists, std_dists, total_support, median_support
-                    prev_distances[[test_idx]] += new_dists
-                    reports0.append(q_report)
-                reports0 = pd.concat(reports0)
-                reports0.insert(2, 'w_start', start)
-                reports0.insert(3, 'w_end', end)
-                reports0.insert(4, 'n_sites', n)
-                reports1.append(reports0)
-                
-            report = pd.concat(reports1)
-            report.sort_values(['w_start', 'n_sites', '_k'], inplace=True, ignore_index=True)
-            
-            # get metrics for each tank/tax in each mode,K,n_sites combination
-            for (w_start, n, k, mode), subtab0 in report.groupby(['w_start', 'n_sites', '_k', 'mode']):
-                w_end = subtab0.w_end.iloc[0]
-                for (rk, tax), subtab1 in subtab0.groupby(['rk', 'tax']):
-                    pred = subtab1.tax.values
-                    real = y.loc[subtab1.idx].iloc[:, int(rk)].values
-                    confusion, taxons = build_confusion(pred, real)
-                    metrics = get_metrics(confusion, taxons)
-                    metrics_report = pd.DataFrame(metrics, columns=['Taxon', 'Accuracy', 'Precision', 'Recall', 'F1_score'])
-                    metrics_report['w_start'] = w_start
-                    metrics_report['w_end'] = w_end
-                    metrics_report['rank'] = rk
-                    # metrics_report['taxon'] = tax
-                    metrics_report['n_sites'] = n
-                    metrics_report['K'] = k
-                    metrics_report['mode'] = mode
-                    
-                    results.append(metrics_report)
-            results = pd.concat(results)
-            # translate numeric codes
-            numcode_dict = {idx:rank for idx, rank in enumerate(self.loader.tax_tab.columns)}
-            results['rank'].replace(numcode_dict, inplace=True)
-            results.to_csv(self.out_file, header=False, index=False, mode='a')
-            
-        self.meta = {'k':k_range,
-                     'n':n_range,
-                     'w_size':w_size,
-                     'w_step':w_step}
-        with open(self.meta_file, 'wb') as meta_handle:
-            pickle.dump(self.meta, meta_handle)
     
     def grid_search(self, w_size, w_step, max_k, step_k, max_n, step_n, min_k=1, min_n=5, filename=None, threads=1, keep_classif=False):
         if self.loader is None:

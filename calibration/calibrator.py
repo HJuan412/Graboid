@@ -128,28 +128,8 @@ class Calibrator:
         self.set_col_thresh()
         self.set_min_seqs()
         self.set_rank()
-        self.set_dist_mat('id')
         self.report = None
-    
-    @property
-    def row_thresh(self):
-        return self.__row_thresh
-    @row_thresh.setter
-    def row_thresh(self, row_thresh):
-        self.__row_thresh = max(0., min(1., row_thresh))
-    @property
-    def col_thresh(self):
-        return self.__col_trhesh
-    @col_thresh.setter
-    def col_thresh(self, col_thresh):
-        self.__col_thresh = max(0., min(1., col_thresh))
-    @property
-    def min_seqs(self):
-        return self.__min_seqs
-    @min_seqs.setter
-    def min_seqs(self, min_seqs):
-        self.__min_seqs = max(0, min_seqs)
-    
+        
     @property
     def dist_mat(self):
         return self.__dist_mat
@@ -182,16 +162,32 @@ class Calibrator:
         self.selector.load_order_mat(order_file)
         self.selector.load_diff_tab(diff_file)
     
-    def grid_search(self, w_size, w_step, max_k, step_k, max_n, step_n, min_k=1, min_n=5, filename=None, threads=1, keep_classif=False):
-        if self.loader is None:
-            return
+    def grid_search(self,
+                    database,
+                    w_size,
+                    w_step,
+                    max_k,
+                    step_k,
+                    max_n,
+                    step_n,
+                    min_seqs=10,
+                    rank='genus',
+                    row_thresh=0.2,
+                    col_thresh=0.2,
+                    min_k=1,
+                    min_n=5,
+                    threads=1,
+                    keep_classif=False):
+        # set database (check that it exists)
+        try:
+            self.set_database(database)
+        except Exception as excp:
+            raise excp
         
         # prepare out files
-        if filename is None:
-            filename = time.strftime("report_%d%m%Y-%H%M%S")
-        self.out_file = f'{self.out_dir}/{filename}.csv'
-        self.classif_file = f'{self.out_dir}/classif_{filename}.csv'
-        self.meta_file = f'{self.out_dir}/{filename}.meta'
+        self.out_file = self.out_dir + '/calibration_report.csv'
+        self.classif_file = self.out_dir + '/classif.csv'
+        self.meta_file = self.out_dir + '/calibration.meta'
         header = True # toggle this when a report file hasn't been generated yet, use to control inclusion of header col
         
         # set calibration parameters
@@ -200,7 +196,7 @@ class Calibrator:
         start_range = np.arange(0, max_pos - w_size, w_step)
         if start_range[-1] < max_pos - w_size:
             # add a tail window, if needed, to cover the entire sequence
-            np.append(start_range, max_pos - w_size)
+            start_range = np.append(start_range, max_pos - w_size)
         end_range = start_range + w_size
         w_coords = np.array([start_range, end_range]).T
         
@@ -213,16 +209,17 @@ class Calibrator:
             t0 = time.time()
             print(f'Window {start} - {end} ({idx + 1} of {len(w_coords)})')
             # extract window and select atributes
-            window = self.loader.get_window(start, end, self.row_thresh, self.col_thresh)
+            window = self.loader.get_window(start, end, row_thresh, col_thresh)
             if len(window.eff_mat) == 0:
+                # no effective sequences in the window
                 continue
             n_seqs = window.eff_mat.shape[0]
-            if n_seqs < self.min_seqs:
+            if n_seqs < min_seqs:
                 # not enough sequences passed the filter, skip iteration
-                print(f'Window {start} - {end}. Not enoug sequences to perform calibration ({n_seqs}, min = {self.min_seqs}), skipping')
+                print(f'Window {start} - {end}. Not enoug sequences to perform calibration ({n_seqs}, min = {min_seqs}), skipping')
                 continue
-            # n_sites = self.selector.get_sites(n_range, start, end, self.rank)
-            n_sites = self.selector.get_sites(n_range, self.rank, window.cols)
+            
+            n_sites = self.selector.get_sites(n_range, rank, window.cols)
             y = window.eff_tax
             # distance container, 3d array, paired distance matrix for every value of n
             dist_mat = np.zeros((n_seqs, n_seqs, len(n_range)), dtype=np.float32)

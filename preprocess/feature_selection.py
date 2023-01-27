@@ -129,8 +129,9 @@ class Selector:
                 taxons.append([rk_idx, tax])
                 orders.append(row.sort_values(ascending = False).index.values)
         
-        # tax_tab is a 2-column array containing rank and taxID
+        # tax_tab is a 2-column array containing rank and taxID of each row in order_tab
         # order_tab is a matrix containing the sites ordered in function of decreasing entropy difference (firts elements are the most informative)
+        # use tax_tab to locate the rows in order_tab that belong to a given rank
         self.order_tax = np.array(taxons, dtype = np.int32)
         self.order_tab = np.array(orders, dtype=np.int16)
         self.order_bounds = bounds

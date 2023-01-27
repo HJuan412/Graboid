@@ -182,34 +182,6 @@ class Calibrator:
         self.selector.load_order_mat(order_file)
         self.selector.load_diff_tab(diff_file)
     
-    def check_ready(self):
-        # check that the calibration is ready to go
-        missing = []
-        try:
-            self.cost_mat
-        except AttributeError:
-            missing.append('distance matrix')
-        try:
-            self.loader.matrix
-            self.loader.bounds
-            self.loader.dims
-        except AttributeError:
-            missing.append('alignment matrix')
-        try:
-            self.loader.accdist
-        except AttributeError:
-            missing.append('accession list')
-        try:
-            self.loader.tax_tab            
-        except AttributeError:
-            missing.append('taxonomy table')
-        try:
-            self.order_file
-        except AttributeError:
-            missing.append('order file')
-        ready = len(missing) > 0
-        return ready, missing
-    
     def grid_search(self, w_size, w_step, max_k, step_k, max_n, step_n, min_k=1, min_n=5, filename=None, threads=1, keep_classif=False):
         if self.loader is None:
             return

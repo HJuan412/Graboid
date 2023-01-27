@@ -166,7 +166,7 @@ class Selector:
         for row in rank_submat:
             rk_cols = row[np.isin(row, cols)][:nsites]
             selected_sites = selected_sites.union(set(rk_cols))
-        return selected_sites
+        return np.array(selected_sites)
     
     def get_sites(self, n_range, rank, cols=None, start=None, end=None):
         # for a given range of sites, generate a dictionary containing the new sites selected at each n

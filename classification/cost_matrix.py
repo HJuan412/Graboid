@@ -7,7 +7,7 @@ Created on Tue Nov 23 13:42:38 2021
 """
 #%% libraries
 import numpy as np
-
+import re
 #%% functions
 # replacement cost matrix
 def pair_idxs(bases0, bases1):
@@ -80,13 +80,12 @@ def id_matrix():
     return mat
     
 def get_matrix(mat_code):
-    if mat_code == 'id':
+    # mat code is id
+    if mat_code.lower() == 'id':
         return id_matrix()
-    if mat_code[0] == 's' and mat_code[2] == 'v':
-        try:
-            transition = int(mat_code[1])
-            transversion = int(mat_code[3])
-            return cost_matrix(transition, transversion)
-        except ValueError:
-            pass
-    return None
+    # mat code contains transition & tranversion
+    transition = float('0' + re.sub('.*s', '', re.sub('v.*', '', mat_code)))
+    transversion = float('0' + re.sub('s.*', '', re.sub('.*v', '', mat_code)))
+    if transition == 0 or transversion == 0:
+        raise Exception(f'Cannot generate substitution matrix, invalid code: {mat_code}')
+    return cost_matrix(transition, transversion)

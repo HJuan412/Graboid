@@ -103,6 +103,15 @@ class Director:
     @property
     def order_tax(self):
         return self.selector.order_tax
+    @property
+    def cost_mat(self):
+        return self.__cost_mat
+    @cost_mat.setter
+    def cost_mat(self, mat_code):
+        try:
+            self.__cost_mat = cost_matrix.get_matrix(mat_code)
+        except:
+            raise
     
     def load_diff_tab(self, file):
         self.diff_tab = pd.read_csv(file, index_col = [0, 1])
@@ -124,13 +133,6 @@ class Director:
         # load information files
         self.selector.load_order_mat(order_file)
         self.selector.load_diff_tab(diff_file)
-    
-    def set_dist_mat(self, mat_code):
-        matrix = cost_matrix.get_matrix(mat_code)
-        if matrix is None:
-            print('Could not set distance matrix, invalid matrix code')
-            return
-        self.cost_mat = matrix
         
     def set_query(self, map_file, acc_file):
         # load query files

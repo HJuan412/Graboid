@@ -152,23 +152,20 @@ class Selector:
     def load_diff_tab(self, file):
         self.diff_tab = pd.read_csv(file, index_col = [0, 1])
     
-    def select_sites(self, nsites, rank, cols=None, start=None, end=None):
-        # get the nsites more informative sites per taxon for the current rank
+    def select_sites(self, nsites, rank, cols):
+        # select the first nsites more informative sites from the given cols
         # must run this AFTER generate diff_tab
         # should run this after select_taxons
         self.selected_rank = rank
         rk = self.ranks[rank]
         
+        # get the portion of the matrix corresponding to the given rank rows
+        rank_submat = self.order_tab[self.order_tav[:,0] == rk]
         # get sites, first nsites columns in the order table
-        sub_order = []
-        for row in self.order_tab:
-            # sub_order.append(row[np.logical_and(row >= start, row < end)])
-            sub_order.append(row[np.isin(row, cols)])
-        sub_order = np.array(sub_order)
-        order_subtab = sub_order[self.order_tax[:,0] == rk,:nsites]
-        # adjust offset, discard sites outside the matrix bounds
-        selected_sites = np.unique(order_subtab) - start
-        
+        selected_sites = set([])
+        for row in rank_submat:
+            rk_cols = row[np.isin(row, cols)][:nsites]
+            selected_sites = selected_sites.union(set(rk_cols))
         return selected_sites
     
     def get_sites(self, n_range, rank, cols=None, start=None, end=None):

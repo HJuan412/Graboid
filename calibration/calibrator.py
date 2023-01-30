@@ -254,8 +254,8 @@ class Calibrator:
                 # since we're using numba functions, y must be cast as a numpy array
                 future_classifs = {executor.submit(classifier, neighbours[...,n], ordered_dists[n], y.to_numpy(), k_range):(mode,n) for (n, mode, classifier) in guide}
                 for future in concurrent.futures.as_completed(future_classifs):
-                    (pre_classif, columns) = future.result()
-                    (mode, n) = future_classifs[future]
+                    pre_classif, columns = future.result()
+                    mode, n = future_classifs[future]
                     classif = classification.get_classif(pre_classif, classification.classif_modes[mode])
                     mode_report = pd.DataFrame(classif, columns=columns)
                     mode_report['mode'] = mode

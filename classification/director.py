@@ -263,7 +263,7 @@ def main0(work_dir, fasta_file, database, overwrite_map=False, evalue=0.005, dro
         acc_file = map_director.acc_file
         # update map record
         new_maps = DATA.MAPS.copy()
-        new_maps.update({fasta:{'map':map_file, 'acc':acc_file}})
+        new_maps[database].update({fasta:{'map':map_file, 'acc':acc_file}})
         DATA.update_maps(new_maps)
         
     classifier = Director(work_dir, tmp_dir, warn_dir)

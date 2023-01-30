@@ -11,6 +11,7 @@ sys.path.append('preprocess')
 sys.path.append('classif')
 #%% libraries
 import concurrent.futures
+import json
 import logging
 import numba as nb
 import numpy as np
@@ -122,13 +123,13 @@ class Calibrator:
         self.out_dir = out_dir
         self.warn_dir = warn_dir
         
+        # prepare out files
+        self.out_file = self.out_dir + '/calibration_report.csv'
+        self.classif_file = self.out_dir + '/classif.csv'
+        self.meta_file = self.out_dir + '/calibration.meta'
+        
         self.selector = fsele.Selector(out_dir)
         self.loader = None
-        self.set_row_thresh()
-        self.set_col_thresh()
-        self.set_min_seqs()
-        self.set_rank()
-        self.report = None
         
     @property
     def dist_mat(self):
@@ -162,10 +163,34 @@ class Calibrator:
         self.selector.load_order_mat(order_file)
         self.selector.load_diff_tab(diff_file)
     
+    def set_windows(self, w_size=np.inf, w_step=np.inf, w_start=0, w_end=np.inf):
+        # TODO: handle multiple w_starts
+        # this function establishes the windows to be used in the grid search
+        # w_size and w_step establish the length and displacement rate of the sliding window
+            # default values use the entire sequence (defined by w_start & w_end) in a single run
+        # w_start and w_end define the scope to analize
+            # default values use the entire sequence
+        
+        # establish the scope
+        max_pos = self.loader.dims[1]
+        w_start = max(0, w_start)
+        w_end = min(w_end, max_pos)
+        scope_len = w_end - w_start
+        # define the windows
+        w_size = min(w_size, scope_len)
+        w_step = min(w_step, scope_len)
+        start_range = np.arange(w_start, w_end, w_step)
+        if start_range[-1] < max_pos - w_size:
+            # add a tail window, if needed, to cover the entire sequence
+            start_range = np.append(start_range, max_pos - w_size)
+        end_range = start_range + w_size
+        
+        w_coords = np.array([start_range, end_range]).T
+        self.w_coords = w_coords
+        self.w_size = w_size
+        self.w_step = w_step
+    
     def grid_search(self,
-                    database,
-                    w_size,
-                    w_step,
                     max_k,
                     step_k,
                     max_n,
@@ -178,36 +203,15 @@ class Calibrator:
                     min_n=5,
                     threads=1,
                     keep_classif=False):
-        # set database (check that it exists)
-        try:
-            self.set_database(database)
-        except Exception as excp:
-            raise excp
-        
-        # prepare out files
-        self.out_file = self.out_dir + '/calibration_report.csv'
-        self.classif_file = self.out_dir + '/classif.csv'
-        self.meta_file = self.out_dir + '/calibration.meta'
-        header = True # toggle this when a report file hasn't been generated yet, use to control inclusion of header col
-        
-        # set calibration parameters
-        # set coordinate ranges for the sliding window
-        max_pos = self.loader.dims[1]
-        start_range = np.arange(0, max_pos - w_size, w_step)
-        if start_range[-1] < max_pos - w_size:
-            # add a tail window, if needed, to cover the entire sequence
-            start_range = np.append(start_range, max_pos - w_size)
-        end_range = start_range + w_size
-        w_coords = np.array([start_range, end_range]).T
         
         # k & n ranges
         k_range = np.arange(min_k, max_k, step_k)
         n_range = np.arange(min_n, max_n, step_n)
         
         # begin calibration
-        for idx, (start, end) in enumerate(w_coords):
+        for idx, (start, end) in enumerate(self.w_coords):
             t0 = time.time()
-            print(f'Window {start} - {end} ({idx + 1} of {len(w_coords)})')
+            print(f'Window {start} - {end} ({idx + 1} of {len(self.w_coords)})')
             # extract window and select atributes
             window = self.loader.get_window(start, end, row_thresh, col_thresh)
             if len(window.eff_mat) == 0:
@@ -268,7 +272,7 @@ class Calibrator:
             if keep_classif:
                 classif_report['w_start'] = start
                 classif_report['w_end'] = end
-                classif_report.to_csv(self.classif_file, header=header, index=False, mode='a')
+                classif_report.to_csv(self.classif_file, header=os.path.isfile(self.classif_file), index=False, mode='a')
             # get classification metrics
             t5 = time.time()
             for (k, n, mode), subtab in classif_report.groupby(['_k', 'n', 'mode']):
@@ -285,25 +289,15 @@ class Calibrator:
                     metrics_report['K'] = k
                     metrics_report['mode'] = classification.classif_longnames[mode]
                     
-                    metrics_report.to_csv(self.out_file, header=header, index=False, mode='a')
-                    header = False
+                    metrics_report.to_csv(self.out_file, header=os.path.isfile(self.classif_file), index=False, mode='a')
             t6 = time.time()
             logger.debug(f'metric calculation {t6 - t5}')
             
-            self.meta = {'k':k_range,
-                         'n':n_range,
-                         'w_size':w_size,
-                         'w_step':w_step}
-            with open(self.meta_file, 'wb') as meta_handle:
-                pickle.dump(self.meta, meta_handle)
-
-    def save_report(self, filename=None):
-        if filename is None:
-            filename = time.strftime("report_%d%m%Y-%H%M%S")
-        self.out_file = f'{self.out_dir}/{filename}.csv'
-        self.meta_file = f'{self.out_dir}/{filename}.meta'
-        if not self.report is None:
-            self.report.to_csv(self.out_file)
-            with open(self.meta_file, 'wb') as meta_handle:
-                pickle.dump(self.meta, meta_handle)
-            logger.info(f'Calibration report saved to {self.out_file}')
+            # register report metadata
+            meta = {'k':k_range,
+                    'n':n_range,
+                    'scope': f'{self.w_start} - {self.w_end}',
+                    'w_size':self.w_size,
+                    'w_step':self.w_step}
+            with open(self.meta_file, 'w') as meta_handle:
+                json.dump(meta, meta_handle)

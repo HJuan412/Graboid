@@ -237,12 +237,14 @@ class Calibrator:
                     sub_ref = ref_seqs[:, sites]
                     dists += classification.get_dists(sub_qry, sub_ref, self.cost_mat).reshape(1, -1)
                     dist_mat[idx_0, idx_1:, n_idx] = dists
-                    dist_mat[idx_1:, idx_0, n_idx] = dists
+                    dist_mat[idx_1:, idx_0, n_idx] = dists # is this necessary? (yes), allows sortying of distances in a single step
+            # fill the diagonal values with infinite value, this ensures they are never amongst the k neighs
+            for i in range(n_range): np.fill_diagonal(dist_mat[:,:,i], np.inf)
             t2 = time.time()
             logger.debug(f'dist calculation {t2 - t1}')
-            # get ordered_neighbours and sorted distances (excluding first columns, which corresponds to the diagonal)
-            neighbours = np.argsort(dist_mat, axis=1)[:,1:,:]
-            ordered_dists = [dist_mat[np.tile(np.arange(n_seqs), (n_seqs-1, 1)).T, neighbours[...,n], n] for n in range(neighbours.shape[2])]
+            # get ordered_neighbours and sorted distances
+            neighbours = np.argsort(dist_mat, axis=1)
+            ordered_dists = [dist_mat[np.tile(np.arange(n_seqs), (n_seqs, 1)).T, neighbours[...,n], n] for n in range(neighbours.shape[2])]
             
             guide = [(n, mode, classif) for mode, classif in classification.classif_funcs_nb.items() for n in range(len(n_range))]
             classif_report = []

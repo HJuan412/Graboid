@@ -17,7 +17,6 @@ import numba as nb
 import numpy as np
 import os
 import pandas as pd
-import pickle
 import time
 from classification import classification
 from classification import cost_matrix
@@ -163,32 +162,40 @@ class Calibrator:
         self.selector.load_order_mat(order_file)
         self.selector.load_diff_tab(diff_file)
     
-    def set_windows(self, w_size=np.inf, w_step=np.inf, w_start=0, w_end=np.inf):
-        # TODO: handle multiple w_starts
+    def set_windows(self, size=np.inf, step=np.inf, starts=0, ends=np.inf):
         # this function establishes the windows to be used in the grid search
-        # w_size and w_step establish the length and displacement rate of the sliding window
+        # size and step establish the length and displacement rate of the sliding window
             # default values use the entire sequence (defined by w_start & w_end) in a single run
-        # w_start and w_end define the scope to analize
+        # start and end define the scope(s) to analize
+        # multiple values of starts & ends allow for calibration on multiple separated windows
             # default values use the entire sequence
         
+        # prepare starts & ends
+        starts = list(starts)
+        ends = list(ends)
+        if len(starts) != len(ends):
+            raise Exception(f'Given starts and ends lengths do not match: {len(starts)} starts, {len(ends)} ends')
         # establish the scope
         max_pos = self.loader.dims[1]
-        w_start = max(0, w_start)
-        w_end = min(w_end, max_pos)
-        scope_len = w_end - w_start
-        # define the windows
-        w_size = min(w_size, scope_len)
-        w_step = min(w_step, scope_len)
-        start_range = np.arange(w_start, w_end, w_step)
-        if start_range[-1] < max_pos - w_size:
-            # add a tail window, if needed, to cover the entire sequence
-            start_range = np.append(start_range, max_pos - w_size)
-        end_range = start_range + w_size
-        
-        w_coords = np.array([start_range, end_range]).T
-        self.w_coords = w_coords
-        self.w_size = w_size
-        self.w_step = w_step
+        w_coords = []
+        w_info = pd.DataFrame(columns='start end size step'.split())
+        for w_idx, (start, end) in enumerate(zip(starts, ends)):
+            w_start = max(0, start)
+            w_end = min(end, max_pos)
+            scope_len = w_end - w_start
+            # define the windows
+            w_size = min(size, scope_len)
+            w_step = min(step, scope_len)
+            start_range = np.arange(w_start, w_end, w_step)
+            if start_range[-1] < max_pos - w_size:
+                # add a tail window, if needed, to cover the entire sequence
+                start_range = np.append(start_range, max_pos - w_size)
+            end_range = start_range + w_size
+            
+            w_coords.append(pd.DataFrame({'start':start_range, 'end':end_range}, index = [w_idx for i in start_range]))
+            w_info.at[f'w_{w_idx}'] = [w_start, w_end, w_size, w_step]
+        self.w_coords = pd.concat(w_coords)
+        self.w_info = w_info
     
     def grid_search(self,
                     max_k,
@@ -209,7 +216,7 @@ class Calibrator:
         n_range = np.arange(min_n, max_n, step_n)
         
         # begin calibration
-        for idx, (start, end) in enumerate(self.w_coords):
+        for idx, (start, end) in enumerate(self.w_coords.to_numpy()):
             t0 = time.time()
             print(f'Window {start} - {end} ({idx + 1} of {len(self.w_coords)})')
             # extract window and select atributes
@@ -296,8 +303,6 @@ class Calibrator:
             # register report metadata
             meta = {'k':k_range,
                     'n':n_range,
-                    'scope': f'{self.w_start} - {self.w_end}',
-                    'w_size':self.w_size,
-                    'w_step':self.w_step}
+                    'windows':self.w_info.T.to_dict()}
             with open(self.meta_file, 'w') as meta_handle:
                 json.dump(meta, meta_handle)

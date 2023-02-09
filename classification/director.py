@@ -239,15 +239,16 @@ def main0(work_dir, fasta_file, database, overwrite_map=False, evalue=0.005, dro
     fasta = re.sub('.*/', '', fasta_file)
     try:
         prev_map = DATA.MAPS[database][fasta]
-        map_exists = True
-    except KeyError:
-        map_exists = False
-    
-    if map_exists and not overwrite_map:
         # use existing map of fasta file
         map_file = prev_map['map']
         acc_file = prev_map['acc']
-    else:
+        make_map = False
+        if overwrite_map:
+            make_map = True
+    except KeyError:
+        make_map = True
+    
+    if make_map:
         # map of fasta file doesn't exist create it
         # TODO: what happens when query fasta can't align to map?
         map_director = mp.Director(work_dir, warn_dir)

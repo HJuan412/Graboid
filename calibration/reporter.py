@@ -8,10 +8,12 @@ This script is used to extract the best parameter combinations from a calibratio
 """
 
 #%% libraries
+from DATA import DATA
+import json
 import logging
 import numpy as np
 import pandas as pd
-import pickle
+import re
 import time
 
 #%% set logger
@@ -40,20 +42,18 @@ class Reporter:
         self.out_dir = out_dir
         
     def load_report(self, report_file):
-        meta_file = report_file.split('.csv')[0] + '.meta'
+        meta_file = re.sub('.csv', '.meta', report_file) # TODO: change calibration outfiles to share a name
         report = pd.read_csv(report_file)
         self.report = report.loc[report.F1_score > 0].sort_values('F1_score', ascending=False).sort_values(['w_start'])
-        with open(meta_file, 'rb') as meta_handle:
-            meta = pickle.load(meta_handle)
+        with open(meta_file, 'r') as meta_handle:
+            meta = json.load(meta_handle)
             self.k_range = meta['k']
             self.n_range = meta['n']
-            self.w_size = meta['w_size']
-            self.w_step = meta['w_step']
-    
-    def set_guide(self, guide_file):
-        guide = pd.read_csv(guide_file, index_col=0)
-        self.taxguide = guide
-        self.rep_dict = guide.reset_index().set_index('taxID').SciName.to_dict()
+            self.windows = meta['windows']
+            self.db = meta['db'] # TODO: add db to calibration meta file
+        # set guide file
+        self.taxguide = pd.read_csv(self.db + '/data.guide', index_col=0) # TODO: universalize filenames in database creator, fasta name / search params stored in meta file
+        self.rep_dict = self.tax_guide.reset_index().set_index('taxID').SciName.to_dict()
     
     def get_summary_scope(self, w_start=0, w_end=None, metric='F1_score', nrows=3):
         # get the nrows best parameters within the scope delimited by w_start and w_end

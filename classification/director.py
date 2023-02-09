@@ -7,6 +7,7 @@ Created on Mon Aug  8 09:59:03 2022
 Director for the classification of sequences of unknown taxonomic origin
 """
 #%%
+from calibration import calibrator as calib
 from classification import classification
 from classification import cost_matrix
 from DATA import DATA
@@ -221,7 +222,7 @@ class Director:
         sites_report.to_csv(f'{self.out_dir}/{out_path}.sites')
 
 #%% main body
-def main0(work_dir, fasta_file, database, overwrite_map=False, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, dist_mat=None, threads=1):
+def main(work_dir, fasta_file, database, overwrite_map=False, calibration='yes', evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, dist_mat=None, max_k=15, step_k=2, max_n=30, step_n=5, threads=1):
     # generate dirs
     tmp_dir = work_dir + '/tmp'
     warn_dir = work_dir + '/warning'
@@ -240,8 +241,7 @@ def main0(work_dir, fasta_file, database, overwrite_map=False, evalue=0.005, dro
     try:
         prev_map = DATA.MAPS[database][fasta]
         # use existing map of fasta file
-        map_file = prev_map['map']
-        acc_file = prev_map['acc']
+        map_file, acc_file = prev_map['map'], prev_map['acc']
         make_map = False
         if overwrite_map:
             make_map = True
@@ -271,35 +271,33 @@ def main0(work_dir, fasta_file, database, overwrite_map=False, evalue=0.005, dro
     classifier.set_train_data(db_dir)
     classifier.set_query(map_file, acc_file)
     classifier.get_overlap()
-    # TODO: ask for a custom calibration or suggest best parameters
+    # calibration options: no, yes, overwrite
+    make_calibrate = False
+    try:
+        # calibration found, check if set to overwrite
+        cal_tab = DATA.MAPS[database][fasta]['cal']
+        if calibration == 'overwrite':
+            make_calibrate = True
+    except KeyError:
+        # calibration not found, verify that one should be made
+        if calibration == 'yes':
+            make_calibrate = True
+    if make_calibrate:
+        calibrator = calib.Calibrator(work_dir, warn_dir)
+        calibrator.set_database(database)
+        calibrator.set_windows(start = classifier.overlaps[:,0], end = classifier.overlaps[:,1])
+        calibrator.grid_search(max_k, step_k, max_n, step_n)
+        cal_tab = calibrator.out_file
+        
+    if calibration == 'yes' or calibration == 'overwrite':
+        # load the custom calibration and get optimum parameters from there
+        pass
+    else:
+        # load generic calibration and get optimum parameters from there
+        pass
     # designate classsification params
     classifier.set_dist_mat(dist_mat)
     # classify
-    return
-def main(w_start=0, w_end=-1, k=1, n=0, cl_mode='knn', rank=None, out_file='', query_file='', query_name='', ref_dir='', dist_mat=None, out_dir='', tmp_dir='', warn_dir='', threads=1):
-    # main classification function: requires
-    # query data (map)
-    # reference data (map)
-    # k
-    # n
-    # weight method (knn, wknn, dwknn)
-    # dist matrix (id, k2p)
-    # out file
-    
-    classifier = Director(out_dir, tmp_dir, warn_dir)
-    # get reference data
-    try:
-        classifier.set_train_data(ref_dir)
-        # TODO: method should return True if successful, False if not, use that instead of try, except
-    except KeyError:
-        print('No db directory found in')
-        return
-    # handle query data
-
-    classifier.set_query(query_file, query_name, threads)
-    classifier.set_dist_mat(dist_mat)
-    classifier.classify(w_start, w_end, k, n, cl_mode, rank, out_file)
-    
     return
 
 if __name__ == '__main__':

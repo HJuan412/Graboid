@@ -118,14 +118,14 @@ def build_cal_tab(pred_tax, real_tax, n_ranks=6):
 
 #%% classes
 class Calibrator:
-    def __init__(self, out_dir, warn_dir):
+    def __init__(self, out_dir, warn_dir, prefix='calibration'):
         self.out_dir = out_dir
         self.warn_dir = warn_dir
         
         # prepare out files
-        self.out_file = self.out_dir + '/calibration_report.csv'
-        self.classif_file = self.out_dir + '/classif.csv'
-        self.meta_file = self.out_dir + '/calibration.meta'
+        self.out_file = self.out_dir + f'/{prefix}.report'
+        self.classif_file = self.out_dir + f'/{prefix}.classif'
+        self.meta_file = self.out_dir + f'/{prefix}.meta'
         
         self.selector = fsele.Selector(out_dir)
         self.loader = None
@@ -147,6 +147,7 @@ class Calibrator:
             for db, desc in DATA.DBASE_LIST.items():
                 print(f'\tDatabase: {db} \t:\t{desc}')
             raise Exception('Database not found')
+        self.db = database
         self.db_dir = DATA.DATAPATH + '/' + database
         
         mat_file = glob(self.db_dir + '/*__map.npz')[0]
@@ -303,6 +304,7 @@ class Calibrator:
             # register report metadata
             meta = {'k':k_range,
                     'n':n_range,
+                    'db': self.db,
                     'windows':self.w_info.T.to_dict()}
             with open(self.meta_file, 'w') as meta_handle:
                 json.dump(meta, meta_handle)

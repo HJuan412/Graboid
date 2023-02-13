@@ -265,7 +265,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
                  'ref_file':ref_file,
                  'acc_file':map_director.acc_file,
                  'order_file':selector.order_file,
-                 'diff_files':selector.diff_file}
+                 'diff_file':selector.diff_file}
     with open(db_dir + 'meta.json', 'w') as meta_handle:
         json.dump(meta_dict, meta_handle)
     

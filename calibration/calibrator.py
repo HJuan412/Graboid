@@ -21,7 +21,6 @@ import time
 from classification import classification
 from classification import cost_matrix
 from DATA import DATA
-from glob import glob
 from preprocess import feature_selection as fsele
 from preprocess import windows
 
@@ -149,12 +148,14 @@ class Calibrator:
             raise Exception('Database not found')
         self.db = database
         self.db_dir = DATA.DATAPATH + '/' + database
-        
-        mat_file = glob(self.db_dir + '/*__map.npz')[0]
-        tax_file = glob(self.db_dir + '/*.tax')[0]
-        acc_file = glob(self.db_dir + '/*__map.accs')[0]
-        order_file = self.db_dir + '/order.npz'
-        diff_file = self.db_dir + 'diff.csv'
+        # use meta file from database to locate necessary files
+        with open(self.db_dir + '/meta.json', 'r') as meta_handle:
+            db_meta = json.load(meta_handle)
+        mat_file = db_meta['mat_file']
+        tax_file = db_meta['tax_file']
+        acc_file = db_meta['acc_file']
+        order_file = db_meta['order_file']
+        diff_file = db_meta['diff_file']
         
         # set the loader with the learning data
         self.loader = windows.WindowLoader('Graboid.calibrator.windowloader')

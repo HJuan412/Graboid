@@ -260,7 +260,7 @@ def main(work_dir, fasta_file, database, overwrite_map=False, calibration='yes',
                             min_width=min_width,
                             threads = threads,
                             keep=False)
-        map_file = map_director.map_file
+        map_file = map_director.mat_file
         acc_file = map_director.acc_file
         # update map record
         new_maps = DATA.MAPS.copy()

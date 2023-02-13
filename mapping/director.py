@@ -115,7 +115,7 @@ class Director:
     def blast_report(self):
         return self.blaster.report
     @property
-    def map_file(self):
+    def mat_file(self):
         return self.mapper.mat_file
     @property
     def acc_file(self):
@@ -129,9 +129,6 @@ class Director:
     @property
     def coverage(self):
         return self.mapper.coverage
-    @property
-    def acclist(self):
-        return self.mapper.acclist
     @property
     def mesas(self):
         return self.mapper.mesas

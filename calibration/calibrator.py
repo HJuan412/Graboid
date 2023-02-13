@@ -156,6 +156,7 @@ class Calibrator:
         acc_file = db_meta['acc_file']
         order_file = db_meta['order_file']
         diff_file = db_meta['diff_file']
+        self.guide_file = db_meta['guide_file'] # this isn't used in the calibration process, used in result visualization
         
         # set the loader with the learning data
         self.loader = windows.WindowLoader('Graboid.calibrator.windowloader')
@@ -305,7 +306,8 @@ class Calibrator:
             # register report metadata
             meta = {'k':k_range,
                     'n':n_range,
-                    'db': self.db,
+                    'db':self.db,
+                    'guide': self.guide_file,
                     'windows':self.w_info.T.to_dict()}
             with open(self.meta_file, 'w') as meta_handle:
                 json.dump(meta, meta_handle)

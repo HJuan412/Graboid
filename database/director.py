@@ -247,9 +247,27 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
     selector.build_tabs(map_director.matrix,
                         map_director.bounds,
                         map_director.coverage,
-                        db_director.tax_file, # TODO: check that this tax file is the correct one in db_director
+                        db_director.tax_file,
                         min_seqs = min_seqs,
                         rank = filt_rank)
+    
+    # assemble meta file
+    meta_dict = {'seq_file':db_director.seq_file,
+                 'tax_file':db_director.tax_file,
+                 'guide_file':db_director.guide_file,
+                 'rank_file':db_director.rank_file,
+                 'nseqs':db_director.nseqs,
+                 'base_rank':db_director.base_rank,
+                 'base_taxa':db_director.base_taxa,
+                 'rank_counts':db_director.rank_counts,
+                 'mat_file':map_director.mat_file,
+                 'ref_dir':ref_dir,
+                 'ref_file':ref_file,
+                 'acc_file':map_director.acc_file,
+                 'order_file':selector.order_file,
+                 'diff_files':selector.diff_file}
+    with open(db_dir + 'meta.json', 'w') as meta_handle:
+        json.dump(meta_dict, meta_handle)
     
     # generate db description
     if description == '':
@@ -259,6 +277,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
             description = f'Database built from file: {fasta}. {db_director.nseqs} sequences.'
     with open(db_dir + 'desc.json', 'w') as handle:
         json.dump(description, handle)
+        
     # write summaries
     # Database summary
     print('Finished building database!')

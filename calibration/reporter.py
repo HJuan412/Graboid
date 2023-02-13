@@ -21,7 +21,7 @@ logger.setLevel(logging.INFO)
 #%% classes
 class Reporter:
     def load_report(self, report_file):
-        meta_file = re.sub('.csv', '.meta', report_file) # TODO: change calibration outfiles to share a name
+        meta_file = re.sub('.report', '.meta', report_file)
         report = pd.read_csv(report_file)
         self.report = report.loc[report.F1_score > 0].sort_values('F1_score', ascending=False).sort_values('w_start')
         with open(meta_file, 'r') as meta_handle:
@@ -29,7 +29,7 @@ class Reporter:
             self.k_range = meta['k']
             self.n_range = meta['n']
             self.windows = meta['windows']
-            self.db = meta['db'] # TODO: add db to calibration meta file
+            self.db = meta['db']
         # set guide file
         self.taxguide = pd.read_csv(self.db + '/data.guide', index_col=0) # TODO: universalize filenames in database creator, fasta name / search params stored in meta file
         self.rep_dict = self.tax_guide.reset_index().set_index('taxID').SciName.to_dict()

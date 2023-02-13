@@ -30,8 +30,9 @@ class Reporter:
             self.n_range = meta['n']
             self.windows = meta['windows']
             self.db = meta['db']
+            self.guide_file = meta['guide']
         # set guide file
-        self.taxguide = pd.read_csv(self.db + '/data.guide', index_col=0) # TODO: universalize filenames in database creator, fasta name / search params stored in meta file
+        self.taxguide = pd.read_csv(self.guide_file, index_col=0)
         self.rep_dict = self.tax_guide.reset_index().set_index('taxID').SciName.to_dict()
         
     def get_summary(self, r_starts=0, r_ends=np.inf, metric='F1_score', nwins=3, show=True, *taxa):
@@ -49,7 +50,7 @@ class Reporter:
         regions = np.array([r_starts, r_ends])
         
         # check valid taxa
-        valid_taxa = set(taxa).intersection(self.taxguide.index)
+        valid_taxa = list(set(taxa).intersection(self.taxguide.index))
         missing = set(taxa).difference(valid_taxa)
         if len(valid_taxa) == 0 and len(taxa) > 0:
             logger.warning('No valid taxa presented. Aborting')
@@ -57,6 +58,8 @@ class Reporter:
         elif len(missing) > 0:
             logger.warning(f'The following taxa are not found in the database: {" ".join(missing)}')
         
+        # get corresponding taxIDs
+        tax_ids = self.taxguide.loc[valid_taxa, 'taxID'].values
         # prune report
         report = self.report.loc[self.report[metric] > 0]
         tab_index = pd.MultiIndex.from_product([np.arange(len(r_starts)), np.arange(nwins)])
@@ -67,16 +70,16 @@ class Reporter:
                 logger.warning(f'No rows selected from report with scope {start} - {end}')
                 continue
             # filter for taxa
-            if len(valid_taxa) > 0:
-                report = report.loc[report.Taxon.isin(valid_taxa)]
+            if len(tax_ids) > 0:
+                report = report.loc[report.Taxon.isin(tax_ids)]
                 # prepare results tab
-                tab_columns = pd.MultiIndex.from_product([valid_taxa, ['w_start', 'w_end', 'K', 'n_sites', 'mode', metric]])
+                tab_columns = pd.MultiIndex.from_product([tax_ids, ['w_start', 'w_end', 'K', 'n_sites', 'mode', metric]])
                 report_tab = pd.DataFrame(index = tab_index, columns = tab_columns)
                 # report tab :
                 #               tax0                tax1                ...
                 #               n k ws we md mt     n k ws we md mt     (md : mode, mt : metric)
-                # win0  row0
-                #       row1
+                # reg0  win0
+                #       win1
                 # ...
                 for tax, sub_subreport in sub_report.groupby('Taxon'):
                     # get the best combination for every window present in sub_subreport
@@ -84,19 +87,20 @@ class Reporter:
                     win_subreport = sub_subreport.loc[~sub_subreport.w_start.duplicated()].reset_index()
                     tax_rows = np.arange(min(nwins, win_subreport.shape[0])) # determine the number of windows for tax in this window is lower than nwins
                     report_tab.loc[(r_idx, tax_rows), tax] = win_subreport.iloc[tax_rows, ['w_start', 'w_end', 'K', 'n_sites', 'mode', metric]]
+                # translate taxID's back to taxon names
+                report_tab.columns = pd.MultiIndex.from_product([valid_taxa, ['w_start', 'w_end', 'K', 'n_sites', 'mode', metric]])
             else:
                 report_tab = pd.DataFrame(index = tab_index, columns = ['w_start', 'w_end', 'K', 'n_sites', 'mode', metric])
                 # report tab :
                 #               n k ws we md mt    (md : mode, mt : metric)
-                # win0  row0
-                #       row1
+                # reg0  win0
+                #       win1
                 # ...
                 win_subreport = sub_report.loc[~sub_report.w_start.duplicated()].reset_index()
                 tax_rows = np.arange(min(nwins, win_subreport.shape[0])) # determine the number of windows for tax in this window is lower than nwins
                 report_tab.loc[(r_idx, tax_rows)] = win_subreport.iloc[tax_rows, ['w_start', 'w_end', 'K', 'n_sites', 'mode', metric]]
         
         header = f'{nwins} best parameter combinations given by the mean {metric} values'
-        # TODO: translate tax names
         if show:
             print(header)
             if len(missing) > 0:

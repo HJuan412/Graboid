@@ -18,6 +18,47 @@ import re
 logger = logging.getLogger('Graboid.reporter')
 logger.setLevel(logging.INFO)
 
+#%% functions
+def get_consensus_params(report):
+    # this function takes unique parameter combinations for a multi taxon calibration report, used for automatic parameter selection
+    # returns a dataframe of the form:
+        # win n k modes taxs
+        # win contains tuples of window coordinates, used as the dataframe index (values may repeat if there are multiple parameter combinations for each window)
+        # n, k & modes, optimum combinations of sites, neighbours and classification modes (modes is a list if multiple modes are applied)
+        # taxs, taxons for which a given parameter combination is the most adequate (list)
+    
+    consensus = pd.DataFrame(columns = 'win n k modes taxs'.split())
+    # begin by exploring each region in the report
+    for reg, reg_subtab in report.groupby(level=0):
+        sub_report = reg_subtab.droplevel(0)
+        # merge window coordinates and n & k parameters into single value by adding the second half as decimal numbers
+        # get orders of magnitude
+        orders = np.floor(np.log10(sub_report.loc[:, (slice(None), ['k', 'e'])].max()))
+        ids0 = sub_report.loc[:, (slice(None), ['n', 's'])]
+        ids1 = sub_report.loc[:, (slice(None), ['k', 'e'])] * 10 ** (-orders - 1)
+        ids = (ids0 + ids1.to_numpy()).rename(columns={'s':'wins', 'n':'params'})
+        
+        # flatten ids table, turn taxon into another attribute
+        flattened = []
+        for tax in ids.columns.levels[0]:
+            subtab = ids.loc[:, tax].copy()
+            subtab['tax'] = tax
+            flattened.append(subtab)
+        # keep the index location for each parameter combination in the original report
+        flattened = pd.concat(flattened).reset_index(drop = False, names = 'idxs')
+        
+        for (win, par), subtab in flattened.groupby(['wins', 'params']):
+            indexes = subtab.idxs.to_list()
+            taxes = subtab.tax.to_list()
+            modes = reg_subtab.loc[indexes, (taxes, 'md')].to_list()
+            w_coords = tuple(reg_subtab.loc[:, (taxes[0], ['ws', 'we'])].iloc[0])
+            n = reg_subtab.loc[:, (taxes[0], 'n')].unique()[0]
+            k = reg_subtab.loc[:, (taxes[0], 'k')].unique()[0]
+            consensus.loc[len(consensus)] = [w_coords, n, k, modes, taxes]
+        consensus.set_index('win')
+    # consensus table uses: group by index, extract unique parameter combinations, run classifications, register differences for each query seq
+    return consensus
+    
 #%% classes
 class Reporter:
     def load_report(self, report_file):

@@ -199,7 +199,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
         if not clear:
             raise Exception('Choose a diferent name or set "clear" as True')
         print(f'Removing existing database: {db_name}...')
-        os.rmdir(db_dir)
+        shutil.rmtree(db_dir)
     
     # create directories
     tmp_dir = db_dir + '/tmp'

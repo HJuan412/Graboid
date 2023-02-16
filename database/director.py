@@ -80,7 +80,7 @@ class Director:
                 ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']
                 
         # propagate to taxonomist and merger
-        logger.INFO(f'Taxonomic ranks set as {" ".join(ranks)}')
+        logger.info(f'Taxonomic ranks set as {" ".join(ranks)}')
         self.taxonomist.set_ranks(ranks)
         self.merger.set_ranks(ranks)
     

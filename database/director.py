@@ -33,6 +33,7 @@ sh = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 sh.setFormatter(formatter)
 sh.setLevel(logging.INFO)
+logger.addHandler(sh)
 
 #%% functions
 # Entrez

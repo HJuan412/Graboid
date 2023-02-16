@@ -16,7 +16,6 @@ from mapping import matrix
 import argparse
 import logging
 import os
-import re
 
 #%% set logger
 logger = logging.getLogger('Graboid.mapper')

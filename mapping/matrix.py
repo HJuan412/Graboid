@@ -233,7 +233,7 @@ class MatBuilder:
                     numseq = get_numseq(seq[match[0]:match[1]][::-1], rc_dict)
                 matrix[q_idx, match[2]:match[3]] = numseq
             acclist.append(qry)
-        
+        self.acclist = acclist
         # store output
         # save the matrix along with the bounds and coverage array (coverage array done over the entire length of the marker reference)
         np.savez_compressed(self.mat_file, bounds=bounds, matrix=matrix, coverage=coverage, mesas=mesas)

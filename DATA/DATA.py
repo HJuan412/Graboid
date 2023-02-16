@@ -20,7 +20,7 @@ import json
 import os
 
 DATAPATH = os.path.dirname(__file__)
-DBASES = [db_dir for db_dir in os.listdir(DATAPATH) if os.path.isdir(DATAPATH + '/' + db_dir) and db_dir != '__pycache__']
+DBASES = [db_dir for db_dir in os.listdir(DATAPATH) if (os.path.isdir(DATAPATH + '/' + db_dir) and db_dir != '__pycache__')]
 
 def update_maps(maps):
     with open(DATAPATH + '/maps.json', 'w') as handle:

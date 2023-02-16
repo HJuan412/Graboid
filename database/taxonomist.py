@@ -131,8 +131,8 @@ class TaxonomistNCBI(Taxer):
                 except IOError:
                     logger.error('Interrupted taxing due to conection error')
                     continue
-                except http.client.client.Incomplete:
-                    logger.Error('Interrupted taxing due to bad file')
+                except http.client.HTTPException:
+                    logger.error('Interrupted taxing due to bad file')
                     continue
             if len(tax_records) != len(chunk):
                 failed += list(chunk)

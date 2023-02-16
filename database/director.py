@@ -29,13 +29,10 @@ from preprocess import feature_selection as fsele
 logger = logging.getLogger('Graboid.database')
 logger.setLevel(logging.DEBUG)
 
-db_logger = logging.getLogger('Database_summary')
-db_logger.setLevel(logging.INFO)
 sh = logging.StreamHandler()
-formatter = logging.Formatter('%(message)s')
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 sh.setFormatter(formatter)
 sh.setLevel(logging.INFO)
-db_logger.addHandler(sh)
 
 #%% functions
 # Entrez
@@ -212,11 +209,11 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
     os.makedirs(warn_dir)
     os.makedirs(ref_dir)
     shutil.copyfile(ref_seq, ref_file)
-    
-    # add db_logger handler
-    fh = logging.FileHandler(db_dir + '/summary')
-    fh.setLevel(logging.INFO)
-    db_logger.addHandler(fh)
+    # add file handler
+    fh = logging.FileHandler(tmp_dir + '/log')
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
     
     # get sequence data (taxon & marker or fasta)
     # setup director
@@ -279,24 +276,24 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
             description = f'Database built from file: {fasta}. {db_director.nseqs} sequences.'
     with open(db_dir + 'desc.json', 'w') as handle:
         json.dump(description, handle)
-        
+    
+    print('Finished building database!')
     # write summaries
     # Database summary
-    print('Finished building database!')
-    db_logger.info(f'Database name: {db_name}')
-    db_logger.info(f'Database location: {db_dir}')
-    db_logger.info(f'Reference sequence (length): {ref_seq}({map_director.marker_len})')
-    db_logger.info(f'N sequences: {db_director.nseqs}')
-    db_logger.info('Taxa:')
-    db_logger.info(f'\tBase taxon (lvl): {db_director.base_taxa} ({db_director.base_rank})')
-    db_logger.info('Rank (N taxa):')
-    for rk, count in db_director.rank_counts.iteritems():
-        db_logger.info(f'\t{rk} ({count})')
-    db_logger.info('Mesas:')
-    for idx, mesa in enumerate(map_director.mesas):
-        db_logger.info(f'\tMesa {idx}')
-        db_logger.info(f'\t\tCoordinates (length): {int(mesa[0])} - {int(mesa[1])} ({int(mesa[2])} bases)')
-        db_logger.info(f'\t\tAverage coverage: {mesa[3]}')
+    with open(db_dir + '/summary', 'w') as summary:
+        summary.write(f'Database name: {db_name}\n')
+        summary.write(f'Database location: {db_dir}\n')
+        summary.write(f'Reference sequence (length): {ref_seq}({map_director.marker_len})\n')
+        summary.write(f'N sequences: {db_director.nseqs}\n')
+        summary.write('Taxa:\n')
+        summary.write(f'\tBase taxon (lvl): {db_director.base_taxa} ({db_director.base_rank})\n')
+        summary.write('Rank (N taxa):\n')
+        summary.write('\n'.join([f'\t{rk} ({count})' for rk, count in db_director.rank_counts.iteritems()]))
+        summary.write('Mesas:\n')
+        for idx, mesa in enumerate(map_director.mesas):
+            summary.write(f'\tMesa {idx}\n')
+            summary.write(f'\t\tCoordinates (length): {int(mesa[0])} - {int(mesa[1])} ({int(mesa[2])} bases)\n')
+            summary.write(f'\t\tAverage coverage: {mesa[3]}\n')
 
 #%% main execution
 parser = argparse.ArgumentParser(prog='Graboid DATABASE',

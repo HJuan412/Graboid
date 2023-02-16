@@ -76,10 +76,11 @@ class Taxer:
 
 class TaxonomistNCBI(Taxer):
     # procures the taxonomic data for the NCBI records
-    def __init__(self, taxid_file, ranks, out_dir):
+    def __init__(self, taxid_file, ranks, out_dir, warn_dir):
         self.taxid_file = taxid_file
         self.ranks = ranks
         self.out_dir = out_dir
+        self.warn_dir = warn_dir
         self.logger = logging.getLogger('Graboid.database.taxonomist.NCBI')
         self.generate_outfiles()
         try:
@@ -143,14 +144,18 @@ class TaxonomistNCBI(Taxer):
                 continue
         
         self.failed = failed
-        if len(failed) > 0:
-            self.logger.warning(f'Failed to download {len(failed)} taxIDs of {len(self.uniq_taxs)}')
     
     def retry_dl(self, max_attempts=3):
         # if some taxids couldn't be downloaded, rety up to max_attempts times
         attempt = 1
         while attempt <= max_attempts and len(self.failed) > 0:
+            self.logger.warning(f'Attempting to download {len(self.failed)} failed taxIDs of {len(self.uniq_taxs)}. Attempt {attempt} of {max_attempts}...')
             self.dl_tax_records(self.failed)
+            attempt += 1
+        if len(self.failed) > 0:
+            with open(self.warn_dir + '/failed_tax.ncbi', 'w') as handle:
+                handle.write('\n'.join(self.failed))
+            
             
     def update_guide(self, taxids, records):
         # extract data from a single record and updates the guide table
@@ -178,9 +183,10 @@ class TaxonomistNCBI(Taxer):
 
 class TaxonomistBOLD(Taxer):
     # generates the taxomoic tables for the records downloaded from BOLD
-    def __init__(self, taxid_file, ranks, out_dir):
+    def __init__(self, taxid_file, ranks, out_dir, warn_dir):
         self.taxid_file = taxid_file
         self.out_dir = out_dir
+        self.warn_dir = warn_dir
         self.logger = logging.getLogger('Graboid.database.taxonomist.BOLD')
         self.generate_outfiles()
         self.__set_marker_vars()
@@ -223,10 +229,11 @@ class Taxonomist:
     # class attribute dictionary containing usable taxonomist tools
     taxer_dict = {'BOLD':TaxonomistBOLD,
                   'NCBI':TaxonomistNCBI}
-    def __init__(self, out_dir, ranks=None):
+    def __init__(self, out_dir, warn_dir, ranks=None):
         self.taxid_files = {}
         self.set_ranks(ranks)
         self.out_dir = out_dir
+        self.warn_dir = warn_dir
         
         self.out_files = {}
     
@@ -249,7 +256,7 @@ class Taxonomist:
             raise Exception('No valid taxid files detected')
         
         for database, taxid_file in taxid_files.items():
-            taxer = self.taxer_dict[database](taxid_file, self.ranks, self.out_dir)
+            taxer = self.taxer_dict[database](taxid_file, self.ranks, self.out_dir, self.warn_dir)
             taxer.taxing(chunksize, max_attempts)
             logger.info(f'Finished retrieving taxonomy data from {database} database. Saved to {taxer.tax_out}')
             self.out_files[database] = taxer.tax_out

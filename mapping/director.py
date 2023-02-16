@@ -18,8 +18,8 @@ import logging
 import os
 
 #%% set logger
-logger = logging.getLogger('Graboid.mapper')
-logger.setLevel(logging.DEBUG)
+map_logger = logging.getLogger('Graboid.mapper')
+map_logger.setLevel(logging.DEBUG)
 
 #%% arg parser
 parser = argparse.ArgumentParser(prog='Graboid MAPPING',
@@ -62,7 +62,7 @@ def check_fasta(fasta_file):
             nseqs += 1
     return nseqs
 
-def build_blastdb(ref_seq, db_dir, clear=False):
+def build_blastdb(ref_seq, db_dir, clear=False, logger=map_logger):
     # build a blast database
     # ref_seq : fasta file containing the reference sequences
     # db_dir : directory to where the generated db files will be stored
@@ -129,7 +129,7 @@ class Director:
     def mesas(self):
         return self.mapper.mesas
         
-    def direct(self, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1, keep=True):
+    def direct(self, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1, keep=True, logger=map_logger):
         # fasta file is the file to be mapped
         # evalue is the max evalue threshold for the blast report
         # db_dir points to the blast database: should be <path to db files>/<db prefix>

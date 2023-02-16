@@ -232,7 +232,8 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
     # build map
     mp.build_blastdb(ref_seq = ref_file,
                      db_dir = ref_dir,
-                     clear = True)
+                     clear = True,
+                     logger = logger)
     map_director = mp.Director(db_dir, warn_dir)
     map_director.direct(fasta_file = db_director.seq_file,
                         db_dir = ref_dir,
@@ -240,7 +241,8 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
                         dropoff=dropoff,
                         min_height=min_height,
                         min_width=min_width,
-                        threads = threads)
+                        threads = threads,
+                        logger = logger)
     
     # quantify information
     selector = fsele.Selector(db_dir)

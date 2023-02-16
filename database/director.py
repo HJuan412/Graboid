@@ -31,9 +31,9 @@ logger.setLevel(logging.DEBUG)
 
 db_logger = logging.getLogger('Database_summary')
 db_logger.setLevel(logging.INFO)
-formatter = logging.Formatter('%(message)s')
-db_logger.setFormatter(formatter)
 sh = logging.StreamHandler()
+formatter = logging.Formatter('%(message)s')
+sh.setFormatter(formatter)
 sh.setLevel(logging.INFO)
 db_logger.addHandler(sh)
 

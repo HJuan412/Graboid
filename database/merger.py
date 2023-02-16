@@ -85,7 +85,8 @@ class Merger():
     def set_ranks(self, ranks=None):
         if ranks is None:
             self.ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']
-        self.ranks = ranks
+        else:
+            self.ranks = ranks
         
     def merge_seqs(self):
         # reads given sequence files and extracts accessions

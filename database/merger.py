@@ -227,7 +227,7 @@ class MergerTax():
         self.build_rank_dict()
         merged_taxons = pd.concat(self.tax_tabs.values())
         self.get_valid_rows(merged_taxons)
-        merged_taxons.to_csv(tax_out)
+        merged_taxons.to_csv(tax_out, index=False)
         logger.info(f'Unified taxonomies stored to {tax_out}')
         # drop duplicated records (if any)
         merged_taxons.loc[np.invert(merged_taxons.index.duplicated())]

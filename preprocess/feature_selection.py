@@ -15,9 +15,10 @@ import pandas as pd
 
 #%% functions
 # table manipulation
-def get_taxid_tab(tax_tab):
+def get_taxid_tab(tax_file):
     # formats the given tax table (keeps only tax_id columns and removes the '_id' tail)
-    cols = [col for col in tax_tab if len(col.split('_')) > 1]
+    tax_tab = pd.read_csv(tax_file, index_col=0)
+    cols = [col for col in tax_tab if '_' in col]
     tr_dict = {col:col.split('_')[0] for col in cols}
     taxid_tab = tax_tab[cols].rename(columns = tr_dict)
     return taxid_tab

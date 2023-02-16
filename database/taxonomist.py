@@ -129,7 +129,7 @@ class TaxonomistNCBI(Taxer):
                     tax_records = Entrez.read(tax_handle)
                     break
                 except IOError:
-                    logger.Error('Interrupted taxing due to conection error')
+                    logger.error('Interrupted taxing due to conection error')
                     continue
                 except http.client.client.Incomplete:
                     logger.Error('Interrupted taxing due to bad file')

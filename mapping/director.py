@@ -8,13 +8,15 @@ Direct dataset_construction
 """
 
 #%% Libraries
-import argparse
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
-import logging
+from glob import glob
 from mapping import blast
 from mapping import matrix
-import numpy as np
+
+import argparse
+import logging
 import os
+import re
 
 #%% set logger
 logger = logging.getLogger('Graboid.mapper')
@@ -67,19 +69,21 @@ def build_blastdb(ref_seq, db_dir, clear=False):
     # db_dir : directory to where the generated db files will be stored
     # clear : overwrite existing db files
     
-    # check database directory    
-    check, db_files = blast.check_db_dir(db_dir)
-    db_name = db_dir.split('/')[-2]
-    if check:
+    # check database directory
+    try:
+        db_name = blast.check_db_dir(db_dir)
+        db_name = re.sub('.*/', '', db_name)
         # base exists 
         if clear:
             logger.info(f'Overwriting database {db_name} using file {ref_seq}')
         else:
             logger.info('A blast database of the name {db_name} already exists in the specified route. To overwrite it run this function again with clear set as True')
             return
-
+    except Exception:
+        db_name = db_dir.split('/')[-2]
+    
     # clear previous db_files (if present)
-    for file in db_files:
+    for file in glob(db_dir + '/*.n'):
         os.remove(file)
 
     # check sequences in ref_seq

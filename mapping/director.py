@@ -72,7 +72,6 @@ def build_blastdb(ref_seq, db_dir, clear=False):
     # check database directory
     try:
         db_name = blast.check_db_dir(db_dir)
-        db_name = re.sub('.*/', '', db_name)
         # base exists 
         if clear:
             logger.info(f'Overwriting database {db_name} using file {ref_seq}')
@@ -80,19 +79,16 @@ def build_blastdb(ref_seq, db_dir, clear=False):
             logger.info('A blast database of the name {db_name} already exists in the specified route. To overwrite it run this function again with clear set as True')
             return
     except Exception:
-        db_name = db_dir.split('/')[-2]
-    
+        db_name = db_dir + '/db'
     # clear previous db_files (if present)
     for file in glob(db_dir + '/*.n'):
         os.remove(file)
-
     # check sequences in ref_seq
     n_refseqs = check_fasta(ref_seq)
     if n_refseqs != 1:
         raise Exception(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
-    
     # build the blast database
-    blast.makeblastdb(ref_seq, db_dir)
+    blast.makeblastdb(ref_seq, db_name)
     logger.info(f'Generated blast databse {db_name} using the file {ref_seq} in directory {db_dir}')
 
 #%% classes

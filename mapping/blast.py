@@ -56,7 +56,7 @@ def check_db_dir(db_dir):
     # counts the database files present at the given location, check returns True if six .n* files are found
     db_files = glob(db_dir + '/*.n*')
     if len(db_files) == 6:
-        db_name = re.sub('\..n.*', '', db_files[0])
+        db_name = re.sub('\..*', '', db_files[0])
         return db_name
     raise Exception(f'Incomplete BLAST database ({len(db_files)} files found)')
 

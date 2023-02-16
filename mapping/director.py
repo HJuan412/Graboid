@@ -104,9 +104,6 @@ class Director:
         
         # attributes
         self.db_dir = None
-        self.mat_file = None
-        self.acc_file = None
-        self.dims = None
         
         # workers
         self.blaster = blast.Blaster(out_dir)

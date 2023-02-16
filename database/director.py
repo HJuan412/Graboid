@@ -159,7 +159,7 @@ class Director:
         return self.merger.rank_counts.loc[self.merger.ranks]
 
 #%% main function
-def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', ranks=None, bold=True, cp_fasta=False, chunksize=500, max_attempts=3, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, min_seqs=10, filt_rank='genus', threads=1, keep=False, clear=False):
+def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', ranks=None, bold=True, cp_fasta=False, chunksize=500, max_attempts=3, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, min_seqs=10, filt_rank='genus', threads=1, keep=False, clear=False, email='', apikey=''):
     # Arguments:
     # required:
     #     db_name : name for the generated database
@@ -186,6 +186,8 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
     #     keep : keep the temporal files
     #     clear : clear the db_name directory (if it exists)
     
+    # set entrez api key
+    set_entrez(email, apikey)
     # check sequences in ref_seq
     n_refseqs = mp.check_fasta(ref_seq)
     if n_refseqs != 1:

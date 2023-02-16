@@ -113,7 +113,7 @@ class SurveyNCBI(SurveyTool):
                 break
             except:
                 self.attempt += 1
-                self.logger.warning(f'Download of {self.taxon} {self.marker} interrupted, {self.ntries - self.attempt} attempts remaining')
+                self.logger.warning(f'Download of {self.taxon} {self.marker} interrupted, {self.max_attempts - self.attempt} attempts remaining')
 
 class Surveyor:
     # This class manages the download process for all taxon - marker - database trio

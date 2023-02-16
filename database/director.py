@@ -338,7 +338,7 @@ parser.add_argument('--email',
 parser.add_argument('--api_key',
                     help='API key associated to the provided email adress',
                     type=str)
-parser.add_argument('-r', '--ref_seq',
+parser.add_argument('-ref', '--ref_seq',
                     default=None,
                     help='Marker sequence to be used as base of the alignment',
                     type=str)

@@ -65,6 +65,16 @@ class Merger():
         self.set_ranks(ranks)
         self.nseqs = 0
     
+    @property
+    def base_rank(self):
+        return self.mtax.base_rank
+    @property
+    def base_taxa(self):
+        return self.mtax.base_taxa
+    @property
+    def rank_counts(self):
+        return self.mtax.rank_counts
+    
     def get_files(self, seqfiles, taxfiles):
         self.seqfiles = seqfiles
         self.taxfiles = taxfiles
@@ -123,8 +133,8 @@ class Merger():
         self.get_files(seqfiles, taxfiles)
         self.generate_outfiles()
         self.merge_seqs()
-        mtax = MergerTax(self.taxfiles, self.ranks)
-        mtax.merge_taxons(self.tax_out, self.taxguide_out, self.rank_dict_out, self.valid_rows_out)
+        self.mtax = MergerTax(self.taxfiles, self.ranks)
+        self.mtax.merge_taxons(self.tax_out, self.taxguide_out, self.rank_dict_out, self.valid_rows_out)
 
 class MergerTax():
     def __init__(self, tax_files, ranks):
@@ -189,7 +199,7 @@ class MergerTax():
         base_rank = self.ranks[0]
         self.base_taxa = self.guide_tab.loc[self.guide_tab['rank'] == base_rank].index.tolist()
         self.base_rank = base_rank
-        self.rank_counts = self.guide_tab.value_counts('rank')
+        self.rank_counts = self.guide_tab.value_counts('rank').to_dict()
         self.rank_dict = {}
         
         dissect_guide(self.guide_tab, root_rank, 0, self.rank_dict)

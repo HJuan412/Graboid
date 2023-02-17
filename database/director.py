@@ -154,7 +154,7 @@ class Director:
         return ' '.join(self.merger.base_taxa)
     @property
     def rank_counts(self):
-        return self.merger.rank_counts.loc[self.merger.ranks]
+        return self.merger.rank_counts
 
 #%% main function
 def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', ranks=None, bold=True, cp_fasta=False, chunksize=500, max_attempts=3, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, min_seqs=10, filt_rank='genus', threads=1, keep=False, clear=False, email='', apikey=''):

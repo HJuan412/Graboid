@@ -135,7 +135,7 @@ class Calibrator:
     @dist_mat.setter
     def dist_mat(self, mat_code):
         try:
-            self.__dist_mat = cost_matrix(mat_code)
+            self.__dist_mat = cost_matrix.get_matrix(mat_code)
         except:
             raise
             

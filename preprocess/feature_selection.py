@@ -15,12 +15,14 @@ import pandas as pd
 
 #%% functions
 # table manipulation
-def get_taxid_tab(tax_file):
+def get_taxid_tab(tax_file, mat_accs):
     # formats the given tax table (keeps only tax_id columns and removes the '_id' tail)
+    # extract only the rows present in the alignment matrix, given by mat_accs
     tax_tab = pd.read_csv(tax_file, index_col=0)
     cols = [col for col in tax_tab if '_' in col]
     tr_dict = {col:col.split('_')[0] for col in cols}
     taxid_tab = tax_tab[cols].rename(columns = tr_dict)
+    taxid_tab = taxid_tab.loc[mat_accs]
     return taxid_tab
 
 # information quantification
@@ -106,9 +108,9 @@ class Selector:
         self.order_file = f'{out_dir}/order.npz'
         self.diff_file = f'{out_dir}/diff.csv'
     
-    def build_tabs(self, matrix, bounds, coverage, tax_file, min_seqs=0, rank='genus'):
+    def build_tabs(self, matrix, bounds, coverage, mat_accs, tax_file, min_seqs=0, rank='genus'):
         # filter taxa below the min_seqs sequence threshold at the given rank
-        tax_tab = get_taxid_tab(tax_file)
+        tax_tab = get_taxid_tab(tax_file, mat_accs)
         ranks = {rk:idx for idx, rk in enumerate(tax_tab.columns)}
         tax_counts = tax_tab[rank].value_counts()
         selected = tax_counts.loc[tax_counts >= min_seqs]
@@ -116,7 +118,7 @@ class Selector:
         seqs = np.argwhere(tax_tab[rank].isin(taxa).values).flatten()
         
         sub_mat = matrix[seqs]
-        sub_tax = tax_tab.loc[seqs]
+        sub_tax = tax_tab.iloc[seqs]
         
         # Quantify information per site per taxon per rank
         self.diff_tab = get_ent_diff(sub_mat, sub_tax)

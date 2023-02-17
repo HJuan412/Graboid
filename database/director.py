@@ -270,7 +270,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
                  'acc_file':map_director.acc_file,
                  'order_file':selector.order_file,
                  'diff_file':selector.diff_file}
-    with open(db_dir + 'meta.json', 'w') as meta_handle:
+    with open(db_dir + '/meta.json', 'w') as meta_handle:
         json.dump(meta_dict, meta_handle)
     
     # generate db description
@@ -279,7 +279,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
             description = f'Database built from search terms: {taxon} + {marker}. {db_director.nseqs} sequences.'
         else:
             description = f'Database built from file: {fasta}. {db_director.nseqs} sequences.'
-    with open(db_dir + 'desc.json', 'w') as handle:
+    with open(db_dir + '/desc.json', 'w') as handle:
         json.dump(description, handle)
     
     print('Finished building database!')

@@ -148,9 +148,9 @@ class Selector:
     
     def load_order_mat(self, file):
         order_data = np.load(file)
-        self.order_tab = order_data['order_tab']
-        self.order_bounds = order_data['order_bounds']
-        self.order_tax = order_data['order_tax']
+        self.order_tab = order_data['order']
+        self.order_bounds = order_data['bounds']
+        self.order_tax = order_data['taxs']
     
     def load_diff_tab(self, file):
         self.diff_tab = pd.read_csv(file, index_col = [0, 1])

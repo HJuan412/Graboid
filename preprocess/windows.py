@@ -8,12 +8,13 @@ This script retrieves windows from a given data matrix and calculates entropy & 
 """
 
 #%% libraries
+from classification import cost_matrix
+
 import logging
 import numba as nb
 import numpy as np
 import pandas as pd
-from classification import cost_matrix
-
+import time
 #%%
 # tax table manipulation
 def get_taxid_tab(tax_file):
@@ -250,18 +251,14 @@ class WindowLoader:
         self.tax_tab = get_taxid_tab(tax_file)
     
     def get_window(self, start, end, row_thresh=0.2, col_thresh=0.2):
-        self.rows = []
-        
         if self.dims is None:
             return
 
-        if start < 0 or end > self.dims[1]:
-            self.logger.error(f'Invalid window dimensions: start: {start}, end: {end}. Must be between 0 and {self.dims[1]}')
-            return
+        if start < 0 or end >= self.dims[1]:
+            raise Exception(f'Invalid window dimensions: start: {start}, end: {end}. Must be between 0 and {self.dims[1]}')
 
-        window = np.array(self.matrix[:, start:end])
         # Windows are handled as a different class
-        out_window = Window(window, start, end, row_thresh, col_thresh, self)
+        out_window = Window(self.matrix, start, end, row_thresh, col_thresh, self)
         return out_window
 
 class Window:
@@ -270,7 +267,6 @@ class Window:
         self.start = start
         self.end = end
         self.loader = loader
-        self.shape = (0,0)
         self.process_window(row_thresh, col_thresh)
     
     @property
@@ -282,19 +278,18 @@ class Window:
         if self.loader is None:
             return None
         return self.loader.tax_tab.iloc[self.rows]
-    
-    @property
-    def col_idxs(self):
-        return self.cols + self.start
 
     def process_window(self, row_thresh, col_thresh):
         # run this method every time you want to change the column threshold
         self.row_thresh = row_thresh
         self.col_thresh = col_thresh
         
+        
+        # crop the portion of interest of the matrix
+        matrix = self.matrix[:, self.start:self.end]
         # fitler rows first
-        rows = filter_matrix(self.matrix, row_thresh, axis = 1)
-        cols = filter_matrix(self.matrix[rows], col_thresh, axis = 0)
+        rows = filter_matrix(matrix, row_thresh, axis = 1)
+        cols = filter_matrix(matrix[rows], col_thresh, axis = 0)
         
         self.rows = rows
         self.cols = cols + self.start
@@ -306,14 +301,17 @@ class Window:
             self.eff_mat = np.zeros((0, len(cols)))
     
     def collapse_window(self):
+        t0 = time.time()
         # tree = Tree()
         # tree.build(self.window)
         # self.eff_idxs = [lv[0] for lv in tree.leaves]
         # self.eff_idxs = get_leaves(0, np.arange(len(self.window)), self.window)
         # self.eff_mat = build_effective_matrix(self.eff_idxs, self.window)
-        self.eff_mat, self.eff_idxs = seq_collapse_nb(self.window)
+        self.eff_mat, self.eff_idxs = seq_collapse_nb(self.matrix[self.rows][:, self.cols])
         # print(self.eff_idxs)
         self.eff_tax = build_effective_taxonomy(self.eff_idxs, self.tax_tab)
+        elapsed = time.time() - t0
+        self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed} seconds')
         
 
 #%%

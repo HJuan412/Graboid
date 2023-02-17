@@ -25,6 +25,8 @@ def read_BOLD_summ(summ_file):
     bold_tab = pd.read_csv(summ_file, sep = '\t', encoding = 'latin-1', dtype = str) # latin-1 to parse BOLD files
     # sometimes BOLD has multiple records, remove repeats
     bold_tab = bold_tab.loc[~bold_tab.sampleid.duplicated()]
+    bold_tab.to_csv(summ_file, index=False)
+    # TODO: combine sequences of repeated records (maybe)
     accs = bold_tab['sampleid'].tolist()
     return accs
 

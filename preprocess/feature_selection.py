@@ -159,9 +159,9 @@ class Selector:
     def select_sites(self, nsites, rank, cols):
         # select the first nsites more informative sites from the given cols
         # returns a list with an array of column indexes per value of nsites
-        # nsites number of sites to select, can be an iterable
-        # rank (name) to select sites by
-        # cols list of column indexes to select
+        # nsites : number of sites to select
+        # rank : (name) to select sites by
+        # cols : list of column indexes to select from
         self.selected_rank = rank
         rk = self.ranks[rank]
         
@@ -172,7 +172,7 @@ class Selector:
             rk_cols = row[np.isin(row, cols)]
             cols_submat[idx] = rk_cols
         
-        selected_sites = [np.unique(cols_submat[:n]) for n in list(nsites)]
+        selected_sites = np.unique(cols_submat[:nsites])
         return selected_sites
     
     def get_sites(self, n_range, rank, cols=None, start=None, end=None):

@@ -154,6 +154,7 @@ class Selector:
     
     def load_diff_tab(self, file):
         self.diff_tab = pd.read_csv(file, index_col = [0, 1])
+        self.ranks = {rk:idx for idx, rk in enumerate(self.diff_tab.index.get_level_values('rank').unique())}
     
     def select_sites(self, nsites, rank, cols):
         # select the first nsites more informative sites from the given cols
@@ -165,7 +166,7 @@ class Selector:
         rk = self.ranks[rank]
         
         # get the portion of the matrix corresponding to the given rank rows, extract relevant cols
-        rank_submat = self.order_tab[self.order_tav[:,0] == rk]
+        rank_submat = self.order_tab[self.order_tax[:,0] == rk]
         cols_submat = np.zeros((len(rank_submat), len(cols)))
         for idx, row in enumerate(rank_submat):
             rk_cols = row[np.isin(row, cols)]

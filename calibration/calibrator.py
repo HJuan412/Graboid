@@ -167,7 +167,7 @@ class Calibrator:
         
         logger.info(f'Set database: {database}')
     
-    def set_windows(self, size=np.inf, step=np.inf, starts=0, ends=np.inf):
+    def set_windows(self, size=np.inf, step=np.inf, starts=[0], ends=[np.inf]):
         # this function establishes the windows to be used in the grid search
         # size and step establish the length and displacement rate of the sliding window
             # default values use the entire sequence (defined by w_start & w_end) in a single run

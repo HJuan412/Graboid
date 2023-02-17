@@ -164,6 +164,8 @@ class Calibrator:
         # load information files
         self.selector.load_order_mat(order_file)
         self.selector.load_diff_tab(diff_file)
+        
+        logger.info(f'Set database: {database}')
     
     def set_windows(self, size=np.inf, step=np.inf, starts=0, ends=np.inf):
         # this function establishes the windows to be used in the grid search
@@ -199,6 +201,7 @@ class Calibrator:
             w_info.at[f'w_{w_idx}'] = [w_start, w_end, w_size, w_step]
         self.w_coords = pd.concat(w_coords)
         self.w_info = w_info
+        logger.info(f'Set {len(w_coords)} of size {size} and step {step}')
     
     def grid_search(self,
                     max_k,
@@ -219,6 +222,8 @@ class Calibrator:
         n_range = np.arange(min_n, max_n, step_n)
         
         # begin calibration
+        logger.info('Began calibration')
+        t00 = time.time()
         for idx, (start, end) in enumerate(self.w_coords.to_numpy()):
             t0 = time.time()
             print(f'Window {start} - {end} ({idx + 1} of {len(self.w_coords)})')
@@ -230,7 +235,7 @@ class Calibrator:
             n_seqs = window.eff_mat.shape[0]
             if n_seqs < min_seqs:
                 # not enough sequences passed the filter, skip iteration
-                print(f'Window {start} - {end}. Not enoug sequences to perform calibration ({n_seqs}, min = {min_seqs}), skipping')
+                logger.info(f'Window {start} - {end}. Not enoug sequences to perform calibration ({n_seqs}, min = {min_seqs}), skipping')
                 continue
             
             n_sites = self.selector.get_sites(n_range, rank, window.cols)
@@ -302,12 +307,17 @@ class Calibrator:
                     metrics_report.to_csv(self.out_file, header=os.path.isfile(self.classif_file), index=False, mode='a')
             t6 = time.time()
             logger.debug(f'metric calculation {t6 - t5}')
-            
-            # register report metadata
-            meta = {'k':k_range,
-                    'n':n_range,
-                    'db':self.db,
-                    'guide': self.guide_file,
-                    'windows':self.w_info.T.to_dict()}
-            with open(self.meta_file, 'w') as meta_handle:
-                json.dump(meta, meta_handle)
+            logger.info(f'Window {start} - {end} ({n_seqs} effective sequences) Calibrated in {t6 - t0} seconds')
+        elapsed = time.time() - t00
+        logger.info(f'Finished calibration in {elapsed} seconds')
+        logger.info(f'Stored calibration report to {self.out_file}')
+        if keep_classif:
+            logger.info(f'Stored classification results to {self.classif_file}')
+        # register report metadata
+        meta = {'k':k_range,
+                'n':n_range,
+                'db':self.db,
+                'guide': self.guide_file,
+                'windows':self.w_info.T.to_dict()}
+        with open(self.meta_file, 'w') as meta_handle:
+            json.dump(meta, meta_handle)

@@ -12,6 +12,7 @@ import argparse
 import json
 import logging
 import os
+import pandas as pd
 import re
 import shutil
 
@@ -230,10 +231,10 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
         db_director.clear_tmp()
         
     # build map
-    mp.build_blastdb(ref_seq = ref_file,
-                     db_dir = ref_dir,
-                     clear = True,
-                     logger = logger)
+    marker_len = mp.build_blastdb(ref_seq = ref_file,
+                                  db_dir = ref_dir,
+                                  clear = True,
+                                  logger = logger)
     map_director = mp.Director(db_dir, warn_dir)
     map_director.direct(fasta_file = db_director.seq_file,
                         db_dir = ref_dir,
@@ -284,20 +285,23 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
     print('Finished building database!')
     # write summaries
     # Database summary
-    with open(db_dir + '/summary', 'w') as summary:
+    summ_file = db_dir + '/summary'
+    with open(summ_file, 'w') as summary:
         summary.write(f'Database name: {db_name}\n')
         summary.write(f'Database location: {db_dir}\n')
-        summary.write(f'Reference sequence (length): {ref_seq}({map_director.marker_len})\n')
+        summary.write(f'Reference sequence (length): {ref_seq} ({marker_len})\n')
         summary.write(f'N sequences: {db_director.nseqs}\n')
         summary.write('Taxa:\n')
         summary.write(f'\tBase taxon (lvl): {db_director.base_taxa} ({db_director.base_rank})\n')
         summary.write('Rank (N taxa):\n')
-        summary.write('\n'.join([f'\t{rk} ({count})' for rk, count in db_director.rank_counts.iteritems()]))
-        summary.write('Mesas:\n')
-        for idx, mesa in enumerate(map_director.mesas):
-            summary.write(f'\tMesa {idx}\n')
-            summary.write(f'\t\tCoordinates (length): {int(mesa[0])} - {int(mesa[1])} ({int(mesa[2])} bases)\n')
-            summary.write(f'\t\tAverage coverage: {mesa[3]}\n')
+        summary.write('\n'.join([f'\t{rk} ({count})' for rk, count in db_director.rank_counts.items()]))
+        summary.write('\nMesas:\n')
+    # mesas summary
+    mesa_tab = pd.DataFrame(map_director.mesas, columns = 'start end bases average_cov'.split())
+    mesa_tab.index.name = 'mesa'
+    mesa_tab = mesa_tab.astype({'start':'int', 'end':'int', 'bases':'int'})
+    mesa_tab['average_cov'] = mesa_tab.average_cov.round(2)
+    mesa_tab.to_csv(summ_file, sep='\t', mode='a')
 
 #%% main execution
 parser = argparse.ArgumentParser(prog='Graboid DATABASE',

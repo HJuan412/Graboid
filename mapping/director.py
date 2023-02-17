@@ -62,6 +62,17 @@ def check_fasta(fasta_file):
             nseqs += 1
     return nseqs
 
+def check_ref(ref_file):
+    nseqs = 0
+    marker_len = 0
+    with open(ref_file, 'r') as fasta_handle:
+        for title, seq in sfp(fasta_handle):
+            nseqs += 1
+            marker_len = len(seq)
+        if nseqs > 1:
+            raise Exception(f'Reference file must contain ONE sequence. File {ref_file} contains {nseqs}')
+    return marker_len
+            
 def build_blastdb(ref_seq, db_dir, clear=False, logger=map_logger):
     # build a blast database
     # ref_seq : fasta file containing the reference sequences
@@ -82,13 +93,12 @@ def build_blastdb(ref_seq, db_dir, clear=False, logger=map_logger):
     # clear previous db_files (if present)
     for file in glob(db_dir + '/*.n'):
         os.remove(file)
-    # check sequences in ref_seq
-    n_refseqs = check_fasta(ref_seq)
-    if n_refseqs != 1:
-        raise Exception(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
+    # check that reference file is valid
+    marker_len = check_ref(ref_seq)    
     # build the blast database
     blast.makeblastdb(ref_seq, db_name)
     logger.info(f'Generated blast databse {db_name} using the file {ref_seq} in directory {db_dir}')
+    return marker_len
 
 #%% classes
 class Director:

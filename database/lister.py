@@ -24,10 +24,13 @@ def read_BOLD_summ(summ_file):
     # extract a list of accessions from a BOLD summary
     bold_tab = pd.read_csv(summ_file, sep = '\t', encoding = 'latin-1', dtype = str) # latin-1 to parse BOLD files
     # sometimes BOLD has multiple records, remove repeats
-    bold_tab = bold_tab.loc[~bold_tab.sampleid.duplicated()]
-    bold_tab.to_csv(summ_file, index=False)
-    # TODO: combine sequences of repeated records (maybe)
-    accs = bold_tab['sampleid'].tolist()
+    duplicated = bold_tab.loc[bold_tab.sampleid.duplicated()]
+    single = bold_tab.loc[~bold_tab.sampleid.duplicated()].reset_index(drop=False).set_index('sampleid', drop=False)
+    for samp_id, cluster in duplicated.groupby('sampleid'):
+        seqs = cluster.nucleotides.sum()
+        single.loc[samp_id, 'nucleotides'] += seqs
+    accs = single.sampleid.tolist()
+    single.to_csv(summ_file, sep='\t', index=False)
     return accs
 
 def read_NCBI_summ(summ_file):
@@ -37,13 +40,15 @@ def read_NCBI_summ(summ_file):
     return accs
 
 def read_summ(summ_file, database):
-    # single read function
-    if database == 'NCBI':
-        ncbi_tab = pd.read_csv(summ_file, sep = '\t')
-        accs = ncbi_tab.iloc[:,0].tolist()
-    elif database == 'BOLD':
-        bold_tab = pd.read_csv(summ_file, sep = '\t', encoding = 'latin-1', dtype = str) # latin-1 to parse BOLD files
-        accs = bold_tab['sampleid'].tolist()
+    readers = {'NCBI':read_NCBI_summ,
+               'BOLD':read_BOLD_summ}
+    accs = readers[database](summ_file)
+    # if database == 'NCBI':
+    #     ncbi_tab = pd.read_csv(summ_file, sep = '\t')
+    #     accs = ncbi_tab.iloc[:,0].tolist()
+    # elif database == 'BOLD':
+    #     bold_tab = pd.read_csv(summ_file, sep = '\t', encoding = 'latin-1', dtype = str) # latin-1 to parse BOLD files
+    #     accs = bold_tab['sampleid'].tolist()
     
     if len(accs) == 0:
         raise Exception(f'No records present in {summ_file}')

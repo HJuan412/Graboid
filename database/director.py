@@ -249,6 +249,7 @@ def main(db_name, ref_seq, taxon=None, marker=None, fasta=None, description='', 
     selector.build_tabs(map_director.matrix,
                         map_director.bounds,
                         map_director.coverage,
+                        map_director.accs,
                         db_director.tax_file,
                         min_seqs = min_seqs,
                         rank = filt_rank)

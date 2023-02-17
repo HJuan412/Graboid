@@ -56,7 +56,7 @@ def per_tax_entropy(matrix, tax_tab):
         entropy_mat = np.zeros((len(tax_list), matrix.shape[1]), dtype=np.float32)
         for idx, tax in enumerate(tax_list):
             entropy_mat[idx] = get_matrix_entropy(matrix[tax_col == tax])
-        tabs.append(pd.DataFrame(entropy_mat, index = pd.MultiIndex.from_product([[rank], tax_list])))
+        tabs.append(pd.DataFrame(entropy_mat, index = pd.MultiIndex.from_product([[rank], tax_list], names=['rank', 'taxID'])))
     # merge entropy tables for each taxon
     entropy_tab = pd.concat(tabs)
     return entropy_tab

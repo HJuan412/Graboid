@@ -172,7 +172,7 @@ class Selector:
             rk_cols = row[np.isin(row, cols)]
             cols_submat[idx] = rk_cols
         
-        selected_sites = np.unique(cols_submat[:nsites])
+        selected_sites = np.unique(cols_submat[:, :nsites])
         return selected_sites
     
     def get_sites(self, n_range, rank, cols=None, start=None, end=None):

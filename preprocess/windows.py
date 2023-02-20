@@ -272,6 +272,9 @@ class Window:
     @property
     def window(self):
         return self.matrix[self.rows][:, self.cols]
+    @property
+    def eff_mat(self):
+        return self.window[self.eff_rows]
     
     @property
     def tax_tab(self):
@@ -302,13 +305,9 @@ class Window:
     
     def collapse_window(self):
         t0 = time.time()
-        # tree = Tree()
-        # tree.build(self.window)
-        # self.eff_idxs = [lv[0] for lv in tree.leaves]
-        # self.eff_idxs = get_leaves(0, np.arange(len(self.window)), self.window)
-        # self.eff_mat = build_effective_matrix(self.eff_idxs, self.window)
-        self.eff_mat, self.eff_idxs = seq_collapse_nb(self.matrix[self.rows][:, self.cols])
-        # print(self.eff_idxs)
+        # self.eff_mat, self.eff_idxs = seq_collapse_nb(self.matrix[self.rows][:, self.cols])
+        self.eff_rows, self.eff_idxs = seq_collapse_nb(self.matrix[self.rows][:, self.cols])
+        self.n_seqs = len(self.eff_rows)
         self.eff_tax = build_effective_taxonomy(self.eff_idxs, self.tax_tab)
         elapsed = time.time() - t0
         self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed} seconds')
@@ -377,17 +376,16 @@ def seq_collapse_nb(matrix):
             for br in possible_branches:
                 seq_guide[base_idx][base].add(br)
     # generate collapsed matrix
-    collapsed = np.zeros((n_branch, seq_len), dtype = matrix.dtype)
-    for br_idx, br in enumerate(branches[:n_branch]):
-        sub_mat = matrix[np.array(br, dtype=np.int64)]
-        collapsed[br_idx] = np.array([col.max() for col in sub_mat.T])
-    # # remove repeated sequences
-    # repeats = set([0 for i in range(0)])
-    # for idx0, br0 in enumerate(branches):
-    #     for idx1, br1 in enumerate(branches[idx0+1]):
-            
-            
-    return collapsed, branches[:n_branch]
+    # collapsed = np.zeros((n_branch, seq_len), dtype = matrix.dtype)
+    # for br_idx, br in enumerate(branches[:n_branch]):
+    #     sub_mat = matrix[np.array(br, dtype=np.int64)]
+    #     collapsed[br_idx] = np.array([col.max() for col in sub_mat.T])
+
+    # return collapsed, branches[:n_branch]
+    
+    # get effective indexes
+    eff_rows = [i[0] for i in branches[:n_branch]]
+    return eff_rows, branches[:n_branch]
 
 # TODO: test these
 # TODO: maybe coud be changed into a numba function

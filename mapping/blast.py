@@ -37,7 +37,7 @@ def blast(query, ref, out_file, threads=1):
     blast_tab = pd.read_csv(out_file, sep='\t', header=None, names='qseqid pident length qstart qend sstart send evalue'.split())
     if len(blast_tab) == 0:
         raise Exception(f'Blast search of file {query} on database {ref} yielded no results')
-    ref_row = pd.Series(index=blast_tab.columns)
+    ref_row = pd.Series(index=blast_tab.columns, dtype=float)
     # add the reference length as an extra row in the report
     ref_row.at['qseqid', 'length', 'evalue'] = ['Reference', ref_marker_len, 100] # evalue of 100 means this row is always filtered out
     # overwrite blast report with column names and reference row

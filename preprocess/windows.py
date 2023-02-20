@@ -274,7 +274,9 @@ class Window:
         return self.matrix[self.rows][:, self.cols]
     @property
     def eff_mat(self):
-        return self.window[self.eff_rows]
+        # eff mat_contains the effective rows for the given window, but all the columns
+        # to get a specific set of columns use self.cols or a subset obtained trough feature selection
+        return self.matrix[self.eff_rows]
     
     @property
     def tax_tab(self):

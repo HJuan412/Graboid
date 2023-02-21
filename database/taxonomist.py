@@ -105,7 +105,7 @@ class TaxonomistNCBI(Taxer):
             raise Exception(f'Summary file {self.in_file} is empty')
 
         # get a reversed taxid list and a list of unique taxes
-        self.taxid_reverse = pd.Series(index = self.taxid_tab.values, data = self.taxid_tab.index)
+        self.taxid_reverse = pd.Series(index = self.taxid_tab.values.flatten(), data = self.taxid_tab.index)
         self.uniq_taxs = np.unique(self.taxid_tab)
     
     def make_tax_tables(self):

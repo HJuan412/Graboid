@@ -93,20 +93,20 @@ class TaxonomistNCBI(Taxer):
         
     def read_taxid_file(self):
         # reads the acc:taxid table
-        self.taxid_list = None
+        self.taxid_tab = None
         self.taxid_reverse = None
         self.uniq_taxs = None
-
-        taxid_list = pd.read_csv(self.taxid_file, index_col = 0, header = None)
+        
+        # index : accessions, values : taxids
+        self.taxid_tab = pd.read_csv(self.taxid_file, index_col = 0)
         
         # generates a warning if taxid_list is empty
-        if len(taxid_list) == 0:
+        if len(self.taxid_tab) == 0:
             raise Exception(f'Summary file {self.in_file} is empty')
 
-        self.taxid_list = taxid_list[1] # index are the accession codes
         # get a reversed taxid list and a list of unique taxes
-        self.taxid_reverse = pd.Series(index = self.taxid_list.values, data = taxid_list.index)
-        self.uniq_taxs = np.unique(taxid_list)
+        self.taxid_reverse = pd.Series(index = self.taxid_tab.values, data = self.taxid_tab.index)
+        self.uniq_taxs = np.unique(self.taxid_tab)
     
     def make_tax_tables(self):
         # generate empty taxonomy table (with two columns per rank one for name, one for ID), guide table link a taxid with its full taxonomy
@@ -171,7 +171,7 @@ class TaxonomistNCBI(Taxer):
             self.tax_table.at[instances] = self.tax_tab0.loc[taxid].values
     
     def taxing(self, chunksize=500, max_attempts=3):
-        if self.taxid_list is None:
+        if self.taxid_tab is None:
             return
 
         self.dl_tax_records(self.uniq_taxs, chunksize)

@@ -59,10 +59,10 @@ class SurveyWAPI(SurveyTool):
                 r.release_conn()
                 self.done = True # signal success
                 break
-            except:
+            except Exception as excp:
                 # update attempt count
+                self.logger.warning(f'Download of {self.taxon} {self.marker} interrupted (Exception: {excp}), {self.ntries - self.attempt} attempts remaining')
                 self.attempt += 1
-                self.logger.warning(f'Download of {self.taxon} {self.marker} interrupted, {self.ntries - self.attempt} attempts remaining')
 
 # Specific survey tools
 # each of these uses a survey method to attempt to download a summary
@@ -111,9 +111,9 @@ class SurveyNCBI(SurveyTool):
                     handle.write('\n'.join(search_record['IdList']))
                 self.done = True # signal success
                 break
-            except:
+            except Exception as excp:
+                self.logger.warning(f'Download of {self.taxon} {self.marker} interrupted (Exception: {excp}), {self.max_attempts - self.attempt} attempts remaining')
                 self.attempt += 1
-                self.logger.warning(f'Download of {self.taxon} {self.marker} interrupted, {self.max_attempts - self.attempt} attempts remaining')
 
 class Surveyor:
     # This class manages the download process for all taxon - marker - database trio

@@ -122,7 +122,7 @@ class Calibrator:
         self.warn_dir = warn_dir
         
         # prepare out files
-        self.out_file = self.out_dir + f'/{prefix}.report'
+        self.report_file = self.out_dir + f'/{prefix}.report'
         self.classif_file = self.out_dir + f'/{prefix}.classif'
         self.meta_file = self.out_dir + f'/{prefix}.meta'
         
@@ -244,7 +244,7 @@ class Calibrator:
             dist_mat = np.zeros((n_seqs, n_seqs, len(n_range)), dtype=np.float32)
             # get paired distances
             t1 = time.time()
-            logger.debug(f'prep time {t1 - t0}')
+            logger.debug(f'prep time {t1 - t0:.3f}')
             for idx_0 in np.arange(n_seqs - 1):
                 qry_seq = window.eff_mat[[idx_0]]
                 idx_1 = idx_0 + 1
@@ -265,7 +265,7 @@ class Calibrator:
             # fill the diagonal values with infinite value, this ensures they are never amongst the k neighs
             for i in range(len(n_range)): np.fill_diagonal(dist_mat[:,:,i], np.inf)
             t2 = time.time()
-            logger.debug(f'dist calculation {t2 - t1}')
+            logger.debug(f'dist calculation {t2 - t1:.3f}')
             # get ordered_neighbours and sorted distances
             neighbours = np.argsort(dist_mat, axis=1)
             ordered_dists = [dist_mat[np.tile(np.arange(n_seqs), (n_seqs, 1)).T, neighbours[...,n], n] for n in range(neighbours.shape[2])]
@@ -287,7 +287,7 @@ class Calibrator:
                     classif_report.append(mode_report)
             classif_report = pd.concat(classif_report)
             t4 = time.time()
-            logger.debug(f'classification {t4 - t3}')
+            logger.debug(f'classification {t4 - t3:.3f}')
             # store intermediate classification results (if enabled)
             if keep_classif:
                 classif_report['w_start'] = start
@@ -309,13 +309,13 @@ class Calibrator:
                     metrics_report['K'] = k
                     metrics_report['mode'] = classification.classif_longnames[mode]
                     
-                    metrics_report.to_csv(self.out_file, header=os.path.isfile(self.classif_file), index=False, mode='a')
+                    metrics_report.to_csv(self.report_file, header=not os.path.isfile(self.report_file), index=False, mode='a')
             t6 = time.time()
-            logger.debug(f'metric calculation {t6 - t5}')
-            logger.info(f'Window {start} - {end} ({n_seqs} effective sequences) Calibrated in {t6 - t0} seconds')
+            logger.debug(f'metric calculation {t6 - t5:.f}')
+            logger.info(f'Window {start} - {end} ({n_seqs} effective sequences) Calibrated in {t6 - t0:.f} seconds')
         elapsed = time.time() - t00
-        logger.info(f'Finished calibration in {elapsed} seconds')
-        logger.info(f'Stored calibration report to {self.out_file}')
+        logger.info(f'Finished calibration in {elapsed:.f} seconds')
+        logger.info(f'Stored calibration report to {self.report_file}')
         if keep_classif:
             logger.info(f'Stored classification results to {self.classif_file}')
         # register report metadata

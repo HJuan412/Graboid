@@ -293,8 +293,8 @@ class Calibrator:
             logger.debug(f'classification {t4 - t3:.3f}')
             # store intermediate classification results (if enabled)
             if keep_classif:
-                classif_file = self.classif_dir + f'/{start}_{end}-{n_seqs}.classif'
-                classif_report.to_csv(classif_file, mode='a')
+                classif_file = self.classif_dir + f'/{start}-{end}_{n_seqs}.classif'
+                classif_report.to_csv(classif_file)
             # get classification metrics
             t5 = time.time()
             for (k, n, mode), subtab in classif_report.groupby(['_k', 'n', 'mode']):

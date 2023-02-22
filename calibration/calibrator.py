@@ -308,13 +308,13 @@ class Calibrator:
                     metrics_report['n_sites'] = n
                     metrics_report['K'] = k
                     metrics_report['mode'] = classification.classif_longnames[mode]
-                    
+                    metrics_report = metrics_report.astype({'Taxon':np.int32, 'Accuracy':np.float32, 'Precision':np.float32, 'Recall':np.float32, 'F1_score':np.float32, 'w_start':np.int32, 'w_end':np.int32, 'rank':np.int16, 'n_sites':np.int16, 'K':np.int16})
                     metrics_report.to_csv(self.report_file, header=not os.path.isfile(self.report_file), index=False, mode='a')
             t6 = time.time()
-            logger.debug(f'metric calculation {t6 - t5:.f}')
-            logger.info(f'Window {start} - {end} ({n_seqs} effective sequences) Calibrated in {t6 - t0:.f} seconds')
+            logger.debug(f'metric calculation {t6 - t5:.2f}')
+            logger.info(f'Window {start} - {end} ({n_seqs} effective sequences) Calibrated in {t6 - t0:.2f} seconds')
         elapsed = time.time() - t00
-        logger.info(f'Finished calibration in {elapsed:.f} seconds')
+        logger.info(f'Finished calibration in {elapsed:.2f} seconds')
         logger.info(f'Stored calibration report to {self.report_file}')
         if keep_classif:
             logger.info(f'Stored classification results to {self.classif_file}')

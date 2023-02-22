@@ -100,7 +100,7 @@ class TaxonomistNCBI(Taxer):
         # index : accessions, values : taxids
         self.taxid_tab = pd.read_csv(self.taxid_file, index_col = 0)
         
-        # generates a warning if taxid_list is empty
+        # generates a warning if taxid_tab is empty
         if len(self.taxid_tab) == 0:
             raise Exception(f'Summary file {self.in_file} is empty')
 
@@ -111,7 +111,7 @@ class TaxonomistNCBI(Taxer):
     def make_tax_tables(self):
         # generate empty taxonomy table (with two columns per rank one for name, one for ID), guide table link a taxid with its full taxonomy
         cols = [f'{rk}{tail}' for rk in self.ranks for tail in ('', '_id')]
-        self.tax_table = pd.DataFrame(index = self.taxid_list.index, columns = cols)
+        self.tax_table = pd.DataFrame(index = self.taxid_tab.index, columns = cols)
         # name tax_tab0 used for compatibility with method fill_blanks
         self.tax_tab0 = pd.DataFrame(index = self.uniq_taxs, columns = cols) # this will be used to store the taxonomic data and later distribute it to each record
     

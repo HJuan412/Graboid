@@ -115,7 +115,7 @@ class TaxonomistNCBI(Taxer):
         # name tax_tab0 used for compatibility with method fill_blanks
         self.tax_tab0 = pd.DataFrame(index = self.uniq_taxs, columns = cols) # this will be used to store the taxonomic data and later distribute it to each record
     
-    def dl_tax_records(self, tax_list, chunksize=500, max_attemps=3):
+    def dl_tax_records(self, tax_list, chunksize=500, max_attempts=3):
         # attempts to download the taxonomic records in chunks of size chunksize
         chunks = tax_slicer(tax_list, chunksize)
         n_chunks = int(np.ceil(len(tax_list)/chunksize))
@@ -123,16 +123,16 @@ class TaxonomistNCBI(Taxer):
         for idx, chunk in enumerate(chunks):
             print(f'Retrieving taxonomy. Chunk {idx + 1} of {n_chunks}')
             tax_records = []
-            for attempt in range(max_attemps):
+            for attempt in range(max_attempts):
                 try:
                     tax_handle = Entrez.efetch(db = 'taxonomy', id = chunk, retmode = 'xml')
                     tax_records = Entrez.read(tax_handle)
                     break
                 except IOError:
-                    logger.error('Interrupted taxing due to conection error')
+                    logger.warning(f'Interrupted taxing due to conection error. {max_attempts - attempt - 1} attempts remaining')
                     continue
                 except http.client.HTTPException:
-                    logger.error('Interrupted taxing due to bad file')
+                    logger.warning(f'Interrupted taxing due to bad file.  {max_attempts - attempt - 1} attempts remaining')
                     continue
             if len(tax_records) != len(chunk):
                 failed += list(chunk)

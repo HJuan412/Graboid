@@ -67,7 +67,7 @@ def main(database,
                            keep_classif=False) # TODO: this true is to keep the generated classification file, remember to set as false
 
 #%
-main('nem_18s', threads=4)
+main('nem_18s', threads=2)
 #%%
 parser = argparse.ArgumentParser(prog='Graboid CALIBRATE',
                                  usage='%(prog)s MODE_ARGS [-h]',

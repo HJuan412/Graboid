@@ -232,7 +232,7 @@ class Calibrator:
             if len(window.eff_mat) == 0:
                 # no effective sequences in the window
                 continue
-            n_seqs = window.eff_mat.shape[0]
+            n_seqs = window.n_seqs
             if n_seqs < min_seqs:
                 # not enough sequences passed the filter, skip iteration
                 logger.info(f'Window {start} - {end}. Not enoug sequences to perform calibration ({n_seqs}, min = {min_seqs}), skipping')
@@ -251,14 +251,19 @@ class Calibrator:
                 ref_seqs = window.eff_mat[idx_1:]
                 # persistent distance array, updates with each value of n
                 dists = np.zeros((1, ref_seqs.shape[0]), dtype=np.float32)
-                for n_idx, sites in enumerate(n_sites.values()):
-                    sub_qry = qry_seq[:, sites]
-                    sub_ref = ref_seqs[:, sites]
-                    dists += classification.get_dists(sub_qry, sub_ref, self.cost_mat).reshape(1, -1)
+                for n_idx, n in enumerate(n_range):
+                    try:
+                        sites = n_sites[n]
+                        sub_qry = qry_seq[:, sites]
+                        sub_ref = ref_seqs[:, sites]
+                        dists += classification.get_dists(sub_qry, sub_ref, self.dist_mat).reshape(1, -1)
+                    except KeyError:
+                        # no new sites for n
+                        pass
                     dist_mat[idx_0, idx_1:, n_idx] = dists
                     dist_mat[idx_1:, idx_0, n_idx] = dists # is this necessary? (yes), allows sortying of distances in a single step
             # fill the diagonal values with infinite value, this ensures they are never amongst the k neighs
-            for i in range(n_range): np.fill_diagonal(dist_mat[:,:,i], np.inf)
+            for i in range(len(n_range)): np.fill_diagonal(dist_mat[:,:,i], np.inf)
             t2 = time.time()
             logger.debug(f'dist calculation {t2 - t1}')
             # get ordered_neighbours and sorted distances

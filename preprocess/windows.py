@@ -303,7 +303,7 @@ class Window:
         if len(rows) > 0:
             self.collapse_window()
         else:
-            self.eff_mat = np.zeros((0, len(cols)))
+            self.eff_rows = []
     
     def collapse_window(self):
         t0 = time.time()

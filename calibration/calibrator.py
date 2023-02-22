@@ -119,8 +119,11 @@ def build_cal_tab(pred_tax, real_tax, n_ranks=6):
 class Calibrator:
     def __init__(self, out_dir, warn_dir, prefix='calibration'):
         self.out_dir = out_dir
+        self.classif_dir = out_dir + '/classification'
         self.warn_dir = warn_dir
         
+        # make a directory to store classification reports
+        os.mkdir(self.classif_dir)
         # prepare out files
         self.report_file = self.out_dir + f'/{prefix}.report'
         self.classif_file = self.out_dir + f'/{prefix}.classif'
@@ -290,9 +293,8 @@ class Calibrator:
             logger.debug(f'classification {t4 - t3:.3f}')
             # store intermediate classification results (if enabled)
             if keep_classif:
-                classif_report['w_start'] = start
-                classif_report['w_end'] = end
-                classif_report.to_csv(self.classif_file, header=os.path.isfile(self.classif_file), index=False, mode='a')
+                classif_file = self.classif_dir + f'/{start}_{end}-{n_seqs}.classif'
+                classif_report.to_csv(classif_file, mode='a')
             # get classification metrics
             t5 = time.time()
             for (k, n, mode), subtab in classif_report.groupby(['_k', 'n', 'mode']):
@@ -317,7 +319,9 @@ class Calibrator:
         logger.info(f'Finished calibration in {elapsed:.2f} seconds')
         logger.info(f'Stored calibration report to {self.report_file}')
         if keep_classif:
-            logger.info(f'Stored classification results to {self.classif_file}')
+            logger.info(f'Stored classification results to {self.classif_dir}')
+        else:
+            os.rmdir(self.classif_dir)
         # register report metadata
         meta = {'k':k_range,
                 'n':n_range,

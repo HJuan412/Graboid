@@ -12,6 +12,8 @@ from calibration import calibrator as cb
 
 import argparse
 import logging
+import os
+import shutil
 
 #% set logger
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -30,14 +32,26 @@ def main(database,
          step_n=5,
          min_k=1,
          min_n=5,
-         threads=1):
+         threads=1,
+         clear=True):
     # check that database exists
     if not database in DATA.DBASES:
         print(f'Database {database} not found. Existing databases:')
         print('\n'.join(DATA.DBASES))
         return
+    # build calibration directory in DATA dir
     db_dir = DATA.DATAPATH + '/' + database
     wrn_dir = db_dir + '/warning'
+    cal_dir = db_dir + '/calibration'
+    # check cal_dir (if it exists, check clear (if true, overwrite, else interrupt))
+    if os.path.isdir(cal_dir):
+        print(f'Database {database} has already been calibrated...')
+        if not clear:
+            raise Exception('Set "clear" as True to replace previous calibration')
+        print(f'Removing existing calibration for database {database}...')
+        shutil.rmtree(cal_dir)
+    os.mkdir(cal_dir)
+    
     # prepare calibration logger
     fh = logging.FileHandler(db_dir + '/log.calibration')
     fh.setLevel(logging.DEBUG)
@@ -47,7 +61,7 @@ def main(database,
     # calibrate
     # update database map in DATA
     # initialize calibrator, establish windows
-    calibrator = cb.Calibrator(db_dir, wrn_dir)
+    calibrator = cb.Calibrator(cal_dir, wrn_dir)
     calibrator.set_database(database)
     calibrator.set_windows(size = w_size, step = w_step)
     calibrator.dist_mat = dist_mat
@@ -64,10 +78,10 @@ def main(database,
                            min_k=1,
                            min_n=5,
                            threads=1,
-                           keep_classif=False) # TODO: this true is to keep the generated classification file, remember to set as false
+                           keep_classif=True) # TODO: this true is to keep the generated classification file, remember to set as false
 
 #%
-main('nem_18s', threads=2)
+main('nem_18s', threads=4)
 #%%
 parser = argparse.ArgumentParser(prog='Graboid CALIBRATE',
                                  usage='%(prog)s MODE_ARGS [-h]',

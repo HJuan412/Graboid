@@ -38,7 +38,10 @@ class SurveyTool:
         else:
             # surveyor was unable to download a summary, generate a warning, delete incomplete file
             self.logger.warning(f'Failed to get summary from {self.database} after {self.max_attempts} attempts.')
-            os.remove(self.out_file)
+            try:
+                os.remove(self.out_file)
+            except:
+                pass
 
 class SurveyWAPI(SurveyTool):
     # Survey tool using an API

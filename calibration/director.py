@@ -53,7 +53,7 @@ def main(database,
     os.mkdir(cal_dir)
     
     # prepare calibration logger
-    fh = logging.FileHandler(db_dir + '/log.calibration')
+    fh = logging.FileHandler(cal_dir + '/log.calibration')
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(formatter)
     cb.logger.addHandler(fh)
@@ -78,7 +78,8 @@ def main(database,
                            min_k=1,
                            min_n=5,
                            threads=1,
-                           keep_classif=True) # TODO: this true is to keep the generated classification file, remember to set as false
+                           keep_classif=True,
+                           log_report=True) # TODO: this true is to keep the generated classification file, remember to set as false
 
 #%
 main('nem_18s', threads=4)

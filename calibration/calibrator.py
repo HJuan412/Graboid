@@ -89,32 +89,186 @@ def build_confusion(pred, real):
             confusion[idx_0, idx_1] = pred_as
     return confusion, uniq_taxes
     
-def build_cal_tab(pred_tax, real_tax, n_ranks=6):
-    # build the calibration table from the given results
-    # n_ranks 6 by default (phylum, class, order, family, genus, species), could be modifyed to include less/more (should be done automatically)
+def build_report0(classification, taxonomy_matrix, out_file, log=False):
+    # setup report logger
+    logname = ''
+    if log:
+        logname = 'Graboid.calibrator.report'
+    report_logger = logging.getLogger(logname)
+    # classification is a pandas dataframe containing the classification results, index must be a multiindex with levels ['_k', 'n', 'mode']
+    # taxonomy matrix is a numpy array with rows equal to the real taxonomies for the 
     
-    results = []
-    # remove first(query name) and last (K) columns from predicted taxons
-    pred_cropped = pred_tax[:,1:-1].T
-    real_mat = real_tax.to_numpy().T
-    ranks = real_tax.columns
+    # build rows & param guides
+    # param guides keys are the ranks visited during calibration
+    # each value is a list of tuples containing the parameter combination and the corresponding rows
+    # this is used to retrieve the correct rows from each confusion matrix
+    # looks like -> param_guides[rk] = [(params0, rows0), (param1, rows1),...]
+    t01 = time.time()
+    param_guides = {}
+    for rk, rk_subtab in classification.groupby('rk'):
+        param_guides[rk] = []
+        aux_tab = pd.Series(index=rk_subtab.index, data=np.arange(len(rk_subtab)))
+        for params, aux_subtab in aux_tab.groupby(level=[0,1,2]):
+            param_guides[rk].append((params, aux_subtab.values))
+    t02 = time.time()
+    report_logger.debug(f'Report prep time {t02 - t01:.3f}')
+    # get rank, index, predicted and real data from the classification table
+    # index contains the query sequence position in the taxonomy matrix
+    rk_data = classification.rk.astype(int).to_numpy()
+    idx_data = classification.idx.astype(int).to_numpy()
+    pred_data = classification.tax.astype(int).to_numpy()
+    real_data = taxonomy_matrix[idx_data, rk_data]
+    t03 = time.time()
+    report_logger.debug(f'Report data gathered {t03 - t02:.3f}')
+    # begin construction
+    # report columns: Taxon Rank K n_sites mode Accuracy Precision Recall F1_score
+    # generate report by taxonomic rank
+    t04 = time.time()
+    for rk in np.unique(rk_data):
+        t05 = time.time()
+        # locate rows in classification belonging to the current rank
+        rk_idx = np.argwhere(rk_data == rk).flatten()
+        # get predicted and actual values
+        pred_submat = pred_data[rk_idx]
+        real_submat = real_data[rk_idx]
+        # get a list of unique taxons in the current rank
+        rk_tax = np.unique(taxonomy_matrix[:,rk])
+        # preset the confusion matrix. Indexes are: classification_rows, metrics, taxon
+        rk_confusion = np.zeros((len(rk_idx), 4, len(rk_tax)), dtype=np.bool8)
+        report_logger.debug(f'Rank {rk} confusion matrix of shape {rk_confusion.shape} and size {(rk_confusion.size * rk_confusion.itemsize)/10240:.3f} mb')
+        # fill confusion matrix
+        t07 = time.time()
+        for idx, tax in enumerate(rk_tax):
+            tax_true = real_submat == tax
+            tax_pred = pred_submat == tax
+            
+            tp = tax_true & tax_pred # true positives
+            tn = ~tax_true & ~tax_pred # true negatives
+            fn = tax_true & ~tax_pred # false negatives
+            fp = ~tax_true & tax_pred # false positives
+            
+            rk_confusion[tp,0, idx] = True # true positives
+            rk_confusion[tn,1, idx] = True # true negatives
+            rk_confusion[fn,2, idx] = True # false negatives
+            rk_confusion[fp,3, idx] = True # false positives
+        t08 = time.time()
+        report_logger.debug(f'Rank {rk} confusion matrix {t08 - t07:.3f}')
+        # access the guide for the current rank
+        guide = param_guides[rk]
+        # get the metrics for each parameter combination
+        t09 = time.time()
+        for params, rows in guide:
+            # count occurrences of each case (true/false positive/negative) and calculate metrics
+            sum_confusion = rk_confusion[rows].sum(axis=0)
+            # clip function used in metrics calculation to handle cases in which divisor is 0
+            acc = (sum_confusion[0] + sum_confusion[1]) / (sum_confusion.sum(axis=0))
+            prc = sum_confusion[0] / np.clip((sum_confusion[0] + sum_confusion[3]), a_min=np.e**-7, a_max=None)
+            rec = sum_confusion[0] / np.clip((sum_confusion[0] + sum_confusion[2]), a_min=np.e**-7, a_max=None)
+            f1 = (2 * prc * rec)/np.clip((prc + rec), np.e**-7, a_max=None)
+            # build subreport, add rank and parameter data
+            pre_subreport = np.array([rk_tax, acc, prc, rec, f1]).T.astype(np.float32)
+            pre_subreport = pd.DataFrame(pre_subreport, columns = 'Taxon Accuracy Precision Recall F1_score'.split())
+            pre_subreport['Rank'] = rk
+            pre_subreport[['K', 'n_sites', 'mode']] = params
+            # sort columns before saving report
+            pre_subreport['Taxon Rank K n_sites mode Accuracy Precision Recall F1_score'.split()].to_csv(out_file, header = not os.path.isfile(out_file), index = False, mode = 'a')
+        t06 = time.time()
+        report_logger.debug(f'Rank {rk} metrics calculation {t06 - t09:.3f}')
+        report_logger.debug(f'Rank {rk} calibration {t06 - t05:.3f}')
+    t010 = time.time()
+    report_logger.debug(f'Calibration complete {t010 - t04:.3f}')
+    return
+
+def get_mem_magnitude(nrows):
+    size = len(nrows)*4
+    size_mb = size / 1024000
+    order = max(np.floor(np.log10(size_mb)).astype(int), 0)
+    if order == 0:
+        return size / 1000, 'kb'
+    if order > 3:
+        return size_mb / 1024, 'Gb'
+    return size_mb, 'Mb'
+
+def build_report(classification, taxonomy_matrix, out_file=None, log=False):
+    # setup report logger
+    logname = ''
+    if log:
+        logname = 'Graboid.calibrator.report'
+    report_logger = logging.getLogger(logname)
+    # classification is a pandas dataframe containing the classification results, index must be a multiindex with levels ['_k', 'n', 'mode']
+    # taxonomy matrix is a numpy array with rows equal to the real taxonomies for the 
     
-    for rank, pred, real in zip(ranks, pred_cropped, real_mat):
-        # build a confusion matrix and get results from there, update results table
-        rank_confusion, taxons = build_confusion(pred, real)
-        rank_metrics = get_metrics(rank_confusion, taxons)
-        rank_metrics = np.insert(rank_metrics, 0, rank, axis=1)
-        results.append(rank_metrics)
-    return np.concatenate(results)
-
-    for rank in np.arange(n_ranks):
-        # build a confusion matrix and get results from there, update results table
-        rank_confusion, taxons = build_confusion(pred_cropped[:,rank], real_tax.iloc[:,rank].to_numpy())
-        rank_metrics = get_metrics(rank_confusion, taxons)
-        rank_metrics = np.insert(rank_metrics, 0, rank, axis=1)
-        results.append(rank_metrics)
-    return np.concatenate(results)
-
+    # build rows & param guides
+    # param guides keys are the ranks visited during calibration
+    # each value is a list of tuples containing the parameter combination and the corresponding rows
+    # this is used to retrieve the correct rows from each confusion matrix
+    # looks like -> param_guides[rk] = [(params0, rows0), (param1, rows1),...]
+    t01 = time.time()
+    param_guides = {}
+    for rk, rk_subtab in classification.groupby('rk'):
+        param_guides[rk] = []
+        aux_tab = pd.Series(index=rk_subtab.index, data=np.arange(len(rk_subtab)))
+        for params, aux_subtab in aux_tab.groupby(level=[0,1,2]):
+            param_guides[rk].append((params, aux_subtab.values))
+    t02 = time.time()
+    report_logger.debug(f'Report prep time {t02 - t01:.3f}')
+    # get rank, index, predicted and real data from the classification table
+    # index contains the query sequence position in the taxonomy matrix
+    rk_data = classification.rk.astype(int).to_numpy()
+    idx_data = classification.idx.astype(int).to_numpy()
+    pred_data = classification.tax.astype(int).to_numpy()
+    real_data = taxonomy_matrix[idx_data, rk_data]
+    t03 = time.time()
+    report_logger.debug(f'Report data gathered {t03 - t02:.3f}')
+    # begin construction
+    # report columns: Taxon Rank K n_sites mode Accuracy Precision Recall F1_score
+    pre_report = [] # stores completed subreports
+    # generate report by taxonomic rank
+    for rk in np.unique(rk_data):
+        t04 = time.time()
+        # access the guide for the current rank
+        guide = param_guides[rk]
+        # locate rows in classification belonging to the current rank
+        rk_idx = np.argwhere(rk_data == rk).flatten()
+        # get predicted and actual values
+        pred_submat = pred_data[rk_idx]
+        real_submat = real_data[rk_idx]
+        # get a list of unique taxons in the current rank
+        rk_tax = np.unique(taxonomy_matrix[:,rk])
+        mem, units = get_mem_magnitude(rk_idx)
+        report_logger.debug(f'Rank {rk} confusion matrix of shape ({len(rk_idx)}, 4) and size {mem:.3f} {units}')
+        # build confusion matrix per taxon in rank, generate metrics and move on
+        for idx, tax in enumerate(rk_tax):
+            tax_true = real_submat == tax
+            tax_pred = pred_submat == tax
+            
+            tp = tax_true & tax_pred # true positives
+            tn = ~tax_true & ~tax_pred # true negatives
+            fn = tax_true & ~tax_pred # false negatives
+            fp = ~tax_true & tax_pred # false positives
+            confusion = np.array([tp, tn, fn, fp]).T
+        
+            # get the metrics for each parameter combination
+            for params, rows in guide:
+                # count occurrences of each case (true/false positive/negative) and calculate metrics
+                sum_confusion = confusion[rows].sum(axis=0)
+                # clip function used in metrics calculation to handle cases in which divisor is 0
+                acc = (sum_confusion[0] + sum_confusion[1]) / (sum_confusion.sum(axis=0))
+                prc = sum_confusion[0] / np.clip((sum_confusion[0] + sum_confusion[3]), a_min=np.e**-7, a_max=None)
+                rec = sum_confusion[0] / np.clip((sum_confusion[0] + sum_confusion[2]), a_min=np.e**-7, a_max=None)
+                f1 = (2 * prc * rec)/np.clip((prc + rec), np.e**-7, a_max=None)
+                # build subreport, add rank and parameter data
+                pre_subreport = [tax, rk, params[0], params[1], params[2], acc, prc, rec, f1]
+                pre_report.append(pre_subreport)
+        t05 = time.time()
+        report_logger.debug(f'Rank {rk} calibration {t05 - t04:.3f}')
+    t07 = time.time()
+    report_logger.debug(f'Calibration complete {t07 - t03:.3f}')
+    report = pd.DataFrame(pre_report, columns = 'Taxon Rank K n_sites mode Accuracy Precision Recall F1_score'.split())
+    if out_file is None:
+        return report
+    report.to_csv(out_file, header = not os.path.isfile(out_file), index = False, mode = 'a')
+    return
 #%% classes
 class Calibrator:
     def __init__(self, out_dir, warn_dir, prefix='calibration'):
@@ -218,7 +372,8 @@ class Calibrator:
                     min_k=1,
                     min_n=5,
                     threads=1,
-                    keep_classif=False):
+                    keep_classif=False,
+                    log_report=False):
         
         # k & n ranges
         k_range = np.arange(min_k, max_k, step_k)
@@ -294,24 +449,41 @@ class Calibrator:
             # store intermediate classification results (if enabled)
             if keep_classif:
                 classif_file = self.classif_dir + f'/{start}-{end}_{n_seqs}.classif'
-                classif_report.to_csv(classif_file)
+                classif_report.to_csv(classif_file, index=False)
+                # store table with real values as well
+                uniq_idxs = classif_report.idx.sort_values().unique()
+                y.loc[uniq_idxs].to_csv(self.classif_dir + f'/{start}-{end}_{n_seqs}.real')
             # get classification metrics
             t5 = time.time()
-            for (k, n, mode), subtab in classif_report.groupby(['_k', 'n', 'mode']):
-                for rk, rk_subtab in subtab.groupby('rk'):
-                    pred = rk_subtab.tax.values
-                    real = y.loc[rk_subtab.idx.values].iloc[:,int(rk)].values
-                    confusion, taxons = build_confusion(pred, real)
-                    metrics = get_metrics(confusion, taxons)
-                    metrics_report = pd.DataFrame(metrics, columns=['Taxon', 'Accuracy', 'Precision', 'Recall', 'F1_score'])
-                    metrics_report['w_start'] = start
-                    metrics_report['w_end'] = end
-                    metrics_report['rank'] = rk
-                    metrics_report['n_sites'] = n
-                    metrics_report['K'] = k
-                    metrics_report['mode'] = classification.classif_longnames[mode]
-                    metrics_report = metrics_report.astype({'Taxon':np.int32, 'Accuracy':np.float32, 'Precision':np.float32, 'Recall':np.float32, 'F1_score':np.float32, 'w_start':np.int32, 'w_end':np.int32, 'rank':np.int16, 'n_sites':np.int16, 'K':np.int16})
-                    metrics_report.to_csv(self.report_file, header=not os.path.isfile(self.report_file), index=False, mode='a')
+            # old calibration loop
+            # for (k, n, mode), subtab in classif_report.groupby(['_k', 'n', 'mode']):
+            #     for rk, rk_subtab in subtab.groupby('rk'):
+            #         t50 = time.time()
+            #         pred = rk_subtab.tax.values
+            #         real = y.loc[rk_subtab.idx.values].iloc[:,int(rk)].values
+            #         confusion, taxons = build_confusion(pred, real)
+            #         metrics = get_metrics(confusion, taxons)
+            #         t51 = time.time()
+            #         # logger.debug(f'\tconfusion & metrics {t51 - t50:.3f}')
+            #         metrics_report = pd.DataFrame(metrics, columns=['Taxon', 'Accuracy', 'Precision', 'Recall', 'F1_score'])
+            #         metrics_report['w_start'] = start
+            #         metrics_report['w_end'] = end
+            #         metrics_report['rank'] = rk
+            #         metrics_report['n_sites'] = n
+            #         metrics_report['K'] = k
+            #         metrics_report['mode'] = classification.classif_longnames[mode]
+            #         t52 = time.time()
+            #         # logger.debug(f'\tmetrics_report {t52 - t51:.3f}')
+            #         metrics_report = metrics_report.astype({'Taxon':np.int32, 'Accuracy':np.float32, 'Precision':np.float32, 'Recall':np.float32, 'F1_score':np.float32, 'w_start':np.int32, 'w_end':np.int32, 'rank':np.int16, 'n_sites':np.int16, 'K':np.int16})
+            #         metrics_report.to_csv(self.report_file, header=not os.path.isfile(self.report_file), index=False, mode='a')
+            #         t53 = time.time()
+            #         # logger.debug(f'\tto_csv {t53 - t52:.3f}')
+            #
+            # new calibration loop
+            classification_table = classif_report.set_index(['_k', 'n', 'mode'])
+            tax_matrix = y.loc[uniq_idxs].to_numpy()
+            build_report(classification_table, tax_matrix, self.report_file, log_report)
+            #
             t6 = time.time()
             logger.debug(f'metric calculation {t6 - t5:.2f}')
             logger.info(f'Window {start} - {end} ({n_seqs} effective sequences) Calibrated in {t6 - t0:.2f} seconds')

@@ -312,7 +312,7 @@ class Window:
         self.n_seqs = len(self.eff_rows)
         self.eff_tax = build_effective_taxonomy(self.eff_idxs, self.tax_tab)
         elapsed = time.time() - t0
-        self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed} seconds')
+        self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed:.3f} seconds')
         
 
 #%%

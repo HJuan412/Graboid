@@ -308,6 +308,15 @@ class Calibrator:
         k_range = np.arange(min_k, max_k, step_k)
         n_range = np.arange(min_n, max_n, step_n)
         
+        # register report metadata
+        meta = {'k':k_range.tolist(),
+                'n':n_range.tolist(),
+                'db':self.db,
+                'guide': self.guide_file,
+                'windows':self.w_info.T.to_dict()}
+        with open(self.meta_file, 'w') as meta_handle:
+            json.dump(meta, meta_handle)
+            
         # begin calibration
         logger.info('Began calibration')
         t00 = time.time()
@@ -396,14 +405,6 @@ class Calibrator:
         logger.info(f'Stored calibration report to {self.report_file}')
         if keep_classif:
             mem, unit = get_classif_mem(self.classif_dir)
-            logger.info(f'Stored classification results to {self.classif_dir}, using {mem:.3f} {unit}')
+            logger.info(f'Stored classification results to {self.classif_dir}, using {mem:.2f} {unit}')
         else:
             os.rmdir(self.classif_dir)
-        # register report metadata
-        meta = {'k':k_range,
-                'n':n_range,
-                'db':self.db,
-                'guide': self.guide_file,
-                'windows':self.w_info.T.to_dict()}
-        with open(self.meta_file, 'w') as meta_handle:
-            json.dump(meta, meta_handle)

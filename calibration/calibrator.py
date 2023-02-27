@@ -236,6 +236,7 @@ class Calibrator:
         # set the loader with the learning data
         self.loader = windows.WindowLoader('Graboid.calibrator.windowloader')
         self.loader.set_files(mat_file, acc_file, tax_file)
+        self.max_pos = self.loader.dims[1]
         # load information files
         self.selector.load_order_mat(order_file)
         self.selector.load_diff_tab(diff_file)
@@ -250,33 +251,43 @@ class Calibrator:
         # multiple values of starts & ends allow for calibration on multiple separated windows
             # default values use the entire sequence
         
-        # prepare starts & ends
         starts = list(starts)
         ends = list(ends)
         if len(starts) != len(ends):
             raise Exception(f'Given starts and ends lengths do not match: {len(starts)} starts, {len(ends)} ends')
+        raw_coords = np.array([starts, ends]).T
+        # clip coordinates outside of boundaries and detect the ones that are flipped
+        clipped = np.clip(raw_coords, 0, self.max_pos).astype(int)
+        flipped = clipped[:,0] >= clipped[:,1]
+        for flp in raw_coords[flipped]:
+            logger.warning(f'Column {flp} is not valid')
+        windows = clipped[~flipped]
         # establish the scope
-        max_pos = self.loader.dims[1]
-        w_coords = []
+        w_tab = []
         w_info = pd.DataFrame(columns='start end size step'.split())
-        for w_idx, (start, end) in enumerate(zip(starts, ends)):
-            w_start = max(0, start)
-            w_end = min(end, max_pos)
+        for w_idx, (w_start, w_end) in enumerate(windows):
             scope_len = w_end - w_start
-            # define the windows
-            w_size = min(size, scope_len)
-            w_step = min(step, scope_len)
-            start_range = np.arange(w_start, w_end, w_step)
-            if start_range[-1] < max_pos - w_size:
-                # add a tail window, if needed, to cover the entire sequence
-                start_range = np.append(start_range, max_pos - w_size)
-            end_range = start_range + w_size
+            if scope_len < size:
+                # do a single window
+                w_coords = np.array([[w_start, w_end]])
+                w_size = scope_len
+            else:
+                w_step = min(step, size)
+                w_size = size
+                start_range = np.arange(w_start, w_end, w_step)
+                end_range = start_range + w_size
+                w_coords = np.array([start_range, end_range]).T
+                # clip windows
+                w_coords = w_coords[end_range <= w_end]
+                if w_coords[-1, 1].T > w_end:
+                    # add a tail window, if needed, to cover the entire sequence
+                    w_coords = np.append(w_coords, [[w_end - size, w_end]], axis=0)
             
-            w_coords.append(pd.DataFrame({'start':start_range, 'end':end_range}, index = [w_idx for i in start_range]))
+            w_tab.append(pd.DataFrame(w_coords, columns = 'start end'.split(), index = [w_idx for i in w_coords]))
             w_info.at[f'w_{w_idx}'] = [w_start, w_end, w_size, w_step]
-        self.w_coords = pd.concat(w_coords)
+        self.w_coords = pd.concat(w_tab)
         self.w_info = w_info
-        logger.info(f'Set {len(w_coords)} of size {size} and step {step}')
+        logger.info(f'Set {len(w_coords)} windows of size {size} and step {step}')
     
     def grid_search(self,
                     max_k,

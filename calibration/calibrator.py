@@ -107,7 +107,7 @@ def get_classif_mem(classif_dir):
         mem += os.path.getsize(classif_dir + '/' + file)
     return get_mem_magnitude(mem)
 
-def build_report(classification, taxonomy_matrix, out_file=None, log=False):
+def build_report(classification, taxonomy_matrix, w_start, w_end, out_file=None, log=False):
     # setup report logger
     logname = ''
     if log:
@@ -176,13 +176,13 @@ def build_report(classification, taxonomy_matrix, out_file=None, log=False):
                 rec = sum_confusion[0] / np.clip((sum_confusion[0] + sum_confusion[2]), a_min=np.e**-7, a_max=None)
                 f1 = (2 * prc * rec)/np.clip((prc + rec), np.e**-7, a_max=None)
                 # build subreport, add rank and parameter data
-                pre_subreport = [tax, rk, params[0], params[1], params[2], acc, prc, rec, f1]
+                pre_subreport = [tax, rk, w_start, w_end, params[0], params[1], params[2], acc, prc, rec, f1]
                 pre_report.append(pre_subreport)
         t05 = time.time()
         report_logger.debug(f'Rank {rk} calibration {t05 - t04:.3f}')
     t07 = time.time()
     report_logger.debug(f'Calibration complete {t07 - t03:.3f}')
-    report = pd.DataFrame(pre_report, columns = 'Taxon Rank K n_sites mode Accuracy Precision Recall F1_score'.split())
+    report = pd.DataFrame(pre_report, columns = 'Taxon Rank w_start w_end K n_sites mode Accuracy Precision Recall F1_score'.split())
     if out_file is None:
         return report
     report.to_csv(out_file, header = not os.path.isfile(out_file), index = False, mode = 'a')
@@ -395,7 +395,7 @@ class Calibrator:
             t5 = time.time()
             classification_table = classif_report.set_index(['_k', 'n', 'mode'])
             tax_matrix = y.loc[uniq_idxs].to_numpy()
-            build_report(classification_table, tax_matrix, self.report_file, log_report)
+            build_report(classification_table, tax_matrix, start, end, self.report_file, log_report)
             #
             t6 = time.time()
             logger.debug(f'metric calculation {t6 - t5:.2f}')

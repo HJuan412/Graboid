@@ -7,13 +7,13 @@ Created on Fri Feb 17 14:49:19 2023
 Calibration director. Calibrates a given database against itself
 """
 
-from DATA import DATA
-from calibration import calibrator as cb
-
 import argparse
 import logging
 import os
 import shutil
+
+from DATA import DATA
+from calibration import calibrator as cb
 
 #% set logger
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -90,7 +90,8 @@ parser.add_argument('-rk', '--rank',
                     help='Rank to be used for feature selection. Default: genus',
                     type=str)
 parser.add_argument('-dm', '--dist_mat',
-                    help='Distance matrix to be used for distance calculation. Valid codes: "id" and "s<int>v<int>"',
+                    default='id',
+                    help='Distance matrix to be used for distance calculation. Valid codes: "id" and "s<int>v<int>". Default: id',
                     type=str)
 parser.add_argument('-wz', '--w_size',
                     default=200,
@@ -134,14 +135,9 @@ parser.add_argument('--clear',
 parser.add_argument('--keep',
                     action='store_true',
                     help='Keep the generated classifiaction files. WARNING: this will use aditional disk space.')
-parser.add_argmuent('--log_report',
+parser.add_argument('--log_report',
                     action='store_true',
                     help='Log memory usage and time elapsed for each calibration cycle')
-
-
-
-
-
 
 args = parser.parse_args()
 if __name__ == '__main__':
@@ -149,7 +145,7 @@ if __name__ == '__main__':
          row_thresh = args.row_thresh,
          col_thresh = args.col_thresh,
          min_seqs = args.min_seqs,
-         rank = args.genus,
+         rank = args.rank,
          dist_mat = args.dist_mat,
          w_size = args.w_size,
          w_step = args.w_step,

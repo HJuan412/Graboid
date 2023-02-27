@@ -18,22 +18,7 @@ import shutil
 #% set logger
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 #%
-def main(database,
-         row_thresh=0.2,
-         col_thresh=0.2,
-         min_seqs=10,
-         rank='genus',
-         dist_mat='id',
-         w_size=200,
-         w_step=15,
-         max_k=15,
-         step_k=2,
-         max_n=30,
-         step_n=5,
-         min_k=1,
-         min_n=5,
-         threads=1,
-         clear=True):
+def main(database, row_thresh=0.2, col_thresh=0.2, min_seqs=10, rank='genus', dist_mat='id', w_size=200, w_step=15, max_k=15, step_k=2, max_n=30, step_n=5, min_k=1, min_n=5, threads=1, clear=True, keep_classif=False, log_report=False):
     # check that database exists
     if not database in DATA.DBASES:
         print(f'Database {database} not found. Existing databases:')
@@ -71,24 +56,21 @@ def main(database,
                            step_k,
                            max_n,
                            step_n,
-                           min_seqs=10,
-                           rank='genus',
-                           row_thresh=0.2,
-                           col_thresh=0.2,
-                           min_k=1,
-                           min_n=5,
-                           threads=1,
-                           keep_classif=True,
-                           log_report=True) # TODO: this true is to keep the generated classification file, remember to set as false
+                           min_seqs,
+                           rank,
+                           row_thresh,
+                           col_thresh,
+                           min_k,
+                           min_n,
+                           threads,
+                           keep_classif,
+                           log_report)
 
-#%
-main('nem_18s', threads=4)
 #%%
 parser = argparse.ArgumentParser(prog='Graboid CALIBRATE',
                                  usage='%(prog)s MODE_ARGS [-h]',
                                  description='Graboid CALIBRATE performs a grid search of the given ranges of K and n along a sliding window over the alignment matrix')
-parser.add_argument('mode')
-parser.add_argument('--db',
+parser.add_argument('-db', '--database',
                     help='Database to calibrate',
                     type=str)
 parser.add_argument('-rt', '--row_thresh',
@@ -115,8 +97,8 @@ parser.add_argument('-wz', '--w_size',
                     help='Sliding window size. Default: 200',
                     type=int)
 parser.add_argument('-ws', '--w_step',
-                    default=15,
-                    help='Sliding window displacement. Default: 15',
+                    default=30,
+                    help='Sliding window displacement. Default: 30',
                     type=int)
 parser.add_argument('-mk', '--max_k',
                     default=15,
@@ -143,6 +125,41 @@ parser.add_argument('-nn', '--min_n',
                     help='Min value of n. Default: 5',
                     type=int)
 parser.add_argument('-t', '--threads',
-                       default=1,
-                       help='Number of threads to be used in the calibration. Default: 1',
-                       type=int)
+                    default=1,
+                    help='Number of threads to be used in the calibration. Default: 1',
+                    type=int)
+parser.add_argument('--clear',
+                    action='store_true',
+                    help='Clear previous calibration if present. If not activated, calibration process will be aborted.') # TODO: should ask for alternative location
+parser.add_argument('--keep',
+                    action='store_true',
+                    help='Keep the generated classifiaction files. WARNING: this will use aditional disk space.')
+parser.add_argmuent('--log_report',
+                    action='store_true',
+                    help='Log memory usage and time elapsed for each calibration cycle')
+
+
+
+
+
+
+args = parser.parse_args()
+if __name__ == '__main__':
+    main(database = args.database,
+         row_thresh = args.row_thresh,
+         col_thresh = args.col_thresh,
+         min_seqs = args.min_seqs,
+         rank = args.genus,
+         dist_mat = args.dist_mat,
+         w_size = args.w_size,
+         w_step = args.w_step,
+         max_k = args.max_k,
+         step_k = args.step_k,
+         max_n = args.max_n,
+         step_n = args.step_n,
+         min_k = args.min_k,
+         min_n = args.min_n,
+         threads = args.threads,
+         clear = args.clear,
+         keep_classif = args.keep,
+         log_report = args.log_report)

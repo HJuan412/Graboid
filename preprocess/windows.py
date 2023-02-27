@@ -254,7 +254,7 @@ class WindowLoader:
         if self.dims is None:
             return
 
-        if start < 0 or end >= self.dims[1]:
+        if start < 0 or end > self.dims[1]:
             raise Exception(f'Invalid window dimensions: start: {start}, end: {end}. Must be between 0 and {self.dims[1]}')
 
         # Windows are handled as a different class

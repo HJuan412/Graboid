@@ -89,17 +89,23 @@ def build_confusion(pred, real):
             confusion[idx_0, idx_1] = pred_as
     return confusion, uniq_taxes
 
-def get_mem_magnitude(nrows):
-    size = len(nrows)*4
+def get_mem_magnitude(size):
     order = np.log2(size)
-    if order < 10:
+    # change order of magnitude at 750 b, KiB, MiB
+    if order < 9.584962500721156:
         return size, 'b'
-    if order < 20:
+    if order < 19.584962500721158:
         return size / 1024, 'KiB'
-    if order < 30:
+    if order < 29.584962500721158:
         return size / 1048576, 'MiB'
-    # this should never happen
     return size / 1073741824, 'GiB'
+
+def get_classif_mem(classif_dir):
+    file_list = os.listdir(classif_dir)
+    mem = 0
+    for file in file_list:
+        mem += os.path.getsize(classif_dir + '/' + file)
+    return get_mem_magnitude(mem)
 
 def build_report(classification, taxonomy_matrix, out_file=None, log=False):
     # setup report logger
@@ -147,7 +153,7 @@ def build_report(classification, taxonomy_matrix, out_file=None, log=False):
         real_submat = real_data[rk_idx]
         # get a list of unique taxons in the current rank
         rk_tax = np.unique(taxonomy_matrix[:,rk])
-        mem, units = get_mem_magnitude(rk_idx)
+        mem, units = get_mem_magnitude(len(rk_idx) * 4)
         report_logger.debug(f'Rank {rk} confusion matrix of shape ({len(rk_idx)}, 4) and size {mem:.3f} {units}')
         # build confusion matrix per taxon in rank, generate metrics and move on
         for idx, tax in enumerate(rk_tax):
@@ -403,7 +409,8 @@ class Calibrator:
         logger.info(f'Finished calibration in {elapsed:.2f} seconds')
         logger.info(f'Stored calibration report to {self.report_file}')
         if keep_classif:
-            logger.info(f'Stored classification results to {self.classif_dir}')
+            mem, unit = get_classif_mem(self.classif_dir)
+            logger.info(f'Stored classification results to {self.classif_dir}, using {mem:.3f} {unit}')
         else:
             os.rmdir(self.classif_dir)
         # register report metadata

@@ -384,31 +384,6 @@ class Calibrator:
                 y.loc[uniq_idxs].to_csv(self.classif_dir + f'/{start}-{end}_{n_seqs}.real')
             # get classification metrics
             t5 = time.time()
-            # old calibration loop
-            # for (k, n, mode), subtab in classif_report.groupby(['_k', 'n', 'mode']):
-            #     for rk, rk_subtab in subtab.groupby('rk'):
-            #         t50 = time.time()
-            #         pred = rk_subtab.tax.values
-            #         real = y.loc[rk_subtab.idx.values].iloc[:,int(rk)].values
-            #         confusion, taxons = build_confusion(pred, real)
-            #         metrics = get_metrics(confusion, taxons)
-            #         t51 = time.time()
-            #         # logger.debug(f'\tconfusion & metrics {t51 - t50:.3f}')
-            #         metrics_report = pd.DataFrame(metrics, columns=['Taxon', 'Accuracy', 'Precision', 'Recall', 'F1_score'])
-            #         metrics_report['w_start'] = start
-            #         metrics_report['w_end'] = end
-            #         metrics_report['rank'] = rk
-            #         metrics_report['n_sites'] = n
-            #         metrics_report['K'] = k
-            #         metrics_report['mode'] = classification.classif_longnames[mode]
-            #         t52 = time.time()
-            #         # logger.debug(f'\tmetrics_report {t52 - t51:.3f}')
-            #         metrics_report = metrics_report.astype({'Taxon':np.int32, 'Accuracy':np.float32, 'Precision':np.float32, 'Recall':np.float32, 'F1_score':np.float32, 'w_start':np.int32, 'w_end':np.int32, 'rank':np.int16, 'n_sites':np.int16, 'K':np.int16})
-            #         metrics_report.to_csv(self.report_file, header=not os.path.isfile(self.report_file), index=False, mode='a')
-            #         t53 = time.time()
-            #         # logger.debug(f'\tto_csv {t53 - t52:.3f}')
-            #
-            # new calibration loop
             classification_table = classif_report.set_index(['_k', 'n', 'mode'])
             tax_matrix = y.loc[uniq_idxs].to_numpy()
             build_report(classification_table, tax_matrix, self.report_file, log_report)

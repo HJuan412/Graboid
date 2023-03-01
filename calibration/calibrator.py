@@ -14,14 +14,16 @@ import numba as nb
 import numpy as np
 import os
 import pandas as pd
+import sys
 import time
 
+sys.path.append("..") # use this to allow importing from a sibling package
 from calibration import reporter as rp
-from ..classification import classification
-from ..classification import cost_matrix
-from ..DATA import DATA
-from ..preprocess import feature_selection as fsele
-from ..preprocess import windows
+from classification import classification
+from classification import cost_matrix
+from DATA import DATA
+from preprocess import feature_selection as fsele
+from preprocess import windows
 
 #%% set
 logger = logging.getLogger('Graboid.calibrator')

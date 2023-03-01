@@ -6,9 +6,6 @@ Created on Tue Nov 30 11:06:10 2021
 @author: hernan
 """
 
-import sys
-sys.path.append('preprocess')
-sys.path.append('classif')
 #%% libraries
 import concurrent.futures
 import json
@@ -18,11 +15,12 @@ import numpy as np
 import os
 import pandas as pd
 import time
-from classification import classification
-from classification import cost_matrix
-from DATA import DATA
-from preprocess import feature_selection as fsele
-from preprocess import windows
+
+from ..classification import classification
+from ..classification import cost_matrix
+from ..DATA import DATA
+from ..preprocess import feature_selection as fsele
+from ..preprocess import windows
 
 #%% set
 logger = logging.getLogger('Graboid.calibrator')

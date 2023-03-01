@@ -65,6 +65,8 @@ def main(database, row_thresh=0.2, col_thresh=0.2, min_seqs=10, rank='genus', di
                            threads,
                            keep_classif,
                            log_report)
+    # build cal summaries
+    calibrator.build_summaries()    
 
 #%%
 parser = argparse.ArgumentParser(prog='Graboid CALIBRATE',

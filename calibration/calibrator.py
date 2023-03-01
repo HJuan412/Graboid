@@ -16,6 +16,7 @@ import os
 import pandas as pd
 import time
 
+from calibration import reporter as rp
 from ..classification import classification
 from ..classification import cost_matrix
 from ..DATA import DATA
@@ -406,3 +407,17 @@ class Calibrator:
             logger.info(f'Stored classification results to {self.classif_dir}, using {mem:.2f} {unit}')
         else:
             os.rmdir(self.classif_dir)
+    
+    def build_summaries(self):
+        # run this function to build the summary files after running the grid search
+        print('Building summary files')
+        cal_report = pd.read_csv(self.report_file)
+        for metric in ['Accuracy', 'Precision', 'Recall', 'F1_score']:
+            print(f'Building {metric} summary')
+            score_file = f'{self.out_dir}/{metric}_score.summ'
+            param_file = f'{self.out_dir}/{metric}_param.summ'
+            rk_tab, param_tab = rp.make_summ_tab(cal_report, metric)
+            rk_tab.to_csv(score_file)
+            param_tab.to_csv(param_file)
+            logger.info(f'Stored score summary to {score_file}')
+            logger.info(f'Stored param summary to {score_file}')

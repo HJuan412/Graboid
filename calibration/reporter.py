@@ -19,6 +19,36 @@ logger = logging.getLogger('Graboid.reporter')
 logger.setLevel(logging.INFO)
 
 #%% functions
+def make_summ_tab(report, metric='F1_score'):
+    # report : calibration report dataframe
+    # metric : Accuracy Precision Recall F1_score
+    # generates a short summary table, get the best score for metric for each taxon in each window
+    # stores parameter combination that yields best score
+    
+    # build the column multiindex (window coordinates)
+    windows_index = pd.MultiIndex.from_frame(report[['w_start', 'w_end']].loc[~report.w_start.duplicated()])
+    rank_tabs = []
+    param_tabs = []
+    # get best score and parameters for each taxon per rank
+    for rk, rk_subtab in report.groupby('Rank'):
+        taxa = rk_subtab.Taxon.unique()
+        rk_tab = pd.DataFrame(index = taxa, columns = windows_index)
+        pr_tab = pd.DataFrame(index = taxa, columns = windows_index)
+        for (tax, w_start), win_subtab in rk_subtab.groupby(['Taxon', 'w_start']):
+            w_end = win_subtab.w_end.values[0]
+            # get the row with the best value
+            selected_row = win_subtab.sort_values(metric).iloc[-1]
+            rk_tab.at[tax, (w_start, w_end)] = selected_row[metric]
+            pr_tab.at[tax, (w_start, w_end)] = selected_row[['K', 'n_sites', 'mode']].tolist()
+        rk_tab.index = pd.MultiIndex.from_product([[rk], taxa], names=['rank', 'taxa'])
+        rank_tabs.append(rk_tab)
+        param_tabs.append(pr_tab)
+    rank_tab = pd.concat(rank_tabs)
+    # count the number of columns each taxon appears in
+    rank_tab['n'] = rank_tab.notna().sum(axis=1)
+    param_tab = pd.concat(param_tabs)
+    return rank_tab, param_tab
+
 def get_consensus_params(report):
     # this function takes unique parameter combinations for a multi taxon calibration report, used for automatic parameter selection
     # returns a dataframe of the form:
@@ -73,7 +103,7 @@ class Reporter:
             self.db = meta['db']
             self.guide_file = meta['guide']
         # set guide file
-        self.taxguide = pd.read_csv(self.guide_file, index_col=0)
+        self.tax_guide = pd.read_csv(self.guide_file, index_col=0)
         self.rep_dict = self.tax_guide.reset_index().set_index('taxID').SciName.to_dict()
         
     def get_summary(self, r_starts=0, r_ends=np.inf, metric='F1_score', nwins=3, show=True, *taxa):
@@ -84,14 +114,14 @@ class Reporter:
         # nwins determines the number of calibration windows to be shown
         
         # establish windows
-        r_starts = list(r_starts)
-        r_ends = list(r_ends)
+        r_starts = list([r_starts])
+        r_ends = list([r_ends])
         if len(r_starts) != len(r_ends):
             raise Exception(f'Given starts and ends lengths do not match: {len(r_starts)} starts, {len(r_ends)} ends')
-        regions = np.array([r_starts, r_ends])
+        regions = np.array([r_starts, r_ends]).T
         
         # check valid taxa
-        valid_taxa = list(set(taxa).intersection(self.taxguide.index))
+        valid_taxa = list(set(taxa).intersection(self.tax_guide.index))
         missing = set(taxa).difference(valid_taxa)
         if len(valid_taxa) == 0 and len(taxa) > 0:
             logger.warning('No valid taxa presented. Aborting')
@@ -100,7 +130,7 @@ class Reporter:
             logger.warning(f'The following taxa are not found in the database: {" ".join(missing)}')
         
         # get corresponding taxIDs
-        tax_ids = self.taxguide.loc[valid_taxa, 'taxID'].values
+        tax_ids = self.tax_guide.loc[valid_taxa, 'taxID'].values
         # prune report
         report = self.report.loc[self.report[metric] > 0]
         tab_index = pd.MultiIndex.from_product([np.arange(len(r_starts)), np.arange(nwins)])
@@ -139,7 +169,7 @@ class Reporter:
                 # ...
                 win_subreport = sub_report.loc[~sub_report.w_start.duplicated()].reset_index()
                 tax_rows = np.arange(min(nwins, win_subreport.shape[0])) # determine the number of windows for tax in this window is lower than nwins
-                report_tab.loc[(r_idx, tax_rows)] = win_subreport.iloc[tax_rows, ['w_start', 'w_end', 'K', 'n_sites', 'mode', metric]]
+                report_tab.loc[(r_idx, tax_rows)] = win_subreport.iloc[tax_rows][['w_start', 'w_end', 'K', 'n_sites', 'mode', metric]]
         
         header = f'{nwins} best parameter combinations given by the mean {metric} values'
         if show:

@@ -265,7 +265,7 @@ class Calibrator:
         windows = clipped[~flipped]
         # establish the scope
         w_tab = []
-        w_info = pd.DataFrame(columns='start end size step'.split())
+        w_info = {} # each window containst a list [params, coords], params includes start end size step
         for w_idx, (w_start, w_end) in enumerate(windows):
             scope_len = w_end - w_start
             if scope_len < size:
@@ -285,7 +285,7 @@ class Calibrator:
                     w_coords = np.append(w_coords, [[w_end - size, w_end]], axis=0)
             
             w_tab.append(pd.DataFrame(w_coords, columns = 'start end'.split(), index = [w_idx for i in w_coords]))
-            w_info.at[f'w_{w_idx}'] = [w_start, w_end, w_size, w_step]
+            w_info[f'w_{w_idx}'] = [[w_start, w_end, w_size, w_step], w_coords.tolist()]
         self.w_coords = pd.concat(w_tab)
         self.w_info = w_info
         logger.info(f'Set {len(w_coords)} windows of size {size} and step {step}')
@@ -314,7 +314,7 @@ class Calibrator:
                 'n':n_range.tolist(),
                 'db':self.db,
                 'guide': self.guide_file,
-                'windows':self.w_info.T.to_dict()}
+                'windows':self.w_info}
         with open(self.meta_file, 'w') as meta_handle:
             json.dump(meta, meta_handle)
             

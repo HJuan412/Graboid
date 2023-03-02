@@ -39,8 +39,9 @@ def make_summ_tab(report, metric='F1_score'):
             # get the row with the best value
             selected_row = win_subtab.sort_values(metric).iloc[-1]
             rk_tab.at[tax, (w_start, w_end)] = selected_row[metric]
-            pr_tab.at[tax, (w_start, w_end)] = selected_row[['K', 'n_sites', 'mode']].tolist()
+            pr_tab.at[tax, (w_start, w_end)] = '%d %d %s' % tuple(selected_row[['K', 'n_sites', 'mode']].values)
         rk_tab.index = pd.MultiIndex.from_product([[rk], taxa], names=['rank', 'taxa'])
+        pr_tab.index = pd.MultiIndex.from_product([[rk], taxa], names=['rank', 'taxa'])
         rank_tabs.append(rk_tab)
         param_tabs.append(pr_tab)
     rank_tab = pd.concat(rank_tabs)

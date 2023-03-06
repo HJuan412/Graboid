@@ -425,4 +425,4 @@ class Calibrator:
             rk_tab.to_csv(score_file)
             param_tab.to_csv(param_file)
             logger.info(f'Stored score summary to {score_file}')
-            logger.info(f'Stored param summary to {score_file}')
+            logger.info(f'Stored param summary to {param_file}')

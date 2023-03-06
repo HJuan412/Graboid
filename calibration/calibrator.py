@@ -386,6 +386,7 @@ class Calibrator:
                     mode_report['n'] = n_range[n]
                     classif_report.append(mode_report)
             classif_report = pd.concat(classif_report)
+            uniq_idxs = classif_report.idx.sort_values().unique()
             t4 = time.time()
             logger.debug(f'classification {t4 - t3:.3f}')
             # store intermediate classification results (if enabled)
@@ -393,7 +394,6 @@ class Calibrator:
                 classif_file = self.classif_dir + f'/{start}-{end}_{n_seqs}.classif'
                 classif_report.to_csv(classif_file, index=False)
                 # store table with real values as well
-                uniq_idxs = classif_report.idx.sort_values().unique()
                 y.loc[uniq_idxs].to_csv(self.classif_dir + f'/{start}-{end}_{n_seqs}.real')
             # get classification metrics
             t5 = time.time()

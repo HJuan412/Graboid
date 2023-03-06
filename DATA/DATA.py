@@ -26,10 +26,10 @@ def update_maps(maps):
     with open(DATAPATH + '/maps.json', 'w') as handle:
         json.dump(maps, handle)
 
-def add_map(database, fasta, map_file, acc_file):
+def add_map(database, fasta, map_file, acc_file, evalue=None, dropoff=None, min_height=None, min_width=None):
     if not database in MAPS.keys():
         MAPS[database] = {}
-    MAPS[database].update({fasta:{'map':map_file, 'acc':acc_file}})
+    MAPS[database].update({fasta:{'map':map_file, 'acc':acc_file, 'evalue':evalue, 'dropoff':dropoff, 'min_height':min_height, 'min_width':min_width}})
     update_maps(MAPS)
     
 # load dbase descriptions

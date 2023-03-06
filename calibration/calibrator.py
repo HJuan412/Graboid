@@ -272,6 +272,7 @@ class Calibrator:
                 # do a single window
                 w_coords = np.array([[w_start, w_end]])
                 w_size = scope_len
+                w_step = scope_len
             else:
                 w_step = min(step, size)
                 w_size = size

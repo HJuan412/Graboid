@@ -298,16 +298,16 @@ def main(work_dir, fasta_file, database, overwrite_map=False, calibration='yes',
         calibrator.grid_search(max_k, step_k, max_n, step_n)
         cal_tab = calibrator.report_file
         cal_meta = calibrator.meta_file
-        DATA.add_calibration(database, fasta, cal_tab, cal_meta)
-    return cal_tab, cal_meta
+        DATA.add_calibration(database, fasta, os.path.abspath(cal_tab), os.path.abspath(cal_meta))
+        calibrator.build_summaries()
         
-    # if calibration == 'yes' or calibration == 'overwrite':
-    #     # load the custom calibration and get optimum parameters from there
-    #     pass
-    # else:
-    #     # load generic calibration and get optimum parameters from there
-    #     pass
-    # # designate classsification params
+    if calibration == 'yes' or calibration == 'overwrite':
+        # load the custom calibration and get optimum parameters from there
+        pass
+    else:
+        # load generic calibration and get optimum parameters from there
+        pass
+    # designate classsification params
     # classifier.set_dist_mat(dist_mat)
     # # classify
     # return

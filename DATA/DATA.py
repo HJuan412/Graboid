@@ -27,7 +27,7 @@ def update_maps(maps):
         json.dump(maps, handle)
 
 def add_map(database, fasta, map_file, acc_file):
-    if database in MAPS.keys():
+    if not database in MAPS.keys():
         MAPS[database] = {}
     MAPS[database].update({fasta:{'map':map_file, 'acc':acc_file}})
     update_maps(MAPS)

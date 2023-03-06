@@ -80,6 +80,8 @@ def id_matrix():
     return mat
     
 def get_matrix(mat_code):
+    if mat_code is None:
+        return id_matrix()
     # mat code is id
     if mat_code.lower() == 'id':
         return id_matrix()

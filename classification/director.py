@@ -7,26 +7,30 @@ Created on Mon Aug  8 09:59:03 2022
 Director for the classification of sequences of unknown taxonomic origin
 """
 #%%
+from glob import glob
+import json
+import logging
+import numpy as np
+import os
+import pandas as pd
+import re
+
 from calibration import calibrator as calib
 from classification import classification
 from classification import cost_matrix
 from DATA import DATA
-from glob import glob
-import logging
 from mapping import director as mp
-import numpy as np
 from preprocess import feature_selection as fsele
 from preprocess import windows
-import pandas as pd
-import re
+
 #%% variables
 mode_dict = {'m':'majority',
              'w':'wknn',
              'd':'dwknn'}
 
 #%% set logger
-logger = logging.getLogger('Graboid.Classifier')
-logger.setLevel(logging.INFO)
+cls_logger = logging.getLogger('Graboid.Classifier')
+cls_logger.setLevel(logging.INFO)
 
 #%%
 def tr_report(report, query_names, rank_names, taxon_names):
@@ -74,8 +78,7 @@ class Director:
         
         self.taxa = {}
         self.loader = windows.WindowLoader()
-        self.selector = fsele.Selector()
-        self.mapper = mp.Director(tmp_dir, warn_dir)
+        self.selector = fsele.Selector(tmp_dir)
     
     @property
     def ref_mat(self):
@@ -117,15 +120,14 @@ class Director:
     def load_diff_tab(self, file):
         self.diff_tab = pd.read_csv(file, index_col = [0, 1])
     
-    
-    def set_train_data(self, data_dir):
+    def set_train_data(self, meta):
         # locate the training files (matrix, accession list, taxonomy table, information scores) needed for classification
-        mat_file = glob(data_dir + '/*__map.npz')[0]
-        tax_file = glob(data_dir + '/*.tax')[0]
-        acc_file = glob(data_dir + '/*__map.accs')[0]
-        guide_file = glob(data_dir + '/*.taxguide')[0]
-        order_file = data_dir + '/order.npz'
-        diff_file = data_dir + 'diff.csv'
+        mat_file = meta['mat_file']
+        tax_file = meta['tax_file']
+        acc_file = meta['acc_file']
+        guide_file = meta['guide_file']
+        order_file = meta['order_file']
+        diff_file = meta['diff_file']
         
         # set the loader with the learning data
         self.loader.set_files(mat_file, acc_file, tax_file)
@@ -134,7 +136,7 @@ class Director:
         # load information files
         self.selector.load_order_mat(order_file)
         self.selector.load_diff_tab(diff_file)
-        
+    
     def set_query(self, map_file, acc_file):
         # load query files
         query_data = np.load(map_file)
@@ -148,9 +150,9 @@ class Director:
     def get_overlap(self):
         # retunrs overlaps array [overlap start, overlap end, query avg coverage, ref avg coverage]
         overlaps = []
-        for qry in self.query_cov:
+        for qry in self.query_mesas:
             # get reference mesas that begin BEFORE qry ends and end AFTER qry starts
-            ol_refs = self.ref_cov[(self.ref_cov[:,0] < qry[1]) & (self.ref_cov[:,1] > qry[0])]
+            ol_refs = self.ref_mesas[(self.ref_mesas[:,0] < qry[1]) & (self.ref_mesas[:,1] > qry[0])]
             for ref in ol_refs:
                 overlaps.append([max(ref[0], qry[0]), min(ref[1], qry[1]), qry[3], ref[3]])
         self.overlaps = np.array(overlaps)
@@ -221,84 +223,94 @@ class Director:
         report.to_csv(f'{self.out_dir}/{out_path}.csv')
         sites_report.to_csv(f'{self.out_dir}/{out_path}.sites')
 
+def map_query(out_dir, warn_dir, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1, logger=cls_logger):
+    map_director = mp.Director(out_dir, warn_dir, logger)
+    map_director.direct(fasta_file = fasta_file,
+                        db_dir = db_dir,
+                        evalue = evalue,
+                        dropoff = dropoff,
+                        min_height = min_height,
+                        min_width = min_width,
+                        threads = threads,
+                        keep = False)
+    map_file = os.path.abspath(map_director.mat_file)
+    acc_file = os.path.abspath(map_director.acc_file)
+    return map_file, acc_file
+    
 #%% main body
-def main(work_dir, fasta_file, database, overwrite_map=False, calibration='yes', evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, dist_mat=None, max_k=15, step_k=2, max_n=30, step_n=5, threads=1):
+def main(work_dir, fasta_file, database, overwrite_map=False, calibration='yes', evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, dist_mat=None, max_k=15, step_k=2, max_n=30, step_n=5, threads=1, logger=cls_logger):
     # generate dirs
     tmp_dir = work_dir + '/tmp'
     warn_dir = work_dir + '/warning'
+    os.makedirs(tmp_dir, exist_ok=True)
+    os.makedirs(warn_dir, exist_ok=True)
     # locate database
     if not database in DATA.DBASES:
         print(f'Database {database} not found.')
         print('Current databases include:')
         for db, desc in DATA.DBASE_LIST.items():
             print(f'\tDatabase: {db} \t:\t{desc}')
-        raise Exception('Database not found')
+        return
     db_dir = DATA.DATAPATH + '/' + database
-    
+    # load meta_file
+    with open(db_dir + '/meta.json', 'r') as meta_handle:
+        meta = json.load(meta_handle)
     # map fasta file
-    # see if fasta file is already present, if it is, skip mapping
+    # see if fasta file is already mapped against the database, if it is, skip mapping, unless...
+    # if overwrite_map is set as True, generate (evein if it is present)
     fasta = re.sub('.*/', '', fasta_file)
+    make_map = overwrite_map
     try:
         prev_map = DATA.MAPS[database][fasta]
         # use existing map of fasta file
         map_file, acc_file = prev_map['map'], prev_map['acc']
-        make_map = False
-        if overwrite_map:
-            make_map = True
+        logger.info(f'Map file of fasta file {fasta_file} for database {database} located at {map_file}')
     except KeyError:
         make_map = True
     
     if make_map:
         # map of fasta file doesn't exist create it
-        # TODO: what happens when query fasta can't align to map?
-        map_director = mp.Director(work_dir, warn_dir)
-        map_director.direct(fasta_file = fasta_file,
-                            db_dir = db_dir,
-                            evalue = evalue,
-                            dropoff=dropoff,
-                            min_height=min_height,
-                            min_width=min_width,
-                            threads = threads,
-                            keep=False)
-        map_file = map_director.mat_file
-        acc_file = map_director.acc_file
+        logger.info(f'Building a map for fasta file {fasta_file} versus database {database}')
+        map_file, acc_file = map_query(work_dir, warn_dir, fasta_file, meta['ref_dir'], evalue, dropoff, min_height, min_width, threads, logger)
         # update map record
-        new_maps = DATA.MAPS.copy()
-        new_maps[database].update({fasta:{'map':map_file, 'acc':acc_file}})
-        DATA.update_maps(new_maps)
+        DATA.add_map(database, fasta, map_file, acc_file, evalue, dropoff, min_height, min_width)
         
     classifier = Director(work_dir, tmp_dir, warn_dir)
-    classifier.set_train_data(db_dir)
+    classifier.set_train_data(meta)
     classifier.set_query(map_file, acc_file)
     classifier.get_overlap()
+    
     # calibration options: no, yes, overwrite
     make_calibrate = False
     try:
         # calibration found, check if set to overwrite
         cal_tab = DATA.MAPS[database][fasta]['cal']
-        if calibration == 'overwrite':
-            make_calibrate = True
+        cal_meta = DATA.MAPS[database][fasta]['cal_meta']
+        make_calibrate = calibration == 'overwrite'
     except KeyError:
         # calibration not found, verify that one should be made
-        if calibration == 'yes':
-            make_calibrate = True
+        make_calibrate = (calibration == 'yes') | (calibration == 'overwrite')
     if make_calibrate:
         calibrator = calib.Calibrator(work_dir, warn_dir)
         calibrator.set_database(database)
-        calibrator.set_windows(start = classifier.overlaps[:,0], end = classifier.overlaps[:,1])
+        calibrator.set_windows(starts = classifier.overlaps[:,0], ends = classifier.overlaps[:,1])
+        calibrator.dist_mat = dist_mat
         calibrator.grid_search(max_k, step_k, max_n, step_n)
-        cal_tab = calibrator.out_file
+        cal_tab = calibrator.report_file
+        cal_meta = calibrator.meta_file
+        DATA.add_calibration(database, fasta, cal_tab, cal_meta)
+    return cal_tab, cal_meta
         
-    if calibration == 'yes' or calibration == 'overwrite':
-        # load the custom calibration and get optimum parameters from there
-        pass
-    else:
-        # load generic calibration and get optimum parameters from there
-        pass
-    # designate classsification params
-    classifier.set_dist_mat(dist_mat)
-    # classify
-    return
+    # if calibration == 'yes' or calibration == 'overwrite':
+    #     # load the custom calibration and get optimum parameters from there
+    #     pass
+    # else:
+    #     # load generic calibration and get optimum parameters from there
+    #     pass
+    # # designate classsification params
+    # classifier.set_dist_mat(dist_mat)
+    # # classify
+    # return
 
 if __name__ == '__main__':
     pass

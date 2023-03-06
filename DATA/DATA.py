@@ -31,6 +31,11 @@ def add_map(database, fasta, map_file, acc_file, evalue=None, dropoff=None, min_
         MAPS[database] = {}
     MAPS[database].update({fasta:{'map':map_file, 'acc':acc_file, 'evalue':evalue, 'dropoff':dropoff, 'min_height':min_height, 'min_width':min_width}})
     update_maps(MAPS)
+
+def add_calibration(database, fasta, report, meta):
+    MAPS[database][fasta]['cal'] = report
+    MAPS[database][fasta]['cal_meta'] = meta
+    update_maps(MAPS)
     
 # load dbase descriptions
 DBASE_LIST = {}

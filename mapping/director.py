@@ -163,56 +163,57 @@ class Director:
         return
 
 #%% main body
-def main(fasta_file, out_name=None, evalue=0.005, threads=1, keep=False, out_dir='', warn_dir='', ref_seq=None, ref_name=None, db_dir=None, ref_dir='.'):
-    # procure blast database
-    if not ref_seq is None:
-        db_dir = build_blastdb(ref_seq, ref_dir, ref_name)
-    elif db_dir is None:
-        print('Can\'t perform BLAST. Either provide a reference sequence file as --base_seq or a BLAST database as --db_dir')
-        return
+# TODO: main body of mapper may be no longer needed
+# def main(fasta_file, out_name=None, evalue=0.005, threads=1, keep=False, out_dir='', warn_dir='', ref_seq=None, ref_name=None, db_dir=None, ref_dir='.'):
+#     # procure blast database
+#     if not ref_seq is None:
+#         db_dir = build_blastdb(ref_seq, ref_dir, ref_name)
+#     elif db_dir is None:
+#         print('Can\'t perform BLAST. Either provide a reference sequence file as --base_seq or a BLAST database as --db_dir')
+#         return
     
-    # locate fasta file
-    try:
-        nseqs = check_fasta(fasta_file)
-    except FileNotFoundError:
-        print(f'Fasta file {fasta_file} not found')
-        return
-    if nseqs == 0:
-        print(f'Fasta file {fasta_file} is empty')
-        return
+#     # locate fasta file
+#     try:
+#         nseqs = check_fasta(fasta_file)
+#     except FileNotFoundError:
+#         print(f'Fasta file {fasta_file} not found')
+#         return
+#     if nseqs == 0:
+#         print(f'Fasta file {fasta_file} is empty')
+#         return
     
-    # align and build matrix
-    map_director = Director(out_dir, warn_dir)
-    map_director.direct(fasta_file=fasta_file,
-                        db_dir=db_dir,
-                        out_name=out_name,
-                        evalue=evalue,
-                        threads=threads,
-                        keep=keep)
-    return map_director
+#     # align and build matrix
+#     map_director = Director(out_dir, warn_dir)
+#     map_director.direct(fasta_file=fasta_file,
+#                         db_dir=db_dir,
+#                         out_name=out_name,
+#                         evalue=evalue,
+#                         threads=threads,
+#                         keep=keep)
+#     return map_director
 
-if __name__ == '__main__':
-    args = parser.parse_args()
-    # build needed directories (if needed)
-    if not os.path.isdir(args.gb_dir):
-        print(f'Specified graboid directory {args.gb_dir} does not exist. A new one will be created')
-    blastdb_dir = args.gb_dir + '/blast_dbs'
-    map_dir = args.gb_dir + '/alignments/queries'
-    warn_dir = args.gb_dir + '/warnings'
-    os.makedirs(blastdb_dir, exist_ok=True)
-    os.makedirs(map_dir, exist_ok=True)
-    os.makedirs(warn_dir, exist_ok=True)
+# if __name__ == '__main__':
+#     args = parser.parse_args()
+#     # build needed directories (if needed)
+#     if not os.path.isdir(args.gb_dir):
+#         print(f'Specified graboid directory {args.gb_dir} does not exist. A new one will be created')
+#     blastdb_dir = args.gb_dir + '/blast_dbs'
+#     map_dir = args.gb_dir + '/alignments/queries'
+#     warn_dir = args.gb_dir + '/warnings'
+#     os.makedirs(blastdb_dir, exist_ok=True)
+#     os.makedirs(map_dir, exist_ok=True)
+#     os.makedirs(warn_dir, exist_ok=True)
     
-    # locate or create the blast database
-    db_dir = build_blastdb(args.ref_seq, blastdb_dir, args.ref_name, args.overwrite)
-    if db_dir is None:
-        print('Failed to locate or create blast database. Aborting.')
-    else:
-        # execute main
-        for fasta in args.fasta_file:
-            main(fasta_file = fasta,
-                 evalue = args.evalue,
-                 threads = args.threads,
-                 out_dir = map_dir,
-                 warn_dir = warn_dir,
-                 db_dir = db_dir)
+#     # locate or create the blast database
+#     db_dir = build_blastdb(args.ref_seq, blastdb_dir, args.ref_name, args.overwrite)
+#     if db_dir is None:
+#         print('Failed to locate or create blast database. Aborting.')
+#     else:
+#         # execute main
+#         for fasta in args.fasta_file:
+#             main(fasta_file = fasta,
+#                  evalue = args.evalue,
+#                  threads = args.threads,
+#                  out_dir = map_dir,
+#                  warn_dir = warn_dir,
+#                  db_dir = db_dir)

@@ -102,17 +102,18 @@ def build_blastdb(ref_seq, db_dir, clear=False, logger=map_logger):
 
 #%% classes
 class Director:
-    def __init__(self, out_dir, warn_dir):
+    def __init__(self, out_dir, warn_dir, logger=map_logger):
         # directories
         self.out_dir = out_dir
         self.warn_dir = warn_dir
-        
+        #logger
+        self.logger = logger
         # attributes
         self.db_dir = None
         
         # workers
         self.blaster = blast.Blaster(out_dir)
-        self.mapper = matrix.MatBuilder(out_dir)
+        self.mapper = matrix.MatBuilder(out_dir, self.logger)
     
     @property
     def accs(self):
@@ -139,7 +140,7 @@ class Director:
     def mesas(self):
         return self.mapper.mesas
         
-    def direct(self, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1, keep=True, logger=map_logger):
+    def direct(self, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1, keep=True):
         # fasta file is the file to be mapped
         # evalue is the max evalue threshold for the blast report
         # db_dir points to the blast database: should be <path to db files>/<db prefix>
@@ -158,7 +159,7 @@ class Director:
         print('Building alignment matrix...')
         self.mapper.build(self.blast_report, fasta_file, evalue, dropoff, min_height, min_width, keep)
         print('Done!')
-        logger.info(f'Generated alignment map files: {self.mat_file} (alignment matrix) and {self.acc_file} (accession index)')
+        self.logger.info(f'Generated alignment map files: {self.mat_file} (alignment matrix) and {self.acc_file} (accession index)')
         return
 
 #%% main body

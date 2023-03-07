@@ -46,8 +46,8 @@ def make_summ_tab(report, metric='F1_score'):
         param_tabs.append(pr_tab)
     rank_tab = pd.concat(rank_tabs)
     # count the number of columns each taxon appears in
-    rank_tab[('n', 'n')] = rank_tab.notna().sum(axis=1)
     param_tab = pd.concat(param_tabs)
+    param_tab[('n', 'n')] = rank_tab.notna().sum(axis=1)
     return rank_tab, param_tab
 
 def get_consensus_params(report):

@@ -417,12 +417,15 @@ class Calibrator:
         # run this function to build the summary files after running the grid search
         print('Building summary files')
         cal_report = pd.read_csv(self.report_file)
+        out_files = {}
         for metric in ['Accuracy', 'Precision', 'Recall', 'F1_score']:
             print(f'Building {metric} summary')
             score_file = f'{self.out_dir}/{metric}_score.summ'
             param_file = f'{self.out_dir}/{metric}_param.summ'
+            out_files[metric] = [score_file, param_file]
             rk_tab, param_tab = rp.make_summ_tab(cal_report, metric)
             rk_tab.to_csv(score_file)
             param_tab.to_csv(param_file)
             logger.info(f'Stored score summary to {score_file}')
             logger.info(f'Stored param summary to {param_file}')
+        return out_files

@@ -50,6 +50,94 @@ def make_summ_tab(report, metric='F1_score'):
     param_tab[('n', 'n')] = rank_tab.notna().sum(axis=1)
     return rank_tab, param_tab
 
+def get_best_params(param_tab, rows, cols):
+    best_params = [params.split() for params in param_tab.to_numpy()[rows, cols]]
+    params = pd.DataFrame(index = param_tab.index[rows].droplevel(0), columns = 'w_start w_end K n mode'.split())
+    params[['w_start', 'w_end']] = [list(coords) for coords in param_tab.columns[cols].values]
+    params[['K', 'n', 'mode']] = best_params
+    return params.astype({'w_start':int, 'w_end':int, 'K':int, 'n':int})
+
+def get_valid_taxa(taxa, guide_tab, rk_dict):
+    # check that all taxa exist
+    valid = []
+    invalid = []
+    for tx in taxa:
+        if tx in guide_tab.index:
+            valid.append(tx)
+        else:
+            invalid.append(tx)
+    # get the rank for each taxa
+    rks = guide_tab.loc[valid, 'rank'].tolist()
+    idxs = guide_tab.loc[valid, 'taxID'].tolist()
+    rows = [(rk_dict[rk], idx) for rk, idx in zip(rks, idxs)]
+    return rows, valid, invalid
+
+def get_params(mesas, score_tab, param_tab, rk_dict, guide_tab, rank=None, *taxa):
+    tax_dict = {idx:tax for tax, idx in guide_tab.taxID.iteritems()}
+    tax_tab = score_tab
+    tax_param_tab = param_tab.iloc[:,:-1]
+    if len(taxa) > 0:
+        # check for valid taxa
+        rows, valid, invalid = get_valid_taxa(taxa, guide_tab, rk_dict)
+        if len(valid) == 0:
+            logger.warning('No valid taxa found among: {taxa}')
+            raise Exception
+        for inv in invalid:
+            logger.warning(f'Taxon {inv} not found in database')
+        # tax tab contains the rows for the specified taxa
+        tax_tab = score_tab.loc[rows]
+        tax_param_tab = param_tab.iloc[:,:-1].loc[rows]
+        # TODO: may need to check for taxa in the score_tab
+    elif not rank is None:
+        # a taxnomic rank was selected instead of a set of taxa
+        rank_id = rk_dict[rank]
+        tax_tab = score_tab.loc[rank_id]
+        tax_param_tab = param_tab.iloc[:,:-1].loc[rank_id]
+    
+    start_coords = score_tab.columns.get_level_values(0).to_numpy(dtype=int)
+    end_coords = score_tab.columns.get_level_values(1).to_numpy(dtype=int)
+    
+    params = []
+    metrics = []
+    
+    for mesa in mesas:
+        mesa_name = '[%d - %d]' % (mesa[0], mesa[1])
+        mesa_len = int(mesa[2])
+        # get windows overlapping with mesa
+        wins = (start_coords >= mesa[0]) & (end_coords <= mesa[1])
+        if wins.sum() == 0:
+            logger.warning(f'Mesa {mesa_name} of length {mesa_len} contains no whole calibration windows')
+            continue
+        
+        wins_tab = tax_tab.loc[:, wins]
+        wins_param_tab = tax_param_tab.loc[:, wins]
+        # check for empty rows
+        ne_rows = (wins_tab.notna().sum(axis=1) > 0).values
+        if ne_rows.sum() == 0:
+            # all rows are empty
+            logger.warning(f'Mesa {mesa_name} has no valid calibration results for the specified taxa')
+            continue
+        # warn empty rows
+        for empty_tax in wins_tab.loc[~ne_rows].index.get_level_values(1):
+            logger.warning(f'Mesa {mesa_name} has no valid results for taxon {tax_dict[empty_tax]}')
+        # warn for rows with all 0 values
+        n0_rows = (wins_tab.sum(axis=1) > 0).values
+        for all0_tax in wins_tab.loc[~n0_rows & ne_rows].index.get_level_values(1):
+            logger.warning(f'Mesa {mesa_name} has no above 0 scores for taxon {tax_dict[all0_tax]}')
+        # locate best cell for each taxon
+        best_cells = np.argmax(wins_tab.loc[n0_rows].fillna(-np.inf).to_numpy(), axis=1)
+        # get best params per taxon
+        best_params = get_best_params(wins_param_tab, n0_rows, best_cells)
+        best_params['mesa'] = mesa_name
+        # get best metrics per taxon
+        best_metrics = pd.DataFrame(wins_tab.to_numpy()[n0_rows, best_cells], index=wins_tab.index[n0_rows].droplevel(0), columns=[mesa_name]).T
+        params.append(best_params)
+        metrics.append(best_metrics)
+    
+    params = pd.concat(params)
+    metrics = pd.concat(metrics)
+    return params, metrics
+
 def get_consensus_params(report):
     # this function takes unique parameter combinations for a multi taxon calibration report, used for automatic parameter selection
     # returns a dataframe of the form:

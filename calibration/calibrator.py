@@ -214,6 +214,10 @@ class Calibrator:
             self.__dist_mat = cost_matrix.get_matrix(mat_code)
         except:
             raise
+    
+    @property
+    def ranks(self):
+        return self.loader.tax_tab.columns.tolist()
             
     def set_database(self, database):
         if not database in DATA.DBASES:
@@ -316,7 +320,7 @@ class Calibrator:
                 'n':n_range.tolist(),
                 'db':self.db,
                 'guide': self.guide_file,
-                'ranks':self.loader.tax_tab.columns.tolist(),
+                'ranks':self.ranks,
                 'windows':self.w_info,}
         with open(self.meta_file, 'w') as meta_handle:
             json.dump(meta, meta_handle)

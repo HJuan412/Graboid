@@ -7,7 +7,6 @@ Created on Mon Aug  8 09:59:03 2022
 Director for the classification of sequences of unknown taxonomic origin
 """
 #%%
-from glob import glob
 import json
 import logging
 import numpy as np
@@ -15,7 +14,8 @@ import os
 import pandas as pd
 import re
 
-from calibration import calibrator as calib
+from calibration import calibrator as clb
+from calibration import reporter
 from classification import classification
 from classification import cost_matrix
 from DATA import DATA
@@ -238,10 +238,100 @@ def map_query(out_dir, warn_dir, fasta_file, db_dir, evalue=0.005, dropoff=0.05,
     return map_file, acc_file
     
 #%% main body
+def main0(database, fasta_file, work_dir, overwrite=True, calibrate='yes', evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, dist_mat=None, max_k=15, step_k=2, max_n=30, step_n=5, threads=1, logger=cls_logger, *taxa):
+    # locate database
+    if not database in DATA.DBASES:
+        print(f'Database {database} not found.')
+        print('Current databases include:')
+        for db, desc in DATA.DBASE_LIST.items():
+            print(f'\tDatabase: {db} \t:\t{desc}')
+        return
+    db_dir = DATA.DATAPATH + '/' + database
+    # load database meta
+    with open(db_dir + '/meta.json', 'r') as meta_handle:
+        db_meta = json.load(meta_handle)
+    guide_tab = pd.read_csv(db_meta['guide_file'], index_col=0)
+
+    # verify fasta
+    # TODO: verify that fasta_file is a dasta file
+    fasta = re.sub('.*/', '', fasta_file)
+    
+    # make directories
+    map_dir = work_dir + '/maps'
+    cal_dir = work_dir + '/calibrations'
+    res_dir = work_dir + '/results'
+    os.makedirs(map_dir, exist_ok = True)
+    os.makedirs(cal_dir, exist_ok = True)
+    os.makedirs(res_dir, exist_ok = True)
+    
+    # load local meta
+    try:
+        with open(work_dir + '/meta.json', 'r') as meta_handle:
+            loc_meta = json.load(meta_handle)
+    except FileNotFoundError:
+        loc_meta = {'maps':{database:{fasta:{'map':None, 'acc':None}}},
+                    'cal':{database:{fasta:{'report':None, 'meta':None, 'summ':None}}}}
+    
+    # build map
+    make_map = overwrite
+    try:
+        map_file, acc_file = loc_meta['maps'][database][fasta]['map'], loc_meta['maps'][database][fasta]['acc']
+        logger.info(f'Map file of fasta file {fasta_file} for database {database} located at {map_file}')
+    except KeyError:
+        make_map = True
+    
+    if make_map:
+        # map of fasta file doesn't exist create it
+        logger.info(f'Building a map for fasta file {fasta_file} versus database {database}')
+        map_file, acc_file = map_query(map_dir, map_dir, fasta_file, db_meta['ref_dir'], evalue, dropoff, min_height, min_width, threads, logger)
+        loc_meta['maps'][database][fasta]['map'] = map_file
+        loc_meta['maps'][database][fasta]['acc'] = acc_file
+    
+    classifier = Director(res_dir, res_dir, res_dir)
+    classifier.set_train_data(db_meta)
+    classifier.set_query(map_file, acc_file)
+    classifier.get_overlap()
+    
+    # build calibration
+    make_cal = False
+    try:
+        cal_file, cal_meta, summ_files = loc_meta['cal'][database][fasta]['report'], loc_meta['cal'][database][fasta]['meta'], loc_meta['cal'][database][fasta]['summ']
+        with open(cal_meta, 'r') as cal_meta_handle:
+            cal_meta_data = json.load(cal_meta_handle)
+        rk_dict = {}
+        rk_dict = {rk:idx for idx, rk in enumerate(cal_meta_data['ranks'])}
+        make_cal = calibrate == 'overwrite' # calibration files located but user wants to overwrite
+        # summ files is a dicionary of the form {metric:[score file, param file]}
+    except:
+        make_cal = calibrate != 'no' # dont make calibration if user set as no
+    
+    if make_cal:
+        calibrator = clb.Calibrator(cal_dir, cal_dir)
+        calibrator.set_database(database)
+        calibrator.set_windows(starts = classifier.overlaps[:,0], ends = classifier.overlaps[:,1])
+        calibrator.dist_mat = dist_mat
+        calibrator.grid_search(max_k, step_k, max_n, step_n)
+        cal_tab = calibrator.report_file
+        cal_meta = calibrator.meta_file
+        summ_files = calibrator.build_summaries()
+        loc_meta['cal'][database][fasta]['report'] = cal_tab
+        loc_meta['cal'][database][fasta]['meta'] = cal_meta
+        loc_meta['cal'][database][fasta]['summ'] = summ_files
+        rk_dict = {rk:idx for idx, rk in enumerate(calibrator.ranks)}
+        
+    # get summary (or not)
+    score_tab = pd.read_csv(summ_files['F1_score'][0], index_col=[0,1], header=[0,1])
+    param_tab = pd.read_csv(summ_files['F1_score'][1], index_col=[0,1], header=[0,1])
+    
+    params, metrics = reporter.get_params(classifier.query_mesas, score_tab, param_tab, rk_dict, guide_tab, rank=None, *taxa)
+    # classify
+    return params, metrics
+
 def main(work_dir, fasta_file, database, overwrite_map=False, calibration='yes', evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, dist_mat=None, max_k=15, step_k=2, max_n=30, step_n=5, threads=1, logger=cls_logger):
     # generate dirs
     tmp_dir = work_dir + '/tmp'
     warn_dir = work_dir + '/warning'
+    cal_dir = work_dir + '/calibration'
     os.makedirs(tmp_dir, exist_ok=True)
     os.makedirs(warn_dir, exist_ok=True)
     # locate database
@@ -281,7 +371,16 @@ def main(work_dir, fasta_file, database, overwrite_map=False, calibration='yes',
     classifier.get_overlap()
     
     # calibration options: no, yes, overwrite
-    make_calibrate = False
+    make_calibrate = calibration == 'yes'
+    if os.path.isdir(cal_dir):
+        if calibration == 'overwrite':
+            print(f'Removing existing calibration for database {database}...')
+            # shutil.rmtree(cal_dir)
+            make_calibrate = True
+        
+        
+    os.mkdir(cal_dir)
+    
     try:
         # calibration found, check if set to overwrite
         cal_tab = DATA.MAPS[database][fasta]['cal']
@@ -291,7 +390,7 @@ def main(work_dir, fasta_file, database, overwrite_map=False, calibration='yes',
         # calibration not found, verify that one should be made
         make_calibrate = (calibration == 'yes') | (calibration == 'overwrite')
     if make_calibrate:
-        calibrator = calib.Calibrator(work_dir, warn_dir)
+        calibrator = clb.Calibrator(work_dir, warn_dir)
         calibrator.set_database(database)
         calibrator.set_windows(starts = classifier.overlaps[:,0], ends = classifier.overlaps[:,1])
         calibrator.dist_mat = dist_mat

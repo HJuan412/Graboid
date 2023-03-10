@@ -44,6 +44,34 @@ def flatten_taxtab(tax_tab, ranks=['phylum', 'class', 'order', 'family', 'genus'
     flattened_tab.set_index('SciName', inplace=True)
     return flattened_tab
 
+def reenganch(diff_table, origin_table, guide_table, ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']):
+    # use this function to locate the base taxonomy of non redundant taxa before incorporating them into the guide
+    # diff_table is the table of new taxa to be added to the guide table
+    # origin_table is the table from which diff_table originates from
+    # guide_table is the table that imposes its taxonomy codes on the rest
+    # ranks is a list of ranks, genius
+    
+    # get the ranks present in the diff table (this is because we want to check the highest ranks first)
+    ranks_in_diff = [rk for rk in ranks if rk in diff_table['rank'].values]
+    # copy the guide tab because we're going to update it and we don't want to things up with the original
+    guide = guide_table.copy()
+    
+    # new table
+    reenganched = diff_table.copy()
+    # start by the highest ranks
+    for rk in ranks_in_diff:
+        rk_tab = diff_table.loc[diff_table['rank'] == rk]
+        for tax, row in rk_tab.iterrows():
+            # get the taxon's parent, locate it's code in the guide table
+            parentID = row.parent_taxID
+            parent = origin_table.loc[origin_table.taxID == parentID].index[0]
+            parent_new_id = guide.loc[parent].taxID
+            # update parent code in reenganched table
+            reenganched.at[tax, 'parent_taxID'] = parent_new_id
+            # add new taxon to the copy of the guide table (in case it had children taxa in the diff_tab)
+            guide.at[tax] = reenganched.loc[tax]
+    return reenganched
+
 def dissect_guide(guide, current_rank, rank_n, rank_dict):
     # generate a rank dict (assign an ordered index to each taxonomic rank in the retrieved taxonomy)
     # update dict
@@ -189,7 +217,8 @@ class MergerTax():
                     tax_tab[rk+'_id'] = rk_vals
                         
             # incorporate non redundant taxons to the guide_tab
-            guide_tab = pd.concat([guide_tab, tab.loc[diff]])
+            non_r_taxa = reenganch(tab.loc[diff], tab, guide_tab, self.ranks)
+            guide_tab = pd.concat([guide_tab, non_r_taxa])
         
         self.guide_tab = guide_tab
     

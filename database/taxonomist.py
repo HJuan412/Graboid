@@ -70,13 +70,7 @@ class TaxonomistNCBI(Taxer):
         self.ranks = ranks
         self.out_dir = out_dir
         self.warn_dir = warn_dir
-        self.logger = logging.getLogger('Graboid.database.taxonomist.NCBI')
         self.generate_outfiles()
-        try:
-            self.read_taxid_file()
-        except Exception as exep:
-            self.logger.error(exep)
-            raise
         self.make_tax_tables()
         self.failed = []
         
@@ -138,7 +132,7 @@ class TaxonomistNCBI(Taxer):
         # if some taxids couldn't be downloaded, rety up to max_attempts times
         attempt = 1
         while attempt <= max_attempts and len(self.failed) > 0:
-            self.logger.warning(f'Attempting to download {len(self.failed)} failed taxIDs of {len(self.uniq_taxs)}. Attempt {attempt} of {max_attempts}...')
+            logger.warning(f'Attempting to download {len(self.failed)} failed taxIDs of {len(self.uniq_taxs)} from NCBI. Attempt {attempt} of {max_attempts}...')
             self.dl_tax_records(self.failed)
             attempt += 1
         if len(self.failed) > 0:
@@ -176,14 +170,8 @@ class TaxonomistBOLD(Taxer):
         self.taxid_file = taxid_file
         self.out_dir = out_dir
         self.warn_dir = warn_dir
-        self.logger = logging.getLogger('Graboid.database.taxonomist.BOLD')
         self.generate_outfiles()
         self.__set_marker_vars()
-        try:
-            self.read_taxid_file()
-        except Exception as exep:
-            self.logger.error(exep)
-            raise
         self.ranks = ranks
         
     def __set_marker_vars(self):
@@ -240,6 +228,11 @@ class Taxonomist:
         
         for database, taxid_file in taxid_files.items():
             taxer = self.taxer_dict[database](taxid_file, self.ranks, self.out_dir, self.warn_dir)
+            try:
+                taxer.read_taxid_file()
+            except Exception as ex:
+                logger.error(ex)
+                raise
             taxer.taxing(chunksize, max_attempts)
             logger.info(f'Finished retrieving taxonomy data from {database} database. Saved to {taxer.tax_out}')
             self.out_files[database] = taxer.tax_out

@@ -25,17 +25,6 @@ logger = logging.getLogger('Graboid.database.taxonomist')
 valid_databases = ['BOLD', 'NCBI']
 
 #%% functions
-def detect_taxidfiles(file_list):
-    # NOTE: this function behaves exactly like lister.detect_summ(), may need more analogs to it in the future, may define a generic one in a tools module
-    # given a list of taxID files, identify the database to which each belongs
-    # works under the assumption that there is a single file per database
-    taxid_files = {}
-    for file in file_list:
-        database = file.split('_')[-1].split('.')[0]
-        if database in valid_databases:
-            taxid_files[database] = file
-    return taxid_files
-
 def tax_slicer(tax_list, chunksize=500):
     # NOTE: this function behaves exactly like fetcher.acc_slicer(), may need more analogs to it in the future, may define a generic one in a tools module
     # slice the list of taxids into chunks
@@ -237,12 +226,6 @@ class Taxonomist:
         
         self.out_files = {}
     
-    def get_taxidfiles(self, taxid_files):
-        self.taxid_files = taxid_files
-        # check that summaries are a list 
-        if isinstance(self.taxid_files, list):
-            self.taxid_files = detect_taxidfiles(taxid_files)
-    
     def set_ranks(self, ranks=None):
         if ranks is None:
             self.ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']
@@ -250,7 +233,7 @@ class Taxonomist:
     
     def taxing(self, taxid_files, chunksize=500, max_attempts=3):
         # taxid_files : dict with {database:taxid_file}
-        # tadid_file : pandas dataframe with index = accessions, columns = taxid if NCBI or full taxonomy if BOLD
+        # taxid_file : pandas dataframe with index = accessions, columns = taxid if NCBI or full taxonomy if BOLD
         # check that summ_file container is not empty
         if len(taxid_files) == 0:
             raise Exception('No valid taxid files detected')

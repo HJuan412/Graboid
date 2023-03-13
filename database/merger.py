@@ -116,7 +116,6 @@ class Merger():
             self.acc_out = header + '.acclist'
             self.tax_out = header +  '.tax'
             self.taxguide_out = header + '.taxguide'
-            self.rank_dict_out = header + '.ranks'
             self.valid_rows_out = header + '.rows'
             break
         
@@ -162,7 +161,7 @@ class Merger():
         self.generate_outfiles()
         self.merge_seqs()
         self.mtax = MergerTax(self.taxfiles, self.ranks)
-        self.mtax.merge_taxons(self.tax_out, self.taxguide_out, self.rank_dict_out, self.valid_rows_out)
+        self.mtax.merge_taxons(self.tax_out, self.taxguide_out, self.valid_rows_out)
 
 class MergerTax():
     def __init__(self, tax_files, ranks):
@@ -261,7 +260,7 @@ class MergerTax():
         valid_rows['species'] = tax_table.loc[~tax_table.species_id.isin(invalid_spp)].index.to_numpy()
         self.valid_rows = valid_rows
         
-    def merge_taxons(self, tax_out, taxguide_out, rank_dict_out, valid_rows_out):
+    def merge_taxons(self, tax_out, taxguide_out, valid_rows_out):
         self.unify_taxids()
         self.build_rank_dict()
         merged_taxons = pd.concat(self.tax_tabs.values())
@@ -271,7 +270,5 @@ class MergerTax():
         # drop duplicated records (if any)
         merged_taxons.loc[np.invert(merged_taxons.index.duplicated())]
         self.guide_tab.to_csv(taxguide_out)
-        with open(rank_dict_out, 'wb') as rank_dict_handle:
-            pickle.dump(self.rank_dict, rank_dict_handle)
         with open(valid_rows_out, 'wb') as valid_rows_handle:
             pickle.dump(self.valid_rows, valid_rows_handle)

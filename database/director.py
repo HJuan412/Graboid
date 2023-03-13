@@ -82,6 +82,7 @@ class Director:
         logger.info(f'Taxonomic ranks set as {" ".join(ranks)}')
         self.taxonomist.set_ranks(ranks)
         self.merger.set_ranks(ranks)
+        self.ranks = ranks
     
     def retrieve_fasta(self, fasta_file, chunksize=500, max_attempts=3):
         # retrieve sequence data from a prebuilt fasta file
@@ -138,9 +139,6 @@ class Director:
     @property
     def guide_file(self):
         return self.merger.taxguide_out
-    @property
-    def rank_file(self):
-        return self.merger.rank_dict_out
     @property
     def valid_file(self):
         return self.merger.valid_rows_out
@@ -280,7 +278,7 @@ def main(db_name,
     meta_dict = {'seq_file':db_director.seq_file,
                  'tax_file':db_director.tax_file,
                  'guide_file':db_director.guide_file,
-                 'rank_file':db_director.rank_file,
+                 'rank':db_director.ranks,
                  'nseqs':db_director.nseqs,
                  'base_rank':db_director.base_rank,
                  'base_taxa':db_director.base_taxa,

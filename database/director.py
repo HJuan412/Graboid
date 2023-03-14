@@ -115,7 +115,7 @@ class Director:
         print('Reconstructing taxonomies...')
         self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
 
-        self.merger.merge(self.fetcher.seq_files, self.taxonomist.out_files)
+        self.merger.merge(self.fetcher.seq_files, self.taxonomist.tax_files, self.taxonomist.guide_files)
         print('Done!')
         
     def direct(self, taxon, marker, databases, fasta_file, chunksize=500, max_attempts=3):
@@ -140,20 +140,14 @@ class Director:
     def guide_file(self):
         return self.merger.taxguide_out
     @property
-    def valid_file(self):
-        return self.merger.valid_rows_out
-    @property
     def nseqs(self):
         return self.merger.nseqs
     @property
-    def base_rank(self):
-        return self.merger.base_rank
-    @property
-    def base_taxa(self):
-        return ' '.join(self.merger.base_taxa)
-    @property
     def rank_counts(self):
-        return self.merger.rank_counts
+        return self.merger.rank_counts.loc[self.merger.ranks]
+    @property
+    def tax_summ(self):
+        return self.merger.taxsumm_out
 
 #%% main function
 def main(db_name,
@@ -280,9 +274,8 @@ def main(db_name,
                  'guide_file':db_director.guide_file,
                  'ranks':db_director.ranks,
                  'nseqs':db_director.nseqs,
-                 'base_rank':db_director.base_rank,
-                 'base_taxa':db_director.base_taxa,
                  'rank_counts':db_director.rank_counts,
+                 'tax_summ_file':db_director.tax_summ,
                  'mat_file':map_director.mat_file,
                  'ref_dir':ref_dir,
                  'ref_file':ref_file,
@@ -311,7 +304,6 @@ def main(db_name,
         summary.write(f'Reference sequence (length): {ref_seq} ({marker_len})\n')
         summary.write(f'N sequences: {db_director.nseqs}\n')
         summary.write('Taxa:\n')
-        summary.write(f'\tBase taxon (lvl): {db_director.base_taxa} ({db_director.base_rank})\n')
         summary.write('Rank (N taxa):\n')
         summary.write('\n'.join([f'\t{rk} ({count})' for rk, count in db_director.rank_counts.items()]))
         summary.write('\nMesas:\n')

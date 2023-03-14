@@ -63,6 +63,23 @@ def update_parents(diff_tab, diff_guide, lead_guide):
     parents.loc[parent_codes.index, 'TaxID'] = parent_codes.TaxID
     fixed_tab.parentTaxID = parents.TaxID.values
     return fixed_tab
+
+def tax_summary(guide_tab, tax_tab, ranks):
+    # builds a human readable dataframe containing the rank, parent taxon and record count for every taxon present in the database
+    summary_tab = guide_tab.copy()
+    # count records per taxon
+    summary_tab['Records'] = tax_tab.TaxID.value_counts()
+    summary_tab.Records = summary_tab.Records.fillna(0)
+    rv_ranks = ranks[::-1]
+    for rk in rv_ranks[:-1]:
+        for parentID, subtab in summary_tab.loc[summary_tab.Rank == rk].groupby('parentTaxID'):
+            summary_tab.loc[parentID, 'Records'] += subtab.Records.sum()
+    # translate taxIDs to human readable
+    tr_dict = {idx:name for idx, name in summary_tab.SciName.iteritems()}
+    summary_tab.parentTaxID = summary_tab.parentTaxID.replace(tr_dict)
+    summary_tab = summary_tab.rename(columns = {'SciName':'Taxon', 'parentTaxID':'Parent'})
+    summary_tab.Records = summary_tab.Records.astype(int)
+    return summary_tab.set_index('Taxon')
     
 #%% classes
 class Merger():
@@ -71,12 +88,6 @@ class Merger():
         self.set_ranks(ranks)
         self.nseqs = 0
     
-    @property
-    def base_rank(self):
-        return self.mtax.base_rank
-    @property
-    def base_taxa(self):
-        return self.mtax.base_taxa
     @property
     def rank_counts(self):
         return self.mtax.rank_counts
@@ -140,6 +151,7 @@ class Merger():
         self.merge_seqs()
         self.mtax = MergerTax(taxfiles, guidefiles)
         self.mtax.merge(self.tax_out, self.taxguide_out)
+        self.tax_summary = tax_summary(self.mtax.merged_guide, self.mtax.merged_tax, self.ranks)
 
 class MergerTax():
     def __init__(self, tax_files, guide_files):
@@ -192,4 +204,6 @@ class MergerTax():
         self.merge_tax_tabs()
         self.merged_guide.to_csv(guide_out)
         self.merged_tax.to_csv(tax_out)
-
+        
+        # get data
+        self.rank_count = self.merged_guide.value_counts()

@@ -240,7 +240,7 @@ class TaxonomistBOLD(Taxer):
         # begin searching from the lowest rank
         for rk in rv_ranks:
             # all records found in the current rank are added and removed so that they don't appear in higher ranks
-            sub_tab = bold_tab.loc[bold_tab[rk + '_TaxID'].notna(), [rk + '_TaxID']].rename(columns = {rk + '_TaxID':'TaxID'})
+            sub_tab = bold_tab.loc[bold_tab[rk + '_taxID'].notna(), [rk + '_taxID']].rename(columns = {rk + '_taxID':'TaxID'})
             sub_tab['Rank'] = rk
             tax_tab.append(sub_tab)
             bold_tab = bold_tab.drop(index = sub_tab.index)
@@ -248,6 +248,7 @@ class TaxonomistBOLD(Taxer):
                 # no more records to assign
                 break
         self.tax_tab = pd.concat(tax_tab).astype({'TaxID':int})
+        self.tax_tab.index.name = 'Accession'
     
     def taxing(self, chunksize=None, max_attempts=None):
         # chunksize and max_attempts kept for compatibility

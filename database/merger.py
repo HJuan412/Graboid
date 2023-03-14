@@ -11,9 +11,7 @@ Compare and merge temporal sequence files
 #%% libraries
 from Bio import SeqIO
 import logging
-import numpy as np
 import pandas as pd
-import pickle
 import re
 
 #%% setup logger
@@ -72,6 +70,22 @@ def reenganch(diff_table, origin_table, guide_table, ranks = ['phylum', 'class',
             guide.at[tax] = reenganched.loc[tax]
     return reenganched
 
+def update_parents(diff_tab, diff_guide, lead_guide):
+    # locate the parent ranks of non redundant taxa when merging tax guides
+    # diff_tab is the table containing new taxa to be incorporated
+    # diff_guide is the guide table from which diff_tab originates
+    # lead_guide is the guide table from which the new codes will be taken
+    fixed_tab = diff_tab.copy()
+    # locate parent taxa for all elements in diff_tab
+    parents = diff_guide.loc[diff_tab.parentTaxID].reset_index().set_index('SciName')
+    parent_names = parents.index.unique()
+    # retrieve the parent TaxIDs from the lead table (when possible)
+    parent_codes = lead_guide.loc[lead_guide.SciName.isin(parent_names), 'SciName'].reset_index().set_index('SciName')
+    # replace parent TaxIDs
+    parents.loc[parent_codes.index, 'TaxID'] = parent_codes.TaxID
+    fixed_tab.parentTaxID = parents.TaxID.values
+    return fixed_tab
+
 def dissect_guide(guide, current_rank, rank_n, rank_dict):
     # generate a rank dict (assign an ordered index to each taxonomic rank in the retrieved taxonomy)
     # update dict
@@ -103,9 +117,10 @@ class Merger():
     def rank_counts(self):
         return self.mtax.rank_counts
     
-    def get_files(self, seqfiles, taxfiles):
+    def get_files(self, seqfiles, taxfiles, guidefiles):
         self.seqfiles = seqfiles
         self.taxfiles = taxfiles
+        self.guide_files = guidefiles
         # seqfiles and taxfiles should be dictionaries with database:filename key:value pairs        
         self.generate_outfiles()
     
@@ -164,111 +179,149 @@ class Merger():
         self.mtax.merge_taxons(self.tax_out, self.taxguide_out, self.valid_rows_out)
 
 class MergerTax():
-    def __init__(self, tax_files, ranks):
+    def __init__(self, tax_files, guide_files, ranks):
         self.tax_files = tax_files
+        self.guide_files = guide_files
         self.ranks = ranks
-        self.NCBI = 'NCBI' in tax_files.keys()
-        self.load_files()
-        self.build_tax_guides()
+        # self.NCBI = 'NCBI' in tax_files.keys()
+        # self.load_files()
+        # self.build_tax_guides()
     
-    def load_files(self):
-        tax_tabs = {}
-        for database, tax_file in self.tax_files.items():
-            tax_tabs[database] = pd.read_csv(tax_file, index_col = 0)
+    # def load_files(self):
+    #     tax_tabs = {}
+    #     guide_tabs = {}
+    #     for database, tax_file in self.tax_files.items():
+    #         tax_tabs[database] = pd.read_csv(tax_file, index_col = 0)
+    #         guide_tabs[database] = pd.read_csv(self.guide_files[database], index_col=0)
+    #     self.tax_tabs = tax_tabs
+    #     self.guide_tabs = guide_tabs
+    
+    def set_tabs(self, tax_tabs, guide_tabs):
         self.tax_tabs = tax_tabs
-    
-    def build_tax_guides(self):
-        tax_guides = {}
-        for database, tax_tab in self.tax_tabs.items():
-            tax_guides[database] = flatten_taxtab(tax_tab, self.ranks)
+        self.guide_tabs = guide_tabs
         
-        self.tax_guides = tax_guides
-    
-    def unify_taxids(self):
-        # unifies taxonomic codes used by different databases
-        # check that NCBI is present (take it as guide if it is)
-        if self.NCBI:
-            guide_db = 'NCBI'
-        else:
-            guide_db = list(self.tax_guides.keys())[0]
-        guide_tab = self.tax_guides[guide_db]
-            
-        for db, tab in self.tax_guides.items():
-            if db == guide_db:
+    def merge_guides(self):
+        # select a lead table to impose its taxIDs over the rest
+        lead = 'NCBI'
+        if not self.NCBI:
+            lead = list(self.guide_tabs.keys())[0]
+        lead_guide = self.guide_tabs[lead].reset_index().set_index('SciName')
+        # check remaining guides, update them using the lead's codes
+        for db, guide in self.guide_tabs.items():
+            # skip the lead guide
+            if db == lead:
                 continue
-            # get taxons with a common scientific names between databases
-            intersect = guide_tab.index.intersection(tab.index)
-            diff = tab.index.difference(guide_tab.index)
+            foll_guide = guide.reset_index().set_index('SciName')
+            # get overlapping taxa and non redundant taxa
+            overlap = lead_guide.index.intersection(foll_guide.index)
+            difference = foll_guide.index.difference(lead_guide.index)
+            # replace updated values in the corresponding taxonomy table
+            old_idx = foll_guide.loc[overlap, 'TaxID'].values
+            new_idx = lead_guide.loc[overlap, 'TaxID'].values
+            repl_dict = {old:new for old, new in zip(old_idx, new_idx)}
+            # foll_guide.TaxID = foll_guide.TaxID.replace(repl_dict)
+            self.tax_tabs[db].TaxID = self.tax_tabs[db].TaxID.replace(repl_dict)
+            # update lead_guide with the new taxa (update parents of the new taxa first)
+            diff_tab = foll_guide.loc[difference]
+            fixed_tab = update_parents(diff_tab, guide, self.guide_tabs[lead])
+            lead_guide = pd.concat([lead_guide, fixed_tab])
+        self.merged_guide = lead_guide.reset_index().set_index('TaxID')
+    
+    def merge_tax_tabs(self):
+        self.merged_tax = pd.concat(list(self.tax_tabs.values()))
+        
+    # def build_tax_guides(self):
+    #     tax_guides = {}
+    #     for database, tax_tab in self.tax_tabs.items():
+    #         tax_guides[database] = flatten_taxtab(tax_tab, self.ranks)
+        
+    #     self.tax_guides = tax_guides
+    
+    # def unify_taxids(self):
+    #     # unifies taxonomic codes used by different databases
+    #     # check that NCBI is present (take it as guide if it is)
+    #     if self.NCBI:
+    #         guide_db = 'NCBI'
+    #     else:
+    #         guide_db = list(self.tax_guides.keys())[0]
+    #     guide_tab = self.tax_guides[guide_db]
+            
+    #     for db, tab in self.tax_guides.items():
+    #         if db == guide_db:
+    #             continue
+    #         # get taxons with a common scientific names between databases
+    #         intersect = guide_tab.index.intersection(tab.index)
+    #         diff = tab.index.difference(guide_tab.index)
 
-            if len(intersect) > 0:
-                # correct_tab indicates which taxids to replace and what to replace them with
-                correct_tab = pd.concat([guide_tab.loc[intersect, ['rank', 'taxID']],
-                                         tab.loc[intersect, 'taxID']], axis = 1)
-                correct_tab.columns = ['rank', 'guide', 'tab']
-                # tax_table to modify
-                tax_tab = self.tax_tabs[db]
-                # for each rank, look for the taxons to fix
-                for rk, rk_subtab in correct_tab.groupby('rank'):
-                    rk_vals = tax_tab[rk+'_id'].values
-                    correction_vals = rk_subtab[['guide', 'tab']].values
-                    for pair in correction_vals:
-                        rk_vals[rk_vals == pair[1]] = pair[0]
-                    tax_tab[rk+'_id'] = rk_vals
+    #         if len(intersect) > 0:
+    #             # correct_tab indicates which taxids to replace and what to replace them with
+    #             correct_tab = pd.concat([guide_tab.loc[intersect, ['rank', 'taxID']],
+    #                                      tab.loc[intersect, 'taxID']], axis = 1)
+    #             correct_tab.columns = ['rank', 'guide', 'tab']
+    #             # tax_table to modify
+    #             tax_tab = self.tax_tabs[db]
+    #             # for each rank, look for the taxons to fix
+    #             for rk, rk_subtab in correct_tab.groupby('rank'):
+    #                 rk_vals = tax_tab[rk+'_id'].values
+    #                 correction_vals = rk_subtab[['guide', 'tab']].values
+    #                 for pair in correction_vals:
+    #                     rk_vals[rk_vals == pair[1]] = pair[0]
+    #                 tax_tab[rk+'_id'] = rk_vals
                         
-            # incorporate non redundant taxons to the guide_tab
-            non_r_taxa = reenganch(tab.loc[diff], tab, guide_tab, self.ranks)
-            guide_tab = pd.concat([guide_tab, non_r_taxa])
+    #         # incorporate non redundant taxons to the guide_tab
+    #         non_r_taxa = reenganch(tab.loc[diff], tab, guide_tab, self.ranks)
+    #         guide_tab = pd.concat([guide_tab, non_r_taxa])
         
-        self.guide_tab = guide_tab
+    #     self.guide_tab = guide_tab
     
-    def build_rank_dict(self):
-        root = set(self.guide_tab.parent_taxID).difference(set(self.guide_tab.taxID))
-        root_rank = self.guide_tab.loc[self.guide_tab.parent_taxID.isin(root), 'rank'].iloc[0]
-        base_rank = self.ranks[0]
-        self.base_taxa = self.guide_tab.loc[self.guide_tab['rank'] == base_rank].index.tolist()
-        self.base_rank = base_rank
-        self.rank_counts = self.guide_tab.value_counts('rank').to_dict()
-        self.rank_dict = {}
+    # def build_rank_dict(self):
+    #     root = set(self.guide_tab.parent_taxID).difference(set(self.guide_tab.taxID))
+    #     root_rank = self.guide_tab.loc[self.guide_tab.parent_taxID.isin(root), 'rank'].iloc[0]
+    #     base_rank = self.ranks[0]
+    #     self.base_taxa = self.guide_tab.loc[self.guide_tab['rank'] == base_rank].index.tolist()
+    #     self.base_rank = base_rank
+    #     self.rank_counts = self.guide_tab.value_counts('rank').to_dict()
+    #     self.rank_dict = {}
         
-        dissect_guide(self.guide_tab, root_rank, 0, self.rank_dict)
+    #     dissect_guide(self.guide_tab, root_rank, 0, self.rank_dict)
     
-    def get_valid_rows(self, tax_table):
-        # generate a dictionary containing the valid rows present for each rank in the retrieved taxonomies
-        # process tax_guide
-        # assumption (only species need this correction)
-        # chriterion, discard all species with 3 or more words, discard all species with a parent taxon outside the genus rank
+    # def get_valid_rows(self, tax_table):
+    #     # generate a dictionary containing the valid rows present for each rank in the retrieved taxonomies
+    #     # process tax_guide
+    #     # assumption (only species need this correction)
+    #     # chriterion, discard all species with 3 or more words, discard all species with a parent taxon outside the genus rank
     
-        # locate all species with triple names
-        guide_spp = self.guide_tab.loc[self.guide_tab['rank'] == 'species'].reset_index()
-        species = [sp.split() for sp in guide_spp.SciName.tolist()]
-        triple_spp = guide_spp.loc[[idx for idx, sp in enumerate(species) if len(sp) > 2], 'taxID'].values
-        # locate 'orphaned' species
-        species_parents = guide_spp.parent_taxID.values
-        non_genus_parents = self.guide_tab.loc[(self.guide_tab.taxID.isin(species_parents)) & (self.guide_tab['rank'] != 'genus'), 'taxID'].values
-        orphan_spp = guide_spp.loc[guide_spp.parent_taxID.isin(non_genus_parents), 'taxID'].values
+    #     # locate all species with triple names
+    #     guide_spp = self.guide_tab.loc[self.guide_tab['rank'] == 'species'].reset_index()
+    #     species = [sp.split() for sp in guide_spp.SciName.tolist()]
+    #     triple_spp = guide_spp.loc[[idx for idx, sp in enumerate(species) if len(sp) > 2], 'taxID'].values
+    #     # locate 'orphaned' species
+    #     species_parents = guide_spp.parent_taxID.values
+    #     non_genus_parents = self.guide_tab.loc[(self.guide_tab.taxID.isin(species_parents)) & (self.guide_tab['rank'] != 'genus'), 'taxID'].values
+    #     orphan_spp = guide_spp.loc[guide_spp.parent_taxID.isin(non_genus_parents), 'taxID'].values
     
-        invalid_spp = set(np.concatenate([triple_spp, orphan_spp]))
+    #     invalid_spp = set(np.concatenate([triple_spp, orphan_spp]))
         
-        tax_table.reset_index(inplace=True)
+    #     tax_table.reset_index(inplace=True)
     
-        valid_rows = {}
+    #     valid_rows = {}
     
-        for rank, rk_subtab in self.guide_tab.groupby('rank'):
-            rank_ids = set(rk_subtab.taxID)
-            rank_rows = tax_table.loc[tax_table[f'{rank}_id'].isin(rank_ids)].index.to_numpy()
-            valid_rows[rank] = rank_rows
-        valid_rows['species'] = tax_table.loc[~tax_table.species_id.isin(invalid_spp)].index.to_numpy()
-        self.valid_rows = valid_rows
+    #     for rank, rk_subtab in self.guide_tab.groupby('rank'):
+    #         rank_ids = set(rk_subtab.taxID)
+    #         rank_rows = tax_table.loc[tax_table[f'{rank}_id'].isin(rank_ids)].index.to_numpy()
+    #         valid_rows[rank] = rank_rows
+    #     valid_rows['species'] = tax_table.loc[~tax_table.species_id.isin(invalid_spp)].index.to_numpy()
+    #     self.valid_rows = valid_rows
         
-    def merge_taxons(self, tax_out, taxguide_out, valid_rows_out):
-        self.unify_taxids()
-        self.build_rank_dict()
-        merged_taxons = pd.concat(self.tax_tabs.values())
-        self.get_valid_rows(merged_taxons)
-        merged_taxons.to_csv(tax_out, index=False)
-        logger.info(f'Unified taxonomies stored to {tax_out}')
-        # drop duplicated records (if any)
-        merged_taxons.loc[np.invert(merged_taxons.index.duplicated())]
-        self.guide_tab.to_csv(taxguide_out)
-        with open(valid_rows_out, 'wb') as valid_rows_handle:
-            pickle.dump(self.valid_rows, valid_rows_handle)
+    # def merge_taxons(self, tax_out, taxguide_out, valid_rows_out):
+    #     self.unify_taxids()
+    #     self.build_rank_dict()
+    #     merged_taxons = pd.concat(self.tax_tabs.values())
+    #     self.get_valid_rows(merged_taxons)
+    #     merged_taxons.to_csv(tax_out, index=False)
+    #     logger.info(f'Unified taxonomies stored to {tax_out}')
+    #     # drop duplicated records (if any)
+    #     merged_taxons.loc[np.invert(merged_taxons.index.duplicated())]
+    #     self.guide_tab.to_csv(taxguide_out)
+    #     with open(valid_rows_out, 'wb') as valid_rows_handle:
+    #         pickle.dump(self.valid_rows, valid_rows_handle)

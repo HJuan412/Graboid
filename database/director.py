@@ -140,6 +140,9 @@ class Director:
     def guide_file(self):
         return self.merger.taxguide_out
     @property
+    def expguide_file(self):
+        return self.merger.expguide_out
+    @property
     def nseqs(self):
         return self.merger.nseqs
     @property
@@ -272,6 +275,7 @@ def main(db_name,
     meta_dict = {'seq_file':db_director.seq_file,
                  'tax_file':db_director.tax_file,
                  'guide_file':db_director.guide_file,
+                 'expguide_file':db_director.expguide_file,
                  'ranks':db_director.ranks,
                  'nseqs':db_director.nseqs,
                  'rank_counts':db_director.rank_counts,

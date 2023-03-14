@@ -64,6 +64,22 @@ def update_parents(diff_tab, diff_guide, lead_guide):
     fixed_tab.parentTaxID = parents.TaxID.values
     return fixed_tab
 
+def expand_guide(guide, ranks):
+    # expand the taxonomy guide to allow for easy ancestor lookup
+    # builds table if index = TaxID, columns = ranks
+    expanded = pd.DataFrame(index = guide.index, columns = ranks)
+    rk_tab = guide.loc[guide.Rank == ranks[0]]
+    for rk, child_rk in zip(ranks[:-1], ranks[1:]):
+        child_tab = guide.loc[guide.Rank == child_rk]
+        taxa = rk_tab.index.values
+        expanded.loc[taxa, rk] = rk_tab.index.values
+        for tx in taxa:
+            children = child_tab.loc[child_tab.parentTaxID == tx].index.values
+            expanded.loc[children,:] = expanded.loc[[tx]].values
+        rk_tab = child_tab
+    expanded.loc[child_tab.index, child_rk] = child_tab.index.values
+    return expanded
+
 def tax_summary(guide_tab, tax_tab, ranks):
     # builds a human readable dataframe containing the rank, parent taxon and record count for every taxon present in the database
     summary_tab = guide_tab.copy()
@@ -106,6 +122,7 @@ class Merger():
             self.acc_out = header + '.acclist'
             self.tax_out = header +  '.tax'
             self.taxguide_out = header + '.taxguide'
+            self.expguide_out = header + '.guideexp'
             self.taxsumm_out = header + '.taxsumm'
             break
         
@@ -152,6 +169,7 @@ class Merger():
         self.merge_seqs()
         self.mtax = MergerTax(taxfiles, guidefiles)
         self.mtax.merge(self.tax_out, self.taxguide_out)
+        expand_guide(self.mtax.merged_guide, self.ranks).to_csv(self.expguide_out)
         tax_summary(self.mtax.merged_guide, self.mtax.merged_tax, self.ranks).to_csv(self.taxsumm_out)
 
 class MergerTax():

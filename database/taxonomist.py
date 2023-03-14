@@ -166,7 +166,8 @@ class TaxonomistNCBI(Taxer):
         self.retry_dl(max_attempts)
         self.build_guide()
         self.build_tax_tab()
-        
+    
+    def store_files(self):
         self.tax_tab.to_csv(self.tax_out)
         self.guide.to_csv(self.guide_out)
 
@@ -251,7 +252,8 @@ class TaxonomistBOLD(Taxer):
         # chunksize and max_attempts kept for compatibility
         self.build_guide()
         self.build_tax_tab()
-        
+    
+    def store_files(self):
         self.tax_tab.to_csv(self.tax_out)
         self.guide.to_csv(self.guide_out)
 
@@ -288,6 +290,7 @@ class Taxonomist:
                 logger.error(ex)
                 raise
             taxer.taxing(chunksize, max_attempts)
+            taxer.store_files()
             logger.info(f'Finished retrieving taxonomy data from {database} database. Saved to {taxer.tax_out}')
             self.tax_files[database] = taxer.tax_out
             self.guide_files[database] = taxer.guide_out

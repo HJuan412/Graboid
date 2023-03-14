@@ -35,15 +35,15 @@ def tax_slicer(tax_list, chunksize=500):
 def unfold_lineage(record):
     # extracts data from a taxonomic record
     # generates lineage dict : {rank:[TaxID, SciName]}
-    unfolded_lineage = {record['Rank']:[record['TaxId'], record['ScientificName']]}
-    unfolded_lineage.update({lin['Rank']:[lin['TaxId'], lin['ScientificName']] for lin in record['LineageEx']})
+    unfolded_lineage = {record['Rank']:[int(record['TaxId']), record['ScientificName']]}
+    unfolded_lineage.update({lin['Rank']:[int(lin['TaxId']), lin['ScientificName']] for lin in record['LineageEx']})
     return unfolded_lineage
 
 def unfold_records(records):
     # generates a dictionary with the unfolded taxonomy of every retrieved record (including the rank of the queried TaxID)
     unfolded = {}
     for record in records:
-        unfolded[record['TaxId']] = unfold_lineage(record)
+        unfolded[int(record['TaxId'])] = unfold_lineage(record)
     return unfolded
 
 #%% classes
@@ -103,7 +103,7 @@ class TaxonomistNCBI(Taxer):
             if len(tax_records) != len(chunk):
                 failed += list(chunk)
                 continue
-            retrieved += tax_records        
+            retrieved += tax_records
         self.failed = failed
         self.tax_records.update(unfold_records(retrieved))
     
@@ -141,7 +141,7 @@ class TaxonomistNCBI(Taxer):
         tax_tab = self.taxid_tab.copy()
         # see if any of the sequence records is missing its taxonomic code in the guide table
         # this can happen if the record's tax ID is not among the specified ranks
-        taxid_values = set(self.taxid_tab.TaxID.values())
+        taxid_values = set(self.taxid_tab.TaxID.values)
         missing = taxid_values.difference(self.guide.index)
         # any missing taxID is replaced by the last known one for its retrieved record
         to_replace = {}
@@ -151,11 +151,12 @@ class TaxonomistNCBI(Taxer):
             for rk in self.ranks[::-1]:
                 try:
                     to_replace[ms] = missing_record[rk][0]
+                    break
                 except KeyError:
                     continue
         # replace missing taxonomy codes and add ranks
         tax_tab.TaxID = tax_tab.TaxID.replace(to_replace)
-        tax_tab['Rank'] = self.guide.loc[tax_tab.TaxID, 'Rank']
+        tax_tab['Rank'] = self.guide.loc[tax_tab.TaxID, 'Rank'].values
         self.tax_tab = tax_tab
     
     def taxing(self, chunksize=500, max_attempts=3):

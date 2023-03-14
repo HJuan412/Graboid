@@ -45,26 +45,36 @@ def get_matrix_entropy(matrix):
     # most frequently 4 clases (acgt), log2(4) = 2
     return (2-entropy) / 2 # 1 min entropy, 0 max entropy
 
-def per_tax_entropy(matrix, tax_tab):
-    # returns entropy_tab with multiindex (rank, tax) and ncols = matrix.shape[1]
-    tabs = [] # will concatenate into entropy_tab at the end
-    # iterate over every rank
-    for rank, tax_col in tax_tab.T.iterrows():
-        # get unique taxons in rank
-        tax_list = tax_col.unique().tolist()
-        # get the entropy for each taxon
-        entropy_mat = np.zeros((len(tax_list), matrix.shape[1]), dtype=np.float32)
-        for idx, tax in enumerate(tax_list):
-            entropy_mat[idx] = get_matrix_entropy(matrix[tax_col == tax])
-        tabs.append(pd.DataFrame(entropy_mat, index = pd.MultiIndex.from_product([[rank], tax_list], names=['rank', 'taxID'])))
-    # merge entropy tables for each taxon
-    entropy_tab = pd.concat(tabs)
-    return entropy_tab
+def per_tax_entropy(matrix, tax_tab, ranks):
+    # builds entropy difference tab, columns : rank, TaxID, records, bases..., n (number of records)
+    bases = np.arange(matrix.shape[1])
+    sub_tabs = []
+    for rk in ranks:
+        taxa = tax_tab[rk].dropna().unique()
+        ent_matrix = np.zeros((len(taxa), len(bases)))
+        n_counts = []
+        tax_sorted = []
+        for idx, (tax, tax_subtab) in enumerate(tax_tab.groupby(rk)):
+            tax_sorted.append(tax)
+            rows = tax_subtab.index.values
+            # record taxon entropy
+            rk_entropy = get_matrix_entropy(matrix[rows])
+            ent_matrix[idx] = rk_entropy
+            n_counts.append(len(rows))
+        rank_tab = pd.DataFrame(ent_matrix)
+        rank_tab['Rank'] = rk
+        rank_tab['TaxID'] = tax_sorted
+        rank_tab['n'] = n_counts
+        sub_tabs.append(rank_tab)
+    entropy_tab = pd.concat(sub_tabs)
+    return entropy_tab.set_index(['Rank', 'TaxID'])
 
-def get_ent_diff(matrix, tax_tab):
+def get_ent_diff(matrix, tax_tab, ranks):
     general_entropy = get_matrix_entropy(matrix)
-    p_tax_ent = per_tax_entropy(matrix, tax_tab)
-    diff_tab = p_tax_ent - general_entropy
+    tax_entropy = per_tax_entropy(matrix, tax_tab, ranks)
+    diff_tab = tax_entropy.drop(columns='n') - general_entropy
+    # reattach the n column
+    diff_tab['n'] = tax_entropy.n.values
     return diff_tab
     
 def get_gain(matrix, tax_tab):
@@ -108,6 +118,13 @@ class Selector:
         self.order_file = f'{out_dir}/order.npz'
         self.diff_file = f'{out_dir}/diff.csv'
     
+    def build_tabs0(self, matrix, accs, tax_tab, guide, ranks):
+        # filter guide for the accs present in the alignment matrix
+        taxids = tax_tab.loc[accs, 'TaxID'].values
+        tax_guide = guide.loc[taxids].reset_index(drop=True) # this table contains the full taxonomy of each SECUENCE
+        
+        diff_tab = get_ent_diff(matrix, tax_guide, ranks)
+        
     def build_tabs(self, matrix, bounds, coverage, mat_accs, tax_file, min_seqs=0, rank='genus'):
         # filter taxa below the min_seqs sequence threshold at the given rank
         tax_tab = get_taxid_tab(tax_file, mat_accs)

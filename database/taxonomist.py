@@ -43,6 +43,20 @@ def extract_tax_data(record):
     
     return taxonomy
 
+def unfold_lineage(record):
+    # extracts data from a taxonomic record
+    # generates lineage dict : {rank:[TaxID, SciName]}
+    unfolded_lineage = {record['Rank']:[record['TaxId'], record['ScientificName']]}
+    unfolded_lineage.update({lin['Rank']:[lin['TaxId'], lin['ScientificName']] for lin in record['LineageEx']})
+    return unfolded_lineage
+
+def unfold_records(records):
+    # generates a dictionary with the unfolded taxonomy of every retrieved record (including the rank of the queried TaxID)
+    unfolded = {}
+    for record in records:
+        unfolded[record['TaxId']] = unfold_lineage(record)
+    return unfolded
+
 #%% classes
 class Taxer:
     def generate_outfiles(self):
@@ -72,6 +86,7 @@ class TaxonomistNCBI(Taxer):
         self.warn_dir = warn_dir
         self.generate_outfiles()
         self.make_tax_tables()
+        self.tax_records = {}
         self.failed = []
         
     def read_taxid_file(self):
@@ -91,17 +106,11 @@ class TaxonomistNCBI(Taxer):
         self.taxid_reverse = pd.Series(index = self.taxid_tab.values.flatten(), data = self.taxid_tab.index)
         self.uniq_taxs = np.unique(self.taxid_tab)
     
-    def make_tax_tables(self):
-        # generate empty taxonomy table (with two columns per rank one for name, one for ID), guide table link a taxid with its full taxonomy
-        cols = [f'{rk}{tail}' for rk in self.ranks for tail in ('', '_id')]
-        self.tax_table = pd.DataFrame(index = self.taxid_tab.index, columns = cols)
-        # name tax_tab0 used for compatibility with method fill_blanks
-        self.tax_tab0 = pd.DataFrame(index = self.uniq_taxs, columns = cols) # this will be used to store the taxonomic data and later distribute it to each record
-    
     def dl_tax_records(self, tax_list, chunksize=500, max_attempts=3):
         # attempts to download the taxonomic records in chunks of size chunksize
         chunks = tax_slicer(tax_list, chunksize)
         n_chunks = int(np.ceil(len(tax_list)/chunksize))
+        retrieved = []
         failed = []
         for idx, chunk in enumerate(chunks):
             print(f'Retrieving taxonomy. Chunk {idx + 1} of {n_chunks}')
@@ -120,13 +129,9 @@ class TaxonomistNCBI(Taxer):
             if len(tax_records) != len(chunk):
                 failed += list(chunk)
                 continue
-            try:
-                self.update_guide(chunk, tax_records)
-            except KeyError:
-                failed += list(chunk)
-                continue
-        
+            retrieved += tax_records        
         self.failed = failed
+        self.tax_records.update(unfold_records(retrieved))
     
     def retry_dl(self, max_attempts=3):
         # if some taxids couldn't be downloaded, rety up to max_attempts times
@@ -136,22 +141,48 @@ class TaxonomistNCBI(Taxer):
             self.dl_tax_records(self.failed)
             attempt += 1
         if len(self.failed) > 0:
+            logger.warning(f'Failed to download {len(self.failed)} records from NCBI after {max_attempts} retries. A list of the failed records was saved as {self.warn_dir}/failed_tax.ncbi')
             with open(self.warn_dir + '/failed_tax.ncbi', 'w') as handle:
                 handle.write('\n'.join(self.failed))
-            
-            
-    def update_guide(self, taxids, records):
-        # extract data from a single record and updates the guide table
-        tax_dicts = [extract_tax_data(record) for record in records]
-        tax_tab = pd.DataFrame(tax_dicts, index = taxids)
-        tax_tab = tax_tab[[f'{rk}{tail}' for rk in self.ranks for tail in ('', '_id')]]
-        self.tax_tab0.update(tax_tab)
     
-    def update_tables(self):
-        # write the final taxonomic tables using the complete guide tables
-        for taxid in self.uniq_taxs:
-            instances = self.taxid_reverse.loc[taxid] # records with the given ID
-            self.tax_table.at[instances] = self.tax_tab0.loc[taxid].values
+    def build_guide(self):
+        # generates a dataframe containing the complete taxonomy of every retrieved record, including only the specified ranks
+        # generated dictionary {TaxID:[SciName, rank, parentTaxID]}
+        taxes = {}
+        for record in self.tax_records.values():
+            prev_tx = 0
+            for rk in self.ranks:
+                try:
+                    rk_taxon = record[rk]
+                    taxes.update({rk_taxon[0]:[rk_taxon[1], rk, prev_tx]})
+                    prev_tx = rk_taxon[0]
+                except KeyError:
+                    # rank not found in lineage
+                    continue
+        self.guide = pd.DataFrame.from_dict(taxes, orient='index', columns='SciName Rank parentTaxID'.split()).rename_axis('TaxID') # leave Rank column with uppercase to enable use of  dot notation (.Rank)
+        # TODO: uncomment this line if you decide to use numeric codes for the ranks
+        # self.guide.Rank = self.guide.Rank.replace({rk:idx for idx, rk in enumerate(self.ranks)})
+    
+    def build_tax_tab(self):
+        tax_tab = self.taxid_tab.copy()
+        # see if any of the sequence records is missing its taxonomic code in the guide table
+        # this can happen if the record's tax ID is not among the specified ranks
+        taxid_values = set(self.taxid_tab.TaxID.values())
+        missing = taxid_values.difference(self.guide.index)
+        # any missing taxID is replaced by the last known one for its retrieved record
+        to_replace = {}
+        for ms in missing:
+            to_replace[ms] = None
+            missing_record = self.tax_records[ms]
+            for rk in self.ranks[::-1]:
+                try:
+                    to_replace[ms] = missing_record[rk][0]
+                except KeyError:
+                    continue
+        # replace missing taxonomy codes and add ranks
+        tax_tab.TaxID = tax_tab.TaxID.replace(to_replace)
+        tax_tab['Rank'] = self.guide.loc[tax_tab.TaxID, 'Rank']
+        self.tax_tab = tax_tab
     
     def taxing(self, chunksize=500, max_attempts=3):
         if self.taxid_tab is None:
@@ -159,10 +190,10 @@ class TaxonomistNCBI(Taxer):
 
         self.dl_tax_records(self.uniq_taxs, chunksize)
         self.retry_dl(max_attempts)
-        self.fill_blanks()
-        self.update_tables()
+        self.build_guide()
+        self.build_tax_tab()
         
-        self.tax_table.to_csv(self.tax_out)
+        self.tax_tab.to_csv(self.tax_out)
 
 class TaxonomistBOLD(Taxer):
     # generates the taxomoic tables for the records downloaded from BOLD

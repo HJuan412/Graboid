@@ -106,6 +106,7 @@ class Merger():
             self.acc_out = header + '.acclist'
             self.tax_out = header +  '.tax'
             self.taxguide_out = header + '.taxguide'
+            self.taxsumm_out = header + '.taxsumm'
             break
         
     def set_ranks(self, ranks=None):
@@ -151,7 +152,7 @@ class Merger():
         self.merge_seqs()
         self.mtax = MergerTax(taxfiles, guidefiles)
         self.mtax.merge(self.tax_out, self.taxguide_out)
-        self.tax_summary = tax_summary(self.mtax.merged_guide, self.mtax.merged_tax, self.ranks)
+        tax_summary(self.mtax.merged_guide, self.mtax.merged_tax, self.ranks).to_csv(self.taxsumm_out)
 
 class MergerTax():
     def __init__(self, tax_files, guide_files):

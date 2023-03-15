@@ -39,7 +39,7 @@ class Director:
         if keep:
             return
         for file in os.listdir(self.tmp_dir):
-            os.remove(file)
+            os.remove(self.tmp_dir + '/' + file)
     
     def set_ranks(self, ranks=None):
         # set taxonomic ranks to retrieve for the training data.

@@ -8,7 +8,6 @@ Direct dataset_construction
 """
 
 #%% Libraries
-import argparse
 import logging
 import os
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
@@ -20,38 +19,6 @@ from mapping import matrix
 #%% set logger
 map_logger = logging.getLogger('Graboid.mapper')
 map_logger.setLevel(logging.INFO)
-
-#%% arg parser
-parser = argparse.ArgumentParser(prog='Graboid MAPPING',
-                                 usage='%(prog)s ARGS [-h]',
-                                 description='Graboid MAPPING aligns the downloaded sequences to a specified reference sequence. Alignment is stored as a numeric matrix with an accession list')
-parser.add_argument('-f', '--fasta_file',
-                    nargs='+',
-                    help='Fasta file with the sequences to map',
-                    type=str)
-parser.add_argument('-r', '--ref_seq',
-                    default=None,
-                    help='Marker sequence to be used as base of the alignment',
-                    type=str)
-parser.add_argument('-rn', '--ref_name',
-                    default=None,
-                    help='OPTIONAL. Name for the generated BLAST database',
-                    type=str)
-parser.add_argument('-gb', '--gb_dir',
-                    default=None,
-                    help='Graboid working directory. Directory containing the generated files',
-                    type=str)
-parser.add_argument('-e', '--evalue',
-                    default=0.005,
-                    help='E-value threshold for the BLAST matches. Default: 0.005',
-                    type=float)
-parser.add_argument('-t', '--threads',
-                    default=1,
-                    help='Number of threads to be used in the BLAST alignment. Default: 1',
-                    type=int)
-parser.add_argument('-ow', '--overwrite',
-                    action='store_true',
-                    help='Overwrite existing files in case of collision')
 
 #%% aux functions
 def check_fasta(fasta_file):

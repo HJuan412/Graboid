@@ -132,15 +132,14 @@ def main(db_name,
                                   db_dir = ref_dir,
                                   clear = True,
                                   logger = logger)
-    map_director = mp.Director(db_dir, warn_dir)
+    map_director = mp.Director(db_dir, warn_dir, logger)
     map_director.direct(fasta_file = db_director.seq_file,
                         db_dir = ref_dir,
                         evalue = evalue,
                         dropoff = dropoff,
                         min_height = min_height,
                         min_width = min_width,
-                        threads = threads,
-                        logger = logger)
+                        threads = threads)
     
     # quantify information
     selector = fsele.Selector(db_dir)

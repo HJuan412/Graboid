@@ -104,10 +104,6 @@ class Merger():
         self.set_ranks(ranks)
         self.nseqs = 0
     
-    @property
-    def rank_counts(self):
-        return self.mtax.rank_counts
-    
     def get_files(self, seqfiles, taxfiles, guidefiles):
         self.seqfiles = seqfiles
         self.taxfiles = taxfiles
@@ -169,8 +165,18 @@ class Merger():
         self.merge_seqs()
         self.mtax = MergerTax(taxfiles, guidefiles)
         self.mtax.merge(self.tax_out, self.taxguide_out)
-        expand_guide(self.mtax.merged_guide, self.ranks).to_csv(self.expguide_out)
+        self.ext_guide = expand_guide(self.mtax.merged_guide, self.ranks)
+        self.ext_guide.to_csv(self.expguide_out)
         tax_summary(self.mtax.merged_guide, self.mtax.merged_tax, self.ranks).to_csv(self.taxsumm_out)
+    
+    @property
+    def rank_counts(self):
+        return self.mtax.rank_counts
+    
+    @property
+    def tax_tab(self):
+        return self.mtax.merged_tax
+    
 
 class MergerTax():
     def __init__(self, tax_files, guide_files):

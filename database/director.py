@@ -136,3 +136,9 @@ class Director:
     @property
     def tax_summ(self):
         return self.merger.taxsumm_out
+    @property
+    def tax_tab(self):
+        return self.merger.tax_tab
+    @property
+    def ext_guide(self):
+        return self.merger.ext_guide

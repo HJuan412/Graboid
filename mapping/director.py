@@ -8,14 +8,14 @@ Direct dataset_construction
 """
 
 #%% Libraries
-from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
-from glob import glob
-from mapping import blast
-from mapping import matrix
-
 import argparse
 import logging
 import os
+from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
+from glob import glob
+
+from mapping import blast
+from mapping import matrix
 
 #%% set logger
 map_logger = logging.getLogger('Graboid.mapper')

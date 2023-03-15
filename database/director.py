@@ -88,7 +88,11 @@ class Director:
         for db in databases:
             self.surveyor.survey(taxon, marker, db, max_attempts)
         print('Building accession lists...')
-        self.lister.build_list(self.surveyor.out_files)
+        try:
+            self.lister.build_list(self.surveyor.out_files)
+        except Exception as excp:
+            logger.warning(excp)
+            raise excp
         print('Fetching sequences...')
         self.fetcher.fetch(self.lister.out_file, self.surveyor.out_files, chunksize, max_attempts)
         

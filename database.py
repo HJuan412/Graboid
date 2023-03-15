@@ -141,21 +141,18 @@ def main(db_name,
     map_director.direct(fasta_file = db_director.seq_file,
                         db_dir = ref_dir,
                         evalue = evalue,
-                        dropoff=dropoff,
-                        min_height=min_height,
-                        min_width=min_width,
+                        dropoff = dropoff,
+                        min_height = min_height,
+                        min_width = min_width,
                         threads = threads,
                         logger = logger)
     
     # quantify information
     selector = fsele.Selector(db_dir)
     selector.build_tabs(map_director.matrix,
-                        map_director.bounds,
-                        map_director.coverage,
                         map_director.accs,
-                        db_director.tax_file,
-                        min_seqs = min_seqs,
-                        rank = filt_rank)
+                        db_director.tax_tab,
+                        db_director.ext_guide)
     
     # assemble meta file
     meta_dict = {'seq_file':db_director.seq_file,

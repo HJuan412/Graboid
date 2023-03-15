@@ -8,7 +8,6 @@ Feature selection
 """
 
 #%% modules
-import matplotlib.pyplot as plt
 import numba as nb
 import numpy as np
 import pandas as pd
@@ -46,10 +45,10 @@ def get_matrix_entropy(matrix):
     return (2-entropy) / 2 # 1 min entropy, 0 max entropy
 
 def per_tax_entropy(matrix, tax_tab, ranks):
-    # builds entropy difference tab, columns : rank, TaxID, records, bases..., n (number of records)
+    # builds entropy difference tab, columns : rank_idx, TaxID, records, bases..., n (number of records)
     bases = np.arange(matrix.shape[1])
     sub_tabs = []
-    for rk in ranks:
+    for rk_idx, rk in enumerate(ranks):
         taxa = tax_tab[rk].dropna().unique()
         ent_matrix = np.zeros((len(taxa), len(bases)))
         n_counts = []
@@ -62,7 +61,7 @@ def per_tax_entropy(matrix, tax_tab, ranks):
             ent_matrix[idx] = rk_entropy
             n_counts.append(len(rows))
         rank_tab = pd.DataFrame(ent_matrix)
-        rank_tab['Rank'] = rk
+        rank_tab['Rank'] = rk_idx
         rank_tab['TaxID'] = tax_sorted
         rank_tab['n'] = n_counts
         sub_tabs.append(rank_tab)
@@ -97,35 +96,47 @@ def get_gain(matrix, tax_tab):
     gain_tab = pd.DataFrame.from_dict(gain_dict, orient = 'index')
     return gain_tab
 
-def plot_gain(table, rank, criterium='diff', figsize=(7,10)):
-    fig, ax = plt.subplots(figsize = figsize)
-    
-    sub_tab = table.loc[rank]
-    x = sub_tab.shape[1]
-    y = sub_tab.mean().to_numpy()
-    y_std = sub_tab.std().to_numpy()
-    
-    ax.bar(x, y, yerr = y_std)
-    ax.set_xlabel('Position')
-    ax.set_ylabel('Entropy difference')
-    ax.set_title(f'Entropy difference for rank {rank} ({len(sub_tab)} taxons)')
-    ax.margins(x = 0.05, y = 0.01)
-
+def extract_cols(matrix, cols):
+    # extract the position of each column specified in cols from every row in matrix
+    cols_submat = np.zeros((len(matrix), len(cols)), dtype = matrix.dtype)
+    for idx, row in enumerate(matrix):
+        cols_submat[idx] = row[np.isin(row, cols)]
+    return cols_submat
 #%%
 class Selector:
-    def __init__(self, out_dir):
+    def __init__(self, out_dir, ranks):
         self.out_dir = out_dir
+        self.ranks = ranks
+        self.rk_dict = {rk:idx for idx, rk in enumerate(ranks)}
         self.order_file = f'{out_dir}/order.npz'
         self.diff_file = f'{out_dir}/diff.csv'
     
-    def build_tabs0(self, matrix, accs, tax_tab, guide, ranks):
+    def build_tabs(self, matrix, accs, tax_tab, guide):
         # filter guide for the accs present in the alignment matrix
+        # matrix : generated alignment matrix
+        # accs : accession list obtained from mapper (contains the accessions of records that made into the matrix)
+        # tax_tab : table containing the taxonomic index assigned to each record
+        # guide : EXTENDED guide
         taxids = tax_tab.loc[accs, 'TaxID'].values
         tax_guide = guide.loc[taxids].reset_index(drop=True) # this table contains the full taxonomy of each SECUENCE
         
-        diff_tab = get_ent_diff(matrix, tax_guide, ranks)
+        # build difference table
+        diff_tab = get_ent_diff(matrix, tax_guide, self.ranks)
+        self.diff_tab = diff_tab
+        # order bases by decreasing information difference
+        # ordered contains the placement of each column per row in the difference tab
+        # taxa is the difference tab index as a numpy array
+        self.order_tab = np.flip(np.argsort(diff_tab.iloc[:,-1].to_numpy(dtype=np.int16), 1), 1)
+        self.order_tax = np.array([diff_tab.index.get_level_values(0), diff_tab.index.get_level_values(1)], dtype=int).T
         
-    def build_tabs(self, matrix, bounds, coverage, mat_accs, tax_file, min_seqs=0, rank='genus'):
+        # save data
+        np.savez_compressed(self.order_file,
+                            order = self.order_tab,
+                            taxs = self.order_tax)
+        self.diff_tab.to_csv(self.diff_file)
+            
+    # TODO: this function is about ready to go away, remove it after you're sure the new sexy build_tabs is ok
+    def build_tabs0(self, matrix, bounds, coverage, mat_accs, tax_file, min_seqs=0, rank='genus'):
         # filter taxa below the min_seqs sequence threshold at the given rank
         tax_tab = get_taxid_tab(tax_file, mat_accs)
         ranks = {rk:idx for idx, rk in enumerate(tax_tab.columns)}
@@ -166,42 +177,40 @@ class Selector:
     def load_order_mat(self, file):
         order_data = np.load(file)
         self.order_tab = order_data['order']
-        self.order_bounds = order_data['bounds']
         self.order_tax = order_data['taxs']
     
     def load_diff_tab(self, file):
+        # remember that the last column of diff tab ('n') is the count of records for that taxon
         self.diff_tab = pd.read_csv(file, index_col = [0, 1])
-        self.ranks = {rk:idx for idx, rk in enumerate(self.diff_tab.index.get_level_values('rank').unique())}
     
-    def select_sites(self, nsites, rank, cols):
-        # select the first nsites more informative sites from the given cols
-        # returns a list with an array of column indexes per value of nsites
-        # nsites : number of sites to select
-        # rank : (name) to select sites by
-        # cols : list of column indexes to select from
-        self.selected_rank = rank
-        rk = self.ranks[rank]
-        
-        # get the portion of the matrix corresponding to the given rank rows, extract relevant cols
-        rank_submat = self.order_tab[self.order_tax[:,0] == rk]
-        cols_submat = np.zeros((len(rank_submat), len(cols)))
-        for idx, row in enumerate(rank_submat):
-            rk_cols = row[np.isin(row, cols)]
-            cols_submat[idx] = rk_cols
-        
-        selected_sites = np.unique(cols_submat[:, :nsites]).astype(int)
-        return selected_sites
-    
-    def get_sites(self, n_range, rank, cols=None, start=None, end=None):
+    def get_sites(self, n_range, rank, cols=None):
         # for a given range of sites, generate a dictionary containing the new sites selected at each n
         # used for exploring multiple n values in calibration and classification, (avoids repeating calculations)
+        if rank not in self.ranks:
+            raise Exception(f'Invalid rank {rank} not found in: {" ".join(self.ranks)}')            
+        self.selected_rank = rank
+        # get the selected rank's index
+        rk = self.rk_dict[rank]
+        # extract the rows corresponding to the given rank
+        rank_submat = self.order_tab[self.order_tax[:,0] == rk]
+        
+        # if no columns were specified, select among every column (YOU SHOULDN'T DO THIS)
+        col_submat = rank_submat
+        if not cols is None:
+            if min(cols) < 0 or max(cols) > self.order_tab.max():
+                raise Exception(f'Invalid column indexes, must be between 0 and {self.order_tab.max()}')
+            # get the specified columns
+            col_submat = extract_cols(rank_submat, cols)
+        
+        # sites dictionary will keep the selected sites specific for a given n (include the sites from the previous n values) 
         sites = {}
+        # total_sites keeps account of sites that have already been incorporated
         total_sites = np.array([], dtype = np.int8)
         for n in n_range:
-            # TODO: test fix for site selection
-            # n_sites = self.select_sites(start, end, n, rank)
-            n_sites = self.select_sites(n, rank, cols)
+            # get the best n sites for every row in col_submat, select all that are not already selected
+            n_sites = np.unique(col_submat[:, :n])
             new_sites = n_sites[np.in1d(n_sites, total_sites, invert=True)]
+            # only update sites dictionary if new sites are incorporated for n
             if len(new_sites) > 0:
                 sites[n] = new_sites
                 total_sites = np.concatenate([total_sites, new_sites])

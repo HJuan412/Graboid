@@ -121,56 +121,20 @@ class Selector:
         tax_guide = guide.loc[taxids].reset_index(drop=True) # this table contains the full taxonomy of each SECUENCE
         
         # build difference table
+        print('Calculating entropy differences...')
         diff_tab = get_ent_diff(matrix, tax_guide, self.ranks)
         self.diff_tab = diff_tab
+        print('Done!')
         # order bases by decreasing information difference
         # ordered contains the placement of each column per row in the difference tab
         # taxa is the difference tab index as a numpy array
-        self.order_tab = np.flip(np.argsort(diff_tab.iloc[:,-1].to_numpy(dtype=np.int16), 1), 1)
+        print('Sorting columns by entropy difference...')
+        self.order_tab = np.flip(np.argsort(diff_tab.drop(columns='n').to_numpy(), 1), 1).astype(np.int16)
         self.order_tax = np.array([diff_tab.index.get_level_values(0), diff_tab.index.get_level_values(1)], dtype=int).T
-        
+        print('Done!')
         # save data
         np.savez_compressed(self.order_file,
                             order = self.order_tab,
-                            taxs = self.order_tax)
-        self.diff_tab.to_csv(self.diff_file)
-            
-    # TODO: this function is about ready to go away, remove it after you're sure the new sexy build_tabs is ok
-    def build_tabs0(self, matrix, bounds, coverage, mat_accs, tax_file, min_seqs=0, rank='genus'):
-        # filter taxa below the min_seqs sequence threshold at the given rank
-        tax_tab = get_taxid_tab(tax_file, mat_accs)
-        ranks = {rk:idx for idx, rk in enumerate(tax_tab.columns)}
-        tax_counts = tax_tab[rank].value_counts()
-        selected = tax_counts.loc[tax_counts >= min_seqs]
-        taxa = selected.index.to_numpy(dtype = int)
-        seqs = np.argwhere(tax_tab[rank].isin(taxa).values).flatten()
-        
-        sub_mat = matrix[seqs]
-        sub_tax = tax_tab.iloc[seqs]
-        
-        # Quantify information per site per taxon per rank
-        self.diff_tab = get_ent_diff(sub_mat, sub_tax)
-        
-        # Get ordered bases for each taxon
-        taxons = []
-        orders = []
-        for rk, rk_idx in ranks.items():
-            sub_diff = self.diff_tab.loc[rk]
-            for idx, (tax, row) in enumerate(sub_diff.iterrows()):
-                taxons.append([rk_idx, tax])
-                orders.append(row.sort_values(ascending = False).index.values)
-        
-        # tax_tab is a 2-column array containing rank and taxID of each row in order_tab
-        # order_tab is a matrix containing the sites ordered in function of decreasing entropy difference (firts elements are the most informative)
-        # use tax_tab to locate the rows in order_tab that belong to a given rank
-        self.order_tax = np.array(taxons, dtype = np.int32)
-        self.order_tab = np.array(orders, dtype=np.int16)
-        self.order_bounds = bounds
-        
-        # save data
-        np.savez_compressed(self.order_file,
-                            order = self.order_tab,
-                            bounds = self.order_bounds,
                             taxs = self.order_tax)
         self.diff_tab.to_csv(self.diff_file)
     

@@ -63,7 +63,7 @@ class SurveyWAPI(SurveyTool):
                 break
             except Exception as excp:
                 # update attempt count
-                self.logger.warning(f'Download of {self.taxon} {self.marker} interrupted (Exception: {excp}), {self.ntries - self.attempt} attempts remaining')
+                logger.warning(f'Download of {self.taxon} {self.marker} interrupted (Exception: {excp}), {self.ntries - self.attempt} attempts remaining')
                 self.attempt += 1
 
 # Specific survey tools
@@ -104,7 +104,7 @@ class SurveyNCBI(SurveyTool):
                 self.done = True # signal success
                 break
             except Exception as excp:
-                self.logger.warning(f'Download of {self.taxon} {self.marker} interrupted (Exception: {excp}), {self.max_attempts - self.attempt} attempts remaining')
+                logger.warning(f'Download of {self.taxon} {self.marker} interrupted (Exception: {excp}), {self.max_attempts - self.attempt} attempts remaining')
                 self.attempt += 1
 
 class Surveyor:

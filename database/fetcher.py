@@ -54,8 +54,7 @@ class NCBIFetcher:
         # out_header is used to generate the names for the output files
         self.out_seqs = f'{out_header}.seqtmp'
         self.out_taxs = f'{out_header}.taxtmp'
-        self.logger = logging.getLogger('Graboid.database.fetcher.NCBI')
-
+        
     def fetch(self, acc_list, chunk_size=500, max_attempts=3):
         # download acc_list sequences from NCBI to a fasta file and tax ids to an acc:taxID list
         # chunks that can't be downloaded are returned in the failed list
@@ -109,8 +108,7 @@ class BOLDFetcher:
         self.out_seqs = f'{out_header}.seqtmp'
         self.out_taxs = f'{out_header}.taxtmp'
         self.bold_file = bold_file
-        self.logger = logging.getLogger('Graboid.database.fetcher.BOLD')
-
+        
     def fetch(self, acc_list, chunk_size=0, max_attempts=3):
         # read table and get records in acc_list
         bold_tab = pd.read_csv(self.bold_file, sep = '\t', encoding = 'latin-1', dtype = str) # latin-1 to parse BOLD files

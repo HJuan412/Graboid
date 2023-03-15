@@ -31,7 +31,7 @@ logger = logging.getLogger('Graboid.database')
 logger.setLevel(logging.DEBUG)
 
 sh = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter('%(asctime)s - %(levelname)s: %(message)s')
 sh.setFormatter(formatter)
 sh.setLevel(logging.INFO)
 logger.addHandler(sh)
@@ -56,7 +56,9 @@ class Director:
         self.taxonomist = txnm.Taxonomist(tmp_dir, warn_dir)
         self.merger = mrgr.Merger(out_dir)
     
-    def clear_tmp(self):
+    def clear_tmp(self, keep=True):
+        if keep:
+            return
         for file in os.listdir(self.tmp_dir):
             os.remove(file)
     
@@ -206,16 +208,18 @@ def main(db_name,
     # check sequences in ref_seq
     n_refseqs = mp.check_fasta(ref_seq)
     if n_refseqs != 1:
-        raise Exception(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
+        logger.error(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
+        return
         
     # prepare output directories
     # check db_name (if it exists, check clear (if true, overwrite, else interrupt))
     db_dir = DATA.DATAPATH + '/' + db_name
     if db_name in DATA.DBASES:
-        print(f'A database with the name {db_name} already exists...')
+        logger.info(f'A database with the name {db_name} already exists...')
         if not clear:
-            raise Exception('Choose a diferent name or set "clear" as True')
-        print(f'Removing existing database: {db_name}...')
+            logger.warning('Choose a diferent name or set "clear" as True')
+            return
+        logger.info(f'Removing existing database: {db_name}...')
         shutil.rmtree(db_dir)
     
     # create directories
@@ -228,8 +232,8 @@ def main(db_name,
     os.makedirs(ref_dir)
     shutil.copyfile(ref_seq, ref_file)
     # add file handler
-    fh = logging.FileHandler(tmp_dir + '/log')
-    fh.setLevel(logging.DEBUG)
+    fh = logging.FileHandler(db_dir + '/database.log')
+    fh.setLevel(logging.INFO)
     fh.setFormatter(formatter)
     logger.addHandler(fh)
     
@@ -243,8 +247,7 @@ def main(db_name,
     # retrieve sequences + taxonomies
     db_director.direct(taxon, marker, databases, fasta, chunksize, max_attempts)
     # clear temporal files
-    if not keep:
-        db_director.clear_tmp()
+    db_director.clear_tmp(keep)
         
     # build map
     marker_len = mp.build_blastdb(ref_seq = ref_file,

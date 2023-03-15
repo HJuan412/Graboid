@@ -73,7 +73,7 @@ def main(db_name,
     #   # mapping
     #     evalue : evalue threshold when building the alignment
     #     # mesas
-    #       dropoff : percentage of mesa height drop to determine bound
+    #       dropoff : percentage of mesa height drop to determine a border
     #       min_height : minimum sequence coverage to consider for a mesa candidate
     #       min_width : minimum weight needed for a candidate to register
     #     threads : threads to use when building the alignment
@@ -200,56 +200,70 @@ def main(db_name,
 parser = argparse.ArgumentParser(prog='Graboid DATABASE',
                                  usage='%(prog)s MODE_ARGS [-h]',
                                  description='Graboid DATABASE downloads records from the specified taxon/marker pair from the NCBI and BOLD databases')
-parser.add_argument('-o', '--out_dir',
-                    help='Output directory for the generated database files',
+parser.add_argument('db',
+                    help='Name for the generated database',
+                    type=str)
+parser.add_argument('ref',
+                    help='Reference sequence for the selected molecular marker. Must be a fasta file with one (1) sequence',
                     type=str)
 parser.add_argument('-T', '--taxon',
-                    help='Taxon to search for (use this in place of --fasta)',
+                    help='Taxon to search for (use this along with --marker in place of --fasta)',
                     type=str)
 parser.add_argument('-M', '--marker',
-                    help='Marker sequence to search for (use this in place of --fasta)',
+                    help='Marker sequence to search for (use this along with --taxon in place of --fasta)',
                     type=str)
 parser.add_argument('-F', '--fasta',
                     help='Pre-constructed fasta file (use this in place of --taxon and --marker)',
                     type=str)
+parser.add_argument('--desc',
+                    help='Database description text. Optional',
+                    type=str)
+parser.add_argument('-r', '--ranks',
+                    help='Set taxonomic ranks to include in the taxonomy table. Default: Phylum Class Order Family Genus Species. Case insensitive',
+                    nargs='*')
 parser.add_argument('--bold',
                     help='Include the BOLD database in the search',
                     action='store_true')
-parser.add_argument('-r', '--ranks',
-                    help='Set taxonomic ranks to include in the taxonomy table. Default: Phylum Class Order Family Genus Species',
-                    nargs='*')
-parser.add_argument('-c', '--chunksize',
-                    default=500,
+parser.add_argument('--chunk',
                     help='Number of records to download per pass. Default: 500',
-                    type=int)
-parser.add_argument('-m', '--max_attempts',
-                    default=3,
+                    type=int,
+                    default=500)
+parser.add_argument('--attempts',
                     help='Max number of attempts to download a chunk of records. Default: 3',
-                    type=int)
-parser.add_argument('--mv',
-                    help='If a fasta file was provided, move it to the output directory',
-                    action='store_true')
+                    type=int,
+                    default=3)
+parser.add_argument('--evalue',
+                    help='E-value threshold for the BLAST matches. Default: 0.005',
+                    type=float,
+                    default=0.005)
+parser.add_argument('--dropoff',
+                    help='Percentage of mesa height drop to determine a border. Default: 0.05',
+                    type=float,
+                    default=0.05)
+parser.add_argument('--min_height',
+                    help='Minimum sequence coverage to consider for a mesa candidate (percentage of maximum coverage). Default: 0.1',
+                    type=float,
+                    default=0.1)
+parser.add_argument('--min_width',
+                    help='Minimum width needed for a mesa candidate to register. Default: 2',
+                    type=int,
+                    default=2)
+parser.add_argument('--threads',
+                    help='Threads to use when building the alignment. Default: 1',
+                    type=int,
+                    default=1)
 parser.add_argument('--keep',
-                    help='Keep temporal files',
+                    help='Keep the temporal files',
+                    action='store_true')
+parser.add_argument('--clear',
+                    help='Overwrite existing database of the same name (if it exists)',
                     action='store_true')
 parser.add_argument('--email',
-                    help='Provide an email adress and an API key in order to use the NCBI Entrez utilities',
+                    help='Use this in conjunction with --apikey to enable parallel downloads from NCBI (must provide a valid NCBI API key)',
                     type=str)
-parser.add_argument('--api_key',
-                    help='API key associated to the provided email adress',
+parser.add_argument('--apikey',
+                    help='Use this in conjunction with --email to enable parallel downloads from NCBI (must provide a valid NCBI API key)',
                     type=str)
-parser.add_argument('-ref', '--ref_seq',
-                    default=None,
-                    help='Marker sequence to be used as base of the alignment',
-                    type=str)
-parser.add_argument('-e', '--evalue',
-                    default=0.005,
-                    help='E-value threshold for the BLAST matches. Default: 0.005',
-                    type=float)
-parser.add_argument('-t', '--threads',
-                    default=1,
-                    help='Number of threads to be used in the BLAST alignment. Default: 1',
-                    type=int)
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -258,18 +272,24 @@ if __name__ == '__main__':
     if n_refseqs != 1:
         print(f'Reference file must contain ONE sequence. File {args.ref_seq} contains {n_refseqs}')
         pass
-    main(out_dir = args.out_dir,
-         email = args.email,
-         api_key = args.api_key,
-         ranks = args.rank,
-         bold = args.bold,
+    
+    main(db_name = args.db,
+         ref_seq = args.ref,
          taxon = args.taxon,
          marker = args.marker,
          fasta = args.fasta,
-         chunksize = args.chunksize,
-         max_attempts = args.max_attempts,
-         mv = args.mv,
-         ref_seq = args.ref_seq,
+         description = args.desc,
+         ranks = args.ranks,
+         bold = args.bold,
+         chunksize = args.chunk,
+         max_attempts = args.attempts,
          evalue = args.evalue,
+         dropoff = args.dropoff,
+         min_height = args.min_heigh,
+         min_width = args.min_width,
          threads = args.threads,
-         keep = args.keep)
+         keep = args.keep,
+         clear = args.clear,
+         email = args.email,
+         apikey = args.apikey)
+    

@@ -10,14 +10,10 @@ Build an alignment matrix from the blast report
 #%% libraries
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 from glob import glob
-import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import re
-
-#%% set logger
-mat_logger = logging.getLogger('Graboid.mapper.Matrix')
 
 #%% vars
 bases = 'nacgtrykmswbdhv'
@@ -173,9 +169,8 @@ def plot_coverage_data(blast_file, evalue = 0.005, figsize=(12,7)):
 
 #%% classes
 class MatBuilder:
-    def __init__(self, out_dir, logger=mat_logger):
+    def __init__(self, out_dir):
         self.out_dir = out_dir
-        self.logger = logger
         self.mat_file = None
         self.acc_file = None
         
@@ -195,8 +190,7 @@ class MatBuilder:
             blast_tab, marker_len = read_blast(blast_file, evalue)
             self.marker_len = marker_len
         except Exception as excp:
-            self.logger.warning(excp)
-            raise
+            raise excp
         
         # get dimensions & coverage
         nrows, ncols, lower, upper = get_mat_dims(blast_tab)
@@ -240,8 +234,6 @@ class MatBuilder:
         np.savez_compressed(self.mat_file, bounds=bounds, matrix=matrix, coverage=coverage, mesas=mesas)
         with open(self.acc_file, 'w') as list_handle:
             list_handle.write('\n'.join(self.acclist))
-        self.logger.info(f'Stored matrix of dimensions {matrix.shape} in {self.mat_file}')
-        self.logger.info(f'Stored accession_list in {self.acc_file}')
         
         if keep:
             self.matrix = matrix

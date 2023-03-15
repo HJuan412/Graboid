@@ -268,7 +268,7 @@ parser.add_argument('--apikey',
 if __name__ == '__main__':
     args = parser.parse_args()
     # check sequences in ref_seq
-    n_refseqs = mp.check_fasta(args.ref_seq)
+    n_refseqs = mp.check_fasta(args.ref)
     if n_refseqs != 1:
         print(f'Reference file must contain ONE sequence. File {args.ref_seq} contains {n_refseqs}')
         pass
@@ -285,7 +285,7 @@ if __name__ == '__main__':
          max_attempts = args.attempts,
          evalue = args.evalue,
          dropoff = args.dropoff,
-         min_height = args.min_heigh,
+         min_height = args.min_height,
          min_width = args.min_width,
          threads = args.threads,
          keep = args.keep,

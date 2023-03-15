@@ -30,7 +30,7 @@ class Director:
         
         # set workers
         self.surveyor = surv.Surveyor(tmp_dir)
-        self.lister = lstr.Lister(tmp_dir)
+        self.lister = lstr.Lister(out_dir)
         self.fetcher = ftch.Fetcher(tmp_dir)
         self.taxonomist = txnm.Taxonomist(tmp_dir, warn_dir)
         self.merger = mrgr.Merger(out_dir)

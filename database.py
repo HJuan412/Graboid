@@ -14,6 +14,7 @@ import logging
 import os
 import pandas as pd
 import shutil
+import re
 
 from Bio import Entrez
 from DATA import DATA
@@ -46,15 +47,12 @@ def main(db_name,
          description='',
          ranks=None,
          bold=True,
-         cp_fasta=False,
          chunksize=500,
          max_attempts=3,
          evalue=0.005,
          dropoff=0.05,
          min_height=0.1,
          min_width=2,
-         min_seqs=10,
-         filt_rank='genus',
          threads=1,
          keep=False,
          clear=False,
@@ -69,7 +67,6 @@ def main(db_name,
     #   # data
     #     ranks : taxonomic ranks to be used. Default: Phylum, Class, Order, Family, Genus, Species
     #     bold : Search BOLD database. Valid when fasta = None
-    #     cp_fasta : Copy fasta file to tmp_dir. Valid when fasta != None
     #   # ncbi
     #     chunksize : Number of sequences to retrieve each pass
     #     max_attempts : Number of retries for failed passes
@@ -79,8 +76,6 @@ def main(db_name,
     #       dropoff : percentage of mesa height drop to determine bound
     #       min_height : minimum sequence coverage to consider for a mesa candidate
     #       min_width : minimum weight needed for a candidate to register
-    #     min_seqs : minimum sequence thresholds at the given filt_rank, to conserve a taxon
-    #     filt_rank : taxonomic rank at which to apply the min_seqs threshold
     #     threads : threads to use when building the alignment
     #   # cleanup
     #     keep : keep the temporal files
@@ -164,7 +159,7 @@ def main(db_name,
                  'rank_counts':db_director.rank_counts,
                  'tax_summ_file':db_director.tax_summ,
                  'mat_file':map_director.mat_file,
-                 'ref_dir':ref_dir,
+                 'reference':re.sub('.*/', '', ref_seq),
                  'ref_file':ref_file,
                  'acc_file':map_director.acc_file,
                  'order_file':selector.order_file,
@@ -197,7 +192,7 @@ def main(db_name,
     # mesas summary
     mesa_tab = pd.DataFrame(map_director.mesas, columns = 'start end bases average_cov'.split())
     mesa_tab.index.name = 'mesa'
-    mesa_tab = mesa_tab.astype({'start':'int', 'end':'int', 'bases':'int'})
+    mesa_tab = mesa_tab.astype({'start':int, 'end':int, 'bases':int})
     mesa_tab['average_cov'] = mesa_tab.average_cov.round(2)
     mesa_tab.to_csv(summ_file, sep='\t', mode='a')
 

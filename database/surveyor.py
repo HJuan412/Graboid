@@ -25,7 +25,6 @@ class SurveyTool:
         self.marker = marker
         self.out_dir = out_dir
         self.out_file = f'{out_dir}/{taxon}_{marker}__{self.database}.summ' # database identifier separated by __
-        self.get_logger()
         self.attempt = 1
         self.max_attempts = 3
         self.done = False
@@ -34,10 +33,10 @@ class SurveyTool:
         self.max_attempts = max_attempts
         self.attempt_dl()
         if self.done:
-            self.logger.info(f'Done getting summary from {self.database} in {self.attempt} attempts.')
+            logger.info(f'Done getting summary from {self.database} in {self.attempt} attempts.')
         else:
             # surveyor was unable to download a summary, generate a warning, delete incomplete file
-            self.logger.warning(f'Failed to get summary from {self.database} after {self.max_attempts} attempts.')
+            logger.warning(f'Failed to get summary from {self.database} after {self.max_attempts} attempts.')
             try:
                 os.remove(self.out_file)
             except:
@@ -73,13 +72,7 @@ class SurveyBOLD(SurveyWAPI):
     @property
     def database(self):
         return 'BOLD'
-    # consider using the full data retrieval API
-    def get_logger(self):
-        self.logger = logging.getLogger('Graboid.database.surveyor.BOLD')
     
-    def get_dbase(self):
-        return 'BOLD'
-
     def get_url(self):
         apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={self.taxon}&marker={self.marker}&format=tsv' # this line downloads sequences AND taxonomies
         return apiurl
@@ -88,9 +81,7 @@ class SurveyENA(SurveyWAPI):
     @property
     def database(self):
         return 'ENA'
-    def get_logger(self):
-        self.logger = logging.getLogger('Graboid.database.surveyor.BOLD.surveyor.ENA')
-
+    
     def get_url(self):
         apiurl = f'https://www.ebi.ac.uk/ena/browser/api/tsv/textsearch?domain=embl&result=sequence&query=%22{self.taxon}%22%20AND%20%22{self.marker}%22'
         return apiurl
@@ -99,10 +90,8 @@ class SurveyNCBI(SurveyTool):
     @property
     def database(self):
         return 'NCBI'
+    
     # This surveyor uses the Entrez package instead of an API, defines its own survey method
-    def get_logger(self):
-        self.logger = logging.getLogger('Graboid.database.surveyor.NCBI')
-
     def attempt_dl(self):
         self.attempt = 1
         while self.attempt <= self.max_attempts:

@@ -21,6 +21,8 @@ import re
 
 #%% setup logger
 logger = logging.getLogger('Graboid.database.fetcher')
+logging.captureWarnings(True)
+
 #%% functions
 # accession list handling
 def acc_slicer(acc_list, chunksize):

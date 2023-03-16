@@ -20,6 +20,7 @@ import re
 
 #%% setup logger
 logger = logging.getLogger('Graboid.database.taxonomist')
+logging.captureWarnings(True)
 
 #%% variables
 valid_databases = ['BOLD', 'NCBI']

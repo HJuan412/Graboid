@@ -16,15 +16,6 @@ import numpy as np
 import pandas as pd
 import time
 #%%
-# tax table manipulation
-def get_taxid_tab(tax_file):
-    # formats the given tax table (keeps only tax_id columns and removes the '_id' tail)
-    tax_tab = pd.read_csv(tax_file, index_col=0)
-    cols = [col for col in tax_tab if len(col.split('_')) > 1]
-    tr_dict = {col:col.split('_')[0] for col in cols}
-    taxid_tab = tax_tab[cols].rename(columns = tr_dict)
-    return taxid_tab
-
 # filter matrix
 def filter_matrix(matrix, thresh = 1, axis = 0):
     # filter columns (axis = 0) or rows (axis = 1) according to a maximum number of empty values
@@ -231,7 +222,7 @@ class WindowLoader:
         self.logger = logging.getLogger(logger)
         self.logger.setLevel(logging.DEBUG)
         
-    def set_files(self, mat_file, acc_file, tax_file):
+    def set_files(self, mat_file, acc_file, tax_file, guide_file):
         self.mat_file = mat_file
         self.acc_file = acc_file
         self.tax_file = tax_file
@@ -248,7 +239,11 @@ class WindowLoader:
         # load acclist & tax tab
         with open(acc_file, 'r') as acc_handle:
                 self.acclist = acc_handle.read().splitlines()
-        self.tax_tab = get_taxid_tab(tax_file)
+        
+        # build a full taxonomy table for the retrieved records
+        record_taxs = pd.read_csv(tax_file, index_col=0)
+        tax_guide = pd.read_csv(guide_file, index_col=0) # use the EXPANDED guide here
+        self.tax_tab = tax_guide.loc[record_taxs.TaxID].set_index(record_taxs.index)
     
     def get_window(self, start, end, row_thresh=0.2, col_thresh=0.2):
         if self.dims is None:

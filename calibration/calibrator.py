@@ -30,10 +30,6 @@ logger = logging.getLogger('Graboid.calibrator')
 logger.setLevel(logging.DEBUG)
 
 #%% functions
-def make_dirs(base_dir):
-    os.makedirs(f'{base_dir}/data', exist_ok=bool)
-    os.makedirs(f'{base_dir}/warnings', exist_ok=bool)
-
 def get_metrics(confusion, taxons):
     # get calibration metrics for a given confusion matrix
     # confusion: confusion matrix
@@ -265,11 +261,11 @@ class Calibrator:
         clipped = np.clip(raw_coords, 0, self.max_pos).astype(int)
         flipped = clipped[:,0] >= clipped[:,1]
         for flp in raw_coords[flipped]:
-            logger.warning(f'Column {flp} is not valid')
+            logger.warning(f'Window {flp} is not valid')
         windows = clipped[~flipped]
         # establish the scope
         w_tab = []
-        w_info = {} # each window containst a list [params, coords], params includes start end size step
+        w_info = {} # each window contains a list [params, coords], params includes: start end size step
         for w_idx, (w_start, w_end) in enumerate(windows):
             scope_len = w_end - w_start
             if scope_len < size:
@@ -326,7 +322,7 @@ class Calibrator:
             json.dump(meta, meta_handle)
             
         # begin calibration
-        logger.info('Began calibration')
+        print('Beginning calibration...')
         t00 = time.time()
         for idx, (start, end) in enumerate(self.w_coords.to_numpy()):
             t0 = time.time()
@@ -339,7 +335,7 @@ class Calibrator:
             n_seqs = window.n_seqs
             if n_seqs < min_seqs:
                 # not enough sequences passed the filter, skip iteration
-                logger.info(f'Window {start} - {end}. Not enoug sequences to perform calibration ({n_seqs}, min = {min_seqs}), skipping')
+                logger.info(f'Window {start} - {end}. Not enough sequences to perform calibration ({n_seqs}, min = {min_seqs}), skipping')
                 continue
             
             n_sites = self.selector.get_sites(n_range, rank, window.cols)

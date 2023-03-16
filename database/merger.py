@@ -168,6 +168,8 @@ class Merger():
         self.ext_guide = expand_guide(self.mtax.merged_guide, self.ranks)
         self.ext_guide.to_csv(self.expguide_out)
         tax_summary(self.mtax.merged_guide, self.mtax.merged_tax, self.ranks).to_csv(self.taxsumm_out)
+        logger.info(f'Stored expanded taxonomic guide to {self.expguide_out}')
+        logger.info(f'Stored taxonomy summary to {self.taxsumm_out}')
     
     @property
     def rank_counts(self):
@@ -220,6 +222,7 @@ class MergerTax():
             fixed_tab = update_parents(diff_tab, guide, self.guide_tabs[lead])
             lead_guide = pd.concat([lead_guide, fixed_tab])
         self.merged_guide = lead_guide.reset_index().set_index('TaxID')
+        logger.info(f'Merged taxonomy codes using {lead} as a guide. Generated index contains {len(self.merged_guide)} unique taxa.')
     
     def merge_tax_tabs(self):
         self.merged_tax = pd.concat(list(self.tax_tabs.values()))
@@ -229,6 +232,8 @@ class MergerTax():
         self.merge_tax_tabs()
         self.merged_guide.to_csv(guide_out)
         self.merged_tax.to_csv(tax_out)
+        logger.info(f'Stored merged taxonomic codes to {guide_out}')
+        logger.info(f'Stored merged record taxonomies to {tax_out}')
         
         # get data
         self.rank_counts = self.merged_guide.Rank.value_counts()

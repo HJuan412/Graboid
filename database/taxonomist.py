@@ -86,8 +86,9 @@ class TaxonomistNCBI(Taxer):
         n_chunks = int(np.ceil(len(tax_list)/chunksize))
         retrieved = []
         failed = []
+        print(f'Downloading {len(tax_list)} records from NCBI...')
         for idx, chunk in enumerate(chunks):
-            print(f'Retrieving taxonomy. Chunk {idx + 1} of {n_chunks}')
+            print(f'Downloading chunk {idx + 1} of {n_chunks}')
             tax_records = []
             for attempt in range(max_attempts):
                 try:
@@ -293,6 +294,6 @@ class Taxonomist:
                 raise
             taxer.taxing(chunksize, max_attempts)
             taxer.store_files()
-            logger.info(f'Finished retrieving taxonomy data from {database} database. Saved to {taxer.tax_out}')
+            logger.info(f'Finished retrieving taxonomy data from {database} database.')
             self.tax_files[database] = taxer.tax_out
             self.guide_files[database] = taxer.guide_out

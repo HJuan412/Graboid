@@ -123,11 +123,15 @@ def main(db_name,
     # set databases
     databases = ['NCBI', 'BOLD'] if bold else ['NCBI']
     # retrieve sequences + taxonomies
+    print('Beginning data retrieval...')
     db_director.direct(taxon, marker, databases, fasta, chunksize, max_attempts)
     # clear temporal files
     db_director.clear_tmp(keep)
-        
+    print('Data retrieval is done!')
+    
     # build map
+    print('Beginning sequence mapping...')
+    print('Building blast reference database...')
     marker_len = mp.build_blastdb(ref_seq = ref_file,
                                   db_dir = ref_dir,
                                   clear = True,
@@ -140,13 +144,16 @@ def main(db_name,
                         min_height = min_height,
                         min_width = min_width,
                         threads = threads)
+    print('Sequence mapping is done!')
     
     # quantify information
-    selector = fsele.Selector(db_dir)
+    print('Calculating information contents...')
+    selector = fsele.Selector(db_dir, db_director.ranks)
     selector.build_tabs(map_director.matrix,
                         map_director.accs,
                         db_director.tax_tab,
                         db_director.ext_guide)
+    print('Calculations are done!')
     
     # assemble meta file
     meta_dict = {'seq_file':db_director.seq_file,

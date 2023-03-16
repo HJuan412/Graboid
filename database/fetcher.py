@@ -62,7 +62,7 @@ class NCBIFetcher:
         # split acc_list
         chunks = acc_slicer(acc_list, chunk_size)
         n_chunks = int(np.ceil(len(acc_list)/chunk_size))
-        
+        print(f'Downloading {len(acc_list)} records from NCBI...')
         for chunk_n, chunk in enumerate(chunks):
             print(f'Downloading chunk {chunk_n + 1} of {n_chunks}')
             seq_recs = []
@@ -125,7 +125,6 @@ class BOLDFetcher:
         with open(self.out_seqs, 'a') as out_handle:
             SeqIO.write(records, out_handle, 'fasta')
         tax_subtab.to_csv(self.out_taxs)
-        
         return [] # empty list returned for compatibility with NCBIFetcher's failed list
 
 fetch_dict = {'BOLD':BOLDFetcher,
@@ -185,6 +184,7 @@ class Fetcher():
                 # failed to download sequences after two passes
                 logger.warning(f'Failed to download {len(failed0)} of {len(acc_list)} records from {database}. Failed accessions saved to {self.failed_file}')
                 failed += failed0
+            logger.info(f'Retrieved {len(acc_list) - len(failed0)}/{len(acc_list)} sequences from {database} database.')
         
         # generate a sub table containing the failed sequences (if any)
         if len(failed) > 0:

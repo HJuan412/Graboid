@@ -29,6 +29,12 @@ def check_fasta(fasta_file):
             nseqs += 1
     return nseqs
 
+def get_header(fasta_file):
+    # use this to extract the header of the reference fasta sequence
+    with open(fasta_file, 'r') as fasta_handle:
+        for title, seq in sfp(fasta_handle):
+            return title
+        
 def check_ref(ref_file):
     nseqs = 0
     marker_len = 0
@@ -61,10 +67,12 @@ def build_blastdb(ref_seq, db_dir, clear=False, logger=map_logger):
     for file in glob(db_dir + '/*.n'):
         os.remove(file)
     # check that reference file is valid
-    marker_len = check_ref(ref_seq)    
+    marker_len = check_ref(ref_seq)
+    ref_header = get_header(ref_seq)
     # build the blast database
     blast.makeblastdb(ref_seq, db_name)
-    logger.info(f'Generated blast databse {db_name} using the file {ref_seq} in directory {db_dir}')
+    logger.info(f'Generated blast databse from reference sequence {ref_header} of length {marker_len}')
+    logger.info(f'Blast database was built using the file {ref_seq} and stored in directory {db_dir}')
     return marker_len
 
 #%% classes
@@ -114,7 +122,7 @@ class Director:
         
         self.db_dir = db_dir
         
-        print(f'Performing blast alignment of {fasta_file}...')
+        print('Performing blast alignment of retrieved sequences against reference sequence...')
         # perform BLAST
         try:
             self.blaster.blast(fasta_file, db_dir, threads)

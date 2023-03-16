@@ -60,7 +60,7 @@ class Director:
                 ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']
                 
         # propagate to taxonomist and merger
-        logger.info(f'Taxonomic ranks set as {" ".join(ranks)}')
+        logger.info(f'Taxonomic ranks set as: {" ".join(ranks)}')
         self.taxonomist.set_ranks(ranks)
         self.merger.set_ranks(ranks)
         self.ranks = ranks
@@ -99,9 +99,8 @@ class Director:
     def process(self, chunksize=500, max_attempts=3):
         print('Reconstructing taxonomies...')
         self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
-
+        print('Merging data...')
         self.merger.merge(self.fetcher.seq_files, self.taxonomist.tax_files, self.taxonomist.guide_files)
-        print('Done!')
         
     def direct(self, taxon, marker, databases, fasta_file, chunksize=500, max_attempts=3):
         # retrieve sequence and taxonomy data

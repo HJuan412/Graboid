@@ -164,7 +164,7 @@ class Merger():
         self.generate_outfiles()
         self.merge_seqs()
         self.mtax = MergerTax(taxfiles, guidefiles)
-        self.mtax.merge(self.tax_out, self.taxguide_out)
+        self.mtax.merge(self.taxguide_out, self.tax_out)
         self.ext_guide = expand_guide(self.mtax.merged_guide, self.ranks)
         self.ext_guide.to_csv(self.expguide_out)
         tax_summary(self.mtax.merged_guide, self.mtax.merged_tax, self.ranks).to_csv(self.taxsumm_out)
@@ -231,4 +231,4 @@ class MergerTax():
         self.merged_tax.to_csv(tax_out)
         
         # get data
-        self.rank_counts = self.merged_guide.value_counts()
+        self.rank_counts = self.merged_guide.Rank.value_counts()

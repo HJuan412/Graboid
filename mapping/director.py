@@ -138,5 +138,5 @@ class Director:
             self.logger.error(excp)
         print('Done!')
         self.logger.info(f'Stored alignment matrix of dimensions {self.matrix.shape} in {self.mat_file}')
-        self.logger.info(f'Stored accession list with {len(self.accs)} in {self.acc_file}')
+        self.logger.info(f'Stored accession list with {len(self.accs)} records in {self.acc_file}')
         return

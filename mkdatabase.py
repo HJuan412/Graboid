@@ -162,6 +162,7 @@ def main(db_name,
                  'expguide_file':db_director.expguide_file,
                  'ranks':db_director.ranks,
                  'nseqs':db_director.nseqs,
+                 'mat_shape':map_director.matrix.shape,
                  'rank_counts':db_director.rank_counts.to_dict(),
                  'tax_summ_file':db_director.tax_summ,
                  'mat_file':map_director.mat_file,
@@ -191,6 +192,7 @@ def main(db_name,
         summary.write(f'Database location: {db_dir}\n')
         summary.write(f'Reference sequence (length): {ref_seq} ({marker_len})\n')
         summary.write(f'N sequences: {db_director.nseqs}\n')
+        summary.write(f'Sequences in alignment: {map_director.matrix.shape[0]}')
         summary.write('Taxa:\n')
         summary.write('Rank (N taxa):\n')
         summary.write('\n'.join([f'\t{rk} ({count})' for rk, count in db_director.rank_counts.items()]))
@@ -223,7 +225,8 @@ parser.add_argument('-F', '--fasta',
                     type=str)
 parser.add_argument('--desc',
                     help='Database description text. Optional',
-                    type=str)
+                    type=str,
+                    default='')
 parser.add_argument('-r', '--ranks',
                     help='Set taxonomic ranks to include in the taxonomy table. Default: Phylum Class Order Family Genus Species. Case insensitive',
                     nargs='*')

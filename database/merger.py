@@ -231,4 +231,4 @@ class MergerTax():
         self.merged_tax.to_csv(tax_out)
         
         # get data
-        self.rank_count = self.merged_guide.value_counts()
+        self.rank_counts = self.merged_guide.value_counts()

@@ -71,7 +71,7 @@ def build_blastdb(ref_seq, db_dir, clear=False, logger=map_logger):
     ref_header = get_header(ref_seq)
     # build the blast database
     blast.makeblastdb(ref_seq, db_name)
-    logger.info(f'Generated blast databse from reference sequence "{ref_header}" of length {marker_len}')
+    logger.info(f'Generated blast databse from reference sequence "{ref_header}" of length {marker_len} bp')
     logger.info(f'Blast database was built using the file {ref_seq} and stored in directory {db_dir}')
     return marker_len
 

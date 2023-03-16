@@ -179,14 +179,14 @@ class Fetcher():
             failed0 = fetcher.fetch(acc_list, chunk_size, max_attempts)
             # do a second pass if some sequences couldn't be downloaded
             if len(failed0) == 0:
+                logger.info(f'Retrieved {len(acc_list)}/{len(acc_list)} sequences from {database} database.')
                 continue
             failed0 = fetcher.fetch(failed0, chunk_size, max_attempts)
-            
+            logger.info(f'Retrieved {len(acc_list) - len(failed0)}/{len(acc_list)} sequences from {database} database.')
             if len(failed0) > 0:
                 # failed to download sequences after two passes
                 logger.warning(f'Failed to download {len(failed0)} of {len(acc_list)} records from {database}. Failed accessions saved to {self.failed_file}')
                 failed += failed0
-            logger.info(f'Retrieved {len(acc_list) - len(failed0)}/{len(acc_list)} sequences from {database} database.')
         
         # generate a sub table containing the failed sequences (if any)
         if len(failed) > 0:

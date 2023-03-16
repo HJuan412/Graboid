@@ -233,10 +233,11 @@ class Calibrator:
         order_file = db_meta['order_file']
         diff_file = db_meta['diff_file']
         self.guide_file = db_meta['guide_file'] # this isn't used in the calibration process, used in result visualization
+        expguide_file = db_meta['expguide_file']
         
         # set the loader with the learning data
         self.loader = windows.WindowLoader('Graboid.calibrator.windowloader')
-        self.loader.set_files(mat_file, acc_file, tax_file)
+        self.loader.set_files(mat_file, acc_file, tax_file, expguide_file)
         self.max_pos = self.loader.dims[1]
         # load information files
         self.selector.load_order_mat(order_file)

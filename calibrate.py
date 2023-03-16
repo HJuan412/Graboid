@@ -38,7 +38,7 @@ def main(database, row_thresh=0.2, col_thresh=0.2, min_seqs=10, rank='genus', di
     os.mkdir(cal_dir)
     
     # prepare calibration logger
-    fh = logging.FileHandler(cal_dir + '/log.calibration')
+    fh = logging.FileHandler(cal_dir + '/calibration.log')
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(formatter)
     cb.logger.addHandler(fh)

@@ -27,8 +27,25 @@ def filter_matrix(matrix, thresh = 1, axis = 0):
     return filtered.flatten()
 
 # TODO: Test this function, replace build_effective_taxonomy
+def orphans_to_the_back(taxa, tax_guide, rv_ranks):
+    # moves orphan taxons to their last known classification
+    parent_dict = {tax:parent for tax, parent in zip(rv_ranks[:-1], rv_ranks[1:])}
+    ordered = []
+    for tax, rk in taxa.iteritems():
+        # compare the current taxon's parent rank with the expected parent rank
+        expected_parent_rank = parent_dict[rk]
+        parent = tax_guide.loc[tax, 'parentTaxID']
+        actual_parent_rank = tax_guide.loc[parent, 'Rank']
+        
+        if actual_parent_rank == expected_parent_rank:
+            # parent rank matches expectation, tax stays
+            ordered.append(tax)
+        else:
+            # parent rank doesn't match, tax moves to the back
+            ordered.append(parent)
+    return tax_guide.loc[np.unique(ordered), 'Rank']
 
-def build_effective_taxonomy(accs, tax_tab, tax_guide, ranks, safe=True):
+def build_effective_taxonomy(accs, tax_tab, tax_guide, ranks):
     # determine the first taxon at which all the given accs (that share a subsequence) match
     # accs: list of accessions
     # tax_tab: table containing each records last known taxon + rank
@@ -38,42 +55,34 @@ def build_effective_taxonomy(accs, tax_tab, tax_guide, ranks, safe=True):
     # get a list of reversed ranks to travel from lowest to highest
     rv_ranks = ranks[::-1]
     # get the TaxID + rank ofr every record
-    tax_ranks = tax_tab.loc[accs].set_index('TaxID')
-    
+    uniq_taxs = tax_tab.loc[accs, 'TaxID'].unique()
+    tax_ranks = tax_guide.loc[uniq_taxs, 'Rank']
+    # filter orphaned taxa
+    tax_ranks = orphans_to_the_back(tax_ranks, tax_guide, rv_ranks)
     # group taxa by rank, order by ascending rank
     ordered_ranks = {rk:np.array([]) for rk in rv_ranks}
     for rk in rv_ranks:    
-        ordered_ranks[rk] = tax_ranks.loc[tax_ranks == rk].index.unique().values
+        ordered_ranks[rk] = tax_ranks.loc[(tax_ranks == rk).values].index.values
     
-    # keep track of the first and last taxon at which there were no conflicts
     first_non_conflict = None
-    last_non_conflict = None
     
     # list the parents of the previous rank's taxa
-    current_parents = np.array([])
     for rk in rv_ranks:
         # concatenate current rank taxa with previous rank's parents
-        current_taxa = np.unique(np.concatenate((ordered_ranks[rk], current_parents)))
+        current_taxa = ordered_ranks[rk]
+        current_parents = tax_guide.loc[current_taxa, 'parentTaxID'].unique()
+        # update parents
+        for parent in current_parents:
+            parent_rk = tax_guide.loc[parent, 'Rank']
+            ordered_ranks[parent_rk] = np.unique(np.append(ordered_ranks[parent_rk], parent))
         if len(current_taxa) == 1:
             # no conflict found
-            if len(ordered_ranks[rk]) > 0:
-                # a conflict COULD have happened
-                # update last_non_conflict
-                last_non_conflict = current_taxa[0]
             if first_non_conflict is None:
                 # fist_non_conflict isn't set
                 first_non_conflict = current_taxa[0]
-                last_non_conflict = current_taxa[0]
         elif len(current_taxa) > 1:
             # conflict found, reset non_conflict taxa
             first_non_conflict = None
-            last_non_conflict = None
-        # update parents
-        current_parents = tax_guide.loc[current_taxa, 'parentTaxID'].unique()
-    
-    # if safe is set to false, return the FIRST taxon at which a conflict could have happened
-    if safe:
-        return last_non_conflict
     return first_non_conflict
 
 def build_effective_taxonomy0(eff_idxs, tax_tab):
@@ -191,11 +200,11 @@ class Window:
         self.shape = (len(rows), len(cols))
         # self.window = window
         if len(rows) > 0:
-            self.collapse_window(safe)
+            self.collapse_window()
         else:
             self.loader.logger.warning('No rows passed the threshold!')
     
-    def collapse_window(self, safe=True):
+    def collapse_window(self):
         t0 = time.time()
         # collapse the sequences of the selected rows and columns
         self.branches, seq_guide = seq_collapse_nb(self.matrix[self.rows][:, self.cols])
@@ -205,7 +214,7 @@ class Window:
         tax = []
         for branch in self.branches:
             accs = self.tax_tab.iloc[branch].index.values
-            tax.append(build_effective_taxonomy(accs, self.tax_tab, self.tax_guide, self.ranks, safe))
+            tax.append(build_effective_taxonomy(accs, self.tax_tab, self.tax_guide, self.ranks))
         self.window_tax = self.tax_guide.loc[tax]
         elapsed = time.time() - t0
         self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed:.3f} seconds')

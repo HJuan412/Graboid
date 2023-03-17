@@ -125,8 +125,10 @@ class TaxonomistNCBI(Taxer):
         # generates a dataframe containing the complete taxonomy of every retrieved record, including only the specified ranks
         # generated dictionary {TaxID:[SciName, rank, parentTaxID]}
         taxes = {}
+        base_rank = self.ranks[0]
         for record in self.tax_records.values():
-            prev_tx = 0
+            prev_tx = record[base_rank]
+            # prev_tx = 0 # TODO: revert to this if fix doesn't work
             for rk in self.ranks:
                 try:
                     rk_taxon = record[rk]

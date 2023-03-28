@@ -13,6 +13,8 @@ import numba as nb
 import numpy as np
 import pandas as pd
 import time
+
+from preprocess import sequence_collapse as sq
 #%%
 # filter matrix
 def filter_matrix(matrix, thresh = 1, axis = 0):
@@ -26,92 +28,21 @@ def filter_matrix(matrix, thresh = 1, axis = 0):
         
     return filtered.flatten()
 
-# TODO: Test this function, replace build_effective_taxonomy
-def orphans_to_the_back(taxa, tax_guide, rv_ranks):
-    # moves orphan taxons to their last known classification
-    parent_dict = {tax:parent for tax, parent in zip(rv_ranks[:-1], rv_ranks[1:])}
-    ordered = []
-    for tax, rk in taxa.iteritems():
-        # compare the current taxon's parent rank with the expected parent rank
-        expected_parent_rank = parent_dict[rk]
-        parent = tax_guide.loc[tax, 'parentTaxID']
-        actual_parent_rank = tax_guide.loc[parent, 'Rank']
-        
-        if actual_parent_rank == expected_parent_rank:
-            # parent rank matches expectation, tax stays
-            ordered.append(tax)
-        else:
-            # parent rank doesn't match, tax moves to the back
-            ordered.append(parent)
-    return tax_guide.loc[np.unique(ordered), 'Rank']
-
-def build_effective_taxonomy(accs, tax_tab, tax_guide, ranks):
-    # determine the first taxon at which all the given accs (that share a subsequence) match
-    # accs: list of accessions
-    # tax_tab: table containing each records last known taxon + rank
-    # tax_guide: SIMPLE (not extended) tax_guide
-    # ranks: list of ranks
-    # safe: determine wether to return the first matching taxon (ignoring records with unknown taxe included in accs)
-    # get a list of reversed ranks to travel from lowest to highest
-    rv_ranks = ranks[::-1]
-    # get the TaxID + rank ofr every record
-    uniq_taxs = tax_tab.loc[accs, 'TaxID'].unique()
-    tax_ranks = tax_guide.loc[uniq_taxs, 'Rank']
-    # filter orphaned taxa
-    tax_ranks = orphans_to_the_back(tax_ranks, tax_guide, rv_ranks)
-    # group taxa by rank, order by ascending rank
-    ordered_ranks = {rk:np.array([]) for rk in rv_ranks}
-    for rk in rv_ranks:    
-        ordered_ranks[rk] = tax_ranks.loc[(tax_ranks == rk).values].index.values
-    
-    first_non_conflict = None
-    
-    # list the parents of the previous rank's taxa
-    for rk in rv_ranks:
-        # concatenate current rank taxa with previous rank's parents
-        current_taxa = ordered_ranks[rk]
-        current_parents = tax_guide.loc[current_taxa, 'parentTaxID'].unique()
-        # update parents
-        for parent in current_parents:
-            parent_rk = tax_guide.loc[parent, 'Rank']
-            ordered_ranks[parent_rk] = np.unique(np.append(ordered_ranks[parent_rk], parent))
-        if len(current_taxa) == 1:
-            # no conflict found
-            if first_non_conflict is None:
-                # fist_non_conflict isn't set
-                first_non_conflict = current_taxa[0]
-        elif len(current_taxa) > 1:
-            # conflict found, reset non_conflict taxa
-            first_non_conflict = None
-    return first_non_conflict
-
-def build_effective_taxonomy0(eff_idxs, tax_tab):
-    # construct the effective taxonomy for each cluster
-    n_ranks = tax_tab.shape[1]
-    effective_taxes = np.zeros((len(eff_idxs), n_ranks))
-    # turn table to array, easier to handle
-    tax_mat = tax_tab.to_numpy()
-    for idx0, cluster in enumerate(eff_idxs):
-        # prepare consensus taxonomy
-        clust_tax = np.zeros(n_ranks)
-        # transpose sub_mat to iterate trough columns
-        sub_mat = tax_mat[cluster].T
-        # previous unconflicting taxon, starts as 0
-        p_tax = 0
-        for idx, rank in enumerate(sub_mat):
-            uniq_vals = np.unique(rank)
-            if len(uniq_vals) > 1:
-                # rank contains multiple taxa. Conflict, set this and all subsequent positions as last unconflicting taxon and break
-                clust_tax[idx:] = p_tax
-                break
-            # no conflict, set taxon and update p_tax
-            clust_tax[idx] = uniq_vals[0]
-            p_tax = uniq_vals
-        # add completed taxonomy
-        effective_taxes[idx0] = clust_tax
-    effective_taxes = pd.DataFrame(effective_taxes, columns = tax_tab.columns)
-    return effective_taxes
-
+def get_consensus_taxonomy(taxa):
+    # return the consensus taxon at the highest possible level
+    last_consensus = None
+    for lvl in taxa.T:
+        lvl_tax = np.unique(lvl)
+        lvl_tax = lvl_tax[~np.isnan(lvl_tax)]
+        if len(lvl_tax) == 0:
+            # none of the sequences have a known tax for this level
+            continue
+        if len(lvl_tax) > 1:
+            # multiple taxa found at this level, conflict
+            return last_consensus
+        # there is consensus at the current level
+        last_consensus = lvl_tax[0]
+    return last_consensus
 #%% classes
 class WindowLoader:
     def __init__(self, ranks, logger='WindowLoader'):
@@ -124,34 +55,79 @@ class WindowLoader:
         self.mat_file = mat_file
         self.acc_file = acc_file
         self.tax_file = tax_file
-        self.guide_file = guide_file
+        self.guide_file = guide_file # should be the extended guide
         # load matrix
         try:
             matrix_data = np.load(mat_file)
         except ValueError:
             raise Exception(f'Error: matrix file {mat_file} is not a valid numpy file')
         self.matrix = matrix_data['matrix']
+        self.matrix[self.matrix > 4] = 0 # TODO: fix this in mapper
         self.bounds = matrix_data['bounds']
         self.coverage = matrix_data['coverage']
         self.mesas = matrix_data['mesas']
         self.dims = self.matrix.shape
         # load acclist & tax tab
         with open(acc_file, 'r') as acc_handle:
-                self.acclist = acc_handle.read().splitlines()
+                self.acclist = np.array(acc_handle.read().splitlines())
         
         # load the taxonomy table and guide file
-        self.tax_tab = pd.read_csv(tax_file, index_col=0).loc[self.acclist]
+        self.tax_tab = pd.read_csv(tax_file, index_col=0)
         self.tax_guide = pd.read_csv(guide_file, index_col=0)
     
-    def get_window(self, start, end, row_thresh=0.2, col_thresh=0.2):
-        if self.dims is None:
-            return
+    def get_window(self, row_thresh=0.2, col_thresh=0.2, **kwargs):
+        start = 0
+        end = self.dims[1]
+        if 'start' in kwargs.keys():
+            start = kwargs['start']
+        if 'end' in kwargs.keys():
+            end = kwargs['end']
+        window_cols = np.arange(start, end)
+        if 'cols' in kwargs.keys():
+            window_cols = np.array(kwargs['cols'])
+        if window_cols.min() < 0 or window_cols.max() > self.dims[1]:
+            raise Exception(f'Invalid window dimensions: start: {window_cols.min()}, end: {window_cols.max()}. Must be between 0 and {self.dims[1]}')
+        
+        # filter out too incomplete rows and columns
+        window_mat = self.matrix[:, window_cols]
+        rows = filter_matrix(window_mat, row_thresh, axis = 1)
+        cols = filter_matrix(window_mat[rows], col_thresh, axis = 0)
+        
+        # collapse redundant sequences
+        if len(rows) > 0:
+            branches = sq.collapse_window(window_mat[rows][:, cols])
+            branch_indexes = [rows[br] for br in branches] # translate each branch's indexes to its original position in the alignment matrix
+        else:
+            self.logger.warning('No rows passed the threshold!')
+        
+        # get collapsed sequence taxonomy
+        window_taxonomy = []
 
-        if start < 0 or end > self.dims[1]:
-            raise Exception(f'Invalid window dimensions: start: {start}, end: {end}. Must be between 0 and {self.dims[1]}')
+        for br in branch_indexes:
+            branch_taxa = self.tax_tab.iloc[br]['TaxID'].values
+            extended_taxa = self.tax_guide.loc[branch_taxa].to_numpy()
+            window_taxonomy.append(get_consensus_taxonomy(extended_taxa))
+        
+        window_reprs = [br[0] for br in branch_indexes]
+        window = window_mat[window_reprs][:, cols]
+        
+        # These two variables list the accession codes included in each branch and the column indexes (from the entire alignment) of the used columns
+        # currently have no use to them, but leave them at hand just in case
+        # branch_accs = [self.acclist[br] for br in branch_indexes]
+        # columns = window_cols[cols]
+        
+        return window, window_taxonomy
+    
+    # OLD method
+    # def get_window(self, start, end, row_thresh=0.2, col_thresh=0.2):
+    #     if self.dims is None:
+    #         return
 
-        # Windows are handled as a different class
-        return Window(self.matrix, start, end, row_thresh, col_thresh, self)
+    #     if start < 0 or end > self.dims[1]:
+    #         raise Exception(f'Invalid window dimensions: start: {start}, end: {end}. Must be between 0 and {self.dims[1]}')
+
+    #     # Windows are handled as a different class
+    #     return Window(self.matrix, start, end, row_thresh, col_thresh, self)
 
 class Window:
     def __init__(self, matrix, start, end, row_thresh=0.2, col_thresh=0.2, loader=None):
@@ -206,18 +182,27 @@ class Window:
     
     def collapse_window(self):
         t0 = time.time()
-        # collapse the sequences of the selected rows and columns
-        self.branches, seq_guide = seq_collapse_nb(self.matrix[self.rows][:, self.cols])
-        self.window = build_collapsed(self.branches, seq_guide)
-        self.n_seqs = len(self.branches)
-        # generate the consensus taxonomy
-        tax = []
-        for branch in self.branches:
-            accs = self.tax_tab.iloc[branch].index.values
-            tax.append(build_effective_taxonomy(accs, self.tax_tab, self.tax_guide, self.ranks))
-        self.window_tax = self.tax_guide.loc[tax]
+        branches = sq.collapse_window(self.matrix[self.rows][:, self.cols])
+        branch_taxonomy = get_consensus_taxonomy()
         elapsed = time.time() - t0
         self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed:.3f} seconds')
+        return
+    
+    # OLD
+    # def collapse_window(self):
+    #     t0 = time.time()
+    #     # collapse the sequences of the selected rows and columns
+    #     self.branches, seq_guide = seq_collapse_nb(self.matrix[self.rows][:, self.cols])
+    #     self.window = build_collapsed(self.branches, seq_guide)
+    #     self.n_seqs = len(self.branches)
+    #     # generate the consensus taxonomy
+    #     tax = []
+    #     for branch in self.branches:
+    #         accs = self.tax_tab.iloc[branch].index.values
+    #         tax.append(build_effective_taxonomy(accs, self.tax_tab, self.tax_guide, self.ranks))
+    #     self.window_tax = self.tax_guide.loc[tax]
+    #     elapsed = time.time() - t0
+    #     self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed:.3f} seconds')
         
 
 #%%

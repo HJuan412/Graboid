@@ -16,13 +16,16 @@ import pandas as pd
 import re
 
 #%% vars
-bases = 'nacgtrykmswbdhv'
-r_bases = 'ntgcarykmswbdhv'
+bases = 'nacgt'
+r_bases = 'ntgca'
+special = {char:0 for char in '-rykmswbdhv'}
 tr_dict = {base:idx for idx, base in enumerate(bases)} | {base:idx for idx, base in enumerate(bases.upper())}
-tr_dict.update({'-':0, 'u':4, 'U':4})
+tr_dict.update({'u':4, 'U':4})
+tr_dict.update(special)
 # compliment dict, used to translate revese complement sequences
 rc_dict = {base:idx for idx, base in enumerate(r_bases)} | {base:idx for idx, base in enumerate(r_bases.upper())}
-rc_dict.update({'-':0, 'u':1, 'U':1})
+rc_dict.update({'u':1, 'U':1})
+rc_dict.update(special)
 
 #%% functions
 # read blast file

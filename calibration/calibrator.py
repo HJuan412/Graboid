@@ -23,7 +23,7 @@ from classification import classification
 from classification import cost_matrix
 from DATA import DATA
 from preprocess import feature_selection as fsele
-from preprocess import windows
+from preprocess import windows as wn
 
 #%% set
 logger = logging.getLogger('Graboid.calibrator')
@@ -236,7 +236,7 @@ class Calibrator:
         expguide_file = db_meta['expguide_file']
         
         # set the loader with the learning data
-        self.loader = windows.WindowLoader('Graboid.calibrator.windowloader')
+        self.loader = wn.WindowLoader('Graboid.calibrator.windowloader')
         self.loader.set_files(mat_file, acc_file, tax_file, expguide_file)
         self.max_pos = self.loader.dims[1]
         # load information files
@@ -329,27 +329,27 @@ class Calibrator:
             t0 = time.time()
             print(f'Window {start} - {end} ({idx + 1} of {len(self.w_coords)})')
             # extract window and select atributes
-            window = self.loader.get_window(start, end, row_thresh, col_thresh)
-            if len(window.eff_mat) == 0:
+            window, window_cols, window_tax = self.loader.get_window(row_thresh, col_thresh, start=start, end=end)
+            n_seqs = len(window)
+            if n_seqs == 0:
                 # no effective sequences in the window
                 continue
-            n_seqs = window.n_seqs
-            if n_seqs < min_seqs:
+            elif n_seqs < min_seqs:
                 # not enough sequences passed the filter, skip iteration
                 logger.info(f'Window {start} - {end}. Not enough sequences to perform calibration ({n_seqs}, min = {min_seqs}), skipping')
                 continue
             
-            n_sites = self.selector.get_sites(n_range, rank, window.cols)
-            y = window.eff_tax
+            n_sites = self.selector.get_sites(n_range, rank, window_cols)
+            y = self.loader.tax_guide.loc[window_tax] # y holds the complete taxonomy of each sequence in the collapsed window, uses the expanded taxonomy guide
             # distance container, 3d array, paired distance matrix for every value of n
             dist_mat = np.zeros((n_seqs, n_seqs, len(n_range)), dtype=np.float32)
             # get paired distances
             t1 = time.time()
             logger.debug(f'prep time {t1 - t0:.3f}')
             for idx_0 in np.arange(n_seqs - 1):
-                qry_seq = window.eff_mat[[idx_0]]
+                qry_seq = window[[idx_0]]
                 idx_1 = idx_0 + 1
-                ref_seqs = window.eff_mat[idx_1:]
+                ref_seqs = window[idx_1:]
                 # persistent distance array, updates with each value of n
                 dists = np.zeros((1, ref_seqs.shape[0]), dtype=np.float32)
                 for n_idx, n in enumerate(n_range):
@@ -363,8 +363,9 @@ class Calibrator:
                         pass
                     dist_mat[idx_0, idx_1:, n_idx] = dists
                     dist_mat[idx_1:, idx_0, n_idx] = dists # is this necessary? (yes), allows sortying of distances in a single step
-            # fill the diagonal values with infinite value, this ensures they are never amongst the k neighs
-            for i in range(len(n_range)): np.fill_diagonal(dist_mat[:,:,i], np.inf)
+            # fill the diagonal values with infinite value, this ensures they are never among the k neighs
+            for i in range(len(n_range)):
+                np.fill_diagonal(dist_mat[:,:,i], np.inf)
             t2 = time.time()
             logger.debug(f'dist calculation {t2 - t1:.3f}')
             # get ordered_neighbours and sorted distances

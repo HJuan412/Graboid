@@ -75,8 +75,8 @@ class WindowLoader:
         self.tax_guide = pd.read_csv(guide_file, index_col=0)
     
     def get_window(self, row_thresh=0.2, col_thresh=0.2, **kwargs):
-        # returns a collapsed matrix and a list with the generated consensus for every row
-        # commented variables branch_accs and columns list the accessions of the sequences that went into each branch and the indexes of the columns that compose the matrix
+        # returns a collapsed matrix, a list of the indexes of the used columns and a list with the generated consensus for every row
+        # commented variable branch_accs list the accessions of the sequences that went into each branch
         # row_thresh and col_thresh determine the maximum proportion of empty siter per row and column respectively (rows are checked first)
         # window bounds must be presented as kwargs:
             # start and/or end coordinates select the range of columns in between them (if only one is provided, the range goes from the given coordinate to the start/end of the alignment)
@@ -125,9 +125,9 @@ class WindowLoader:
         # These two variables list the accession codes included in each branch and the column indexes (from the entire alignment) of the used columns
         # currently have no use to them, but leave them at hand just in case
         # branch_accs = [self.acclist[br] for br in branch_indexes]
-        # columns = window_cols[cols]
+        columns = window_cols[cols]
         
-        return window, window_taxonomy
+        return window, columns, window_taxonomy
     
     # OLD method
     # def get_window(self, start, end, row_thresh=0.2, col_thresh=0.2):

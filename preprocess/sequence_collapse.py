@@ -4,10 +4,15 @@
 Created on Fri Mar 24 10:52:33 2023
 
 @author: hernan
+This module contains the functions used in collapsing of redundant subsequences
 """
 
-
+import logging
 import numpy as np
+from time import time
+
+#%% set logger
+logger = logging.getLogger('Graboid.preprocessing.seq_collapsing')
 #%%
 def entropy(matrix):
     # entropy calcluation for a matrix with no unknown values
@@ -155,6 +160,7 @@ def collapse_window(window):
     #     Sequence A contains B (A ⊃ B) when all of Bs known sites are known in A, A has more known sites, and no differing values are present
     
     # we begin by grouping the sequence by completeness level
+    t0 = time()
     missing = window == 0
     unk_count = missing.sum(1)
     row_indexes = np.arange(window.shape[0])
@@ -177,5 +183,6 @@ def collapse_window(window):
     
     # filter subset branches
     kept_branches = filter_branches(tier_branches, window, missing)
-    
+    elapsed = time() - t0
+    logger.debug(f'Collapsed {len(window)} into {len(kept_branches)} in {elapsed:.3f} seconds')
     return kept_branches

@@ -66,18 +66,20 @@ def update_parents(diff_tab, diff_guide, lead_guide):
 
 def expand_guide(guide, ranks):
     # expand the taxonomy guide to allow for easy ancestor lookup
-    # builds table if index = TaxID, columns = ranks
+    # builds table of index = TaxID, columns = ranks
     expanded = pd.DataFrame(index = guide.index, columns = ranks)
-    rk_tab = guide.loc[guide.Rank == ranks[0]]
-    for rk, child_rk in zip(ranks[:-1], ranks[1:]):
-        child_tab = guide.loc[guide.Rank == child_rk]
-        taxa = rk_tab.index.values
-        expanded.loc[taxa, rk] = rk_tab.index.values
-        for tx in taxa:
-            children = child_tab.loc[child_tab.parentTaxID == tx].index.values
-            expanded.loc[children,:] = expanded.loc[[tx]].values
-        rk_tab = child_tab
-    expanded.loc[child_tab.index, child_rk] = child_tab.index.values
+
+    for rk in ranks[::-1]:
+        # start from the lowest ranks up
+        # locate all records for the given rank and add them to the expanded table
+        rk_tab = guide.loc[guide.Rank == rk]
+        expanded.at[rk_tab.index, rk] = rk_tab.index
+        # fill parent tax for taxa at the given rank
+        filled_rows = expanded.loc[expanded[rk].notna(), rk]
+        parents = guide.loc[filled_rows.values, 'parentTaxID'].values
+        parent_tab = guide.loc[parents].reset_index().set_index(filled_rows.index)
+        for parent_rk, parent_subtab in parent_tab.groupby('Rank'):
+            expanded.at[parent_subtab.index, parent_rk] = parent_subtab.TaxID
     return expanded
 
 def tax_summary(guide_tab, tax_tab, ranks):

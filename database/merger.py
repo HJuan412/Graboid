@@ -11,6 +11,7 @@ Compare and merge temporal sequence files
 #%% libraries
 from Bio import SeqIO
 import logging
+import numpy as np
 import pandas as pd
 import re
 
@@ -80,6 +81,11 @@ def expand_guide(guide, ranks):
         parent_tab = guide.loc[parents].reset_index().set_index(filled_rows.index)
         for parent_rk, parent_subtab in parent_tab.groupby('Rank'):
             expanded.at[parent_subtab.index, parent_rk] = parent_subtab.TaxID
+    
+    # clear orphans
+    for rk_idx, rk in enumerate(ranks):
+        empty_tax = expanded.loc[expanded[rk].isna()].index
+        expanded.loc[empty_tax, ranks[rk_idx + 1:]] = np.nan
     return expanded.astype(float)
 
 def tax_summary(guide_tab, tax_tab, ranks):

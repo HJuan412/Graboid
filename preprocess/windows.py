@@ -62,7 +62,6 @@ class WindowLoader:
         except ValueError:
             raise Exception(f'Error: matrix file {mat_file} is not a valid numpy file')
         self.matrix = matrix_data['matrix']
-        self.matrix[self.matrix > 4] = 0 # TODO: fix this in mapper
         self.bounds = matrix_data['bounds']
         self.coverage = matrix_data['coverage']
         self.mesas = matrix_data['mesas']
@@ -76,6 +75,15 @@ class WindowLoader:
         self.tax_guide = pd.read_csv(guide_file, index_col=0)
     
     def get_window(self, row_thresh=0.2, col_thresh=0.2, **kwargs):
+        # returns a collapsed matrix and a list with the generated consensus for every row
+        # commented variables branch_accs and columns list the accessions of the sequences that went into each branch and the indexes of the columns that compose the matrix
+        # row_thresh and col_thresh determine the maximum proportion of empty siter per row and column respectively (rows are checked first)
+        # window bounds must be presented as kwargs:
+            # start and/or end coordinates select the range of columns in between them (if only one is provided, the range goes from the given coordinate to the start/end of the alignment)
+            # cols takes an array of possibly discontinuous column positions (overrides start/end if present)
+            # if neither bound types are provided, get_window works over the entire alignment (NOT RECOMMENDED, as it will be time intensive and yield uninformative results)
+        
+        # determine window boundaries
         start = 0
         end = self.dims[1]
         if 'start' in kwargs.keys():
@@ -95,8 +103,11 @@ class WindowLoader:
         
         # collapse redundant sequences
         if len(rows) > 0:
+            t0 = time.time()
             branches = sq.collapse_window(window_mat[rows][:, cols])
             branch_indexes = [rows[br] for br in branches] # translate each branch's indexes to its original position in the alignment matrix
+            elapsed = time.time() - t0
+            self.logger.debug(f'Collapsed window of shape ({len(rows)}, {len(cols)}) into {len(branches)} in {elapsed:.3f} seconds')
         else:
             self.logger.warning('No rows passed the threshold!')
         

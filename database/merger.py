@@ -80,7 +80,7 @@ def expand_guide(guide, ranks):
         parent_tab = guide.loc[parents].reset_index().set_index(filled_rows.index)
         for parent_rk, parent_subtab in parent_tab.groupby('Rank'):
             expanded.at[parent_subtab.index, parent_rk] = parent_subtab.TaxID
-    return expanded
+    return expanded.astype(float)
 
 def tax_summary(guide_tab, tax_tab, ranks):
     # builds a human readable dataframe containing the rank, parent taxon and record count for every taxon present in the database

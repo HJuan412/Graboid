@@ -120,7 +120,7 @@ class TaxonomistNCBI(Taxer):
         taxes = {}
         base_rank = self.ranks[0]
         for record in self.tax_records.values():
-            prev_tx = record[base_rank]
+            prev_tx = record[base_rank][0]
             # prev_tx = 0 # TODO: revert to this if fix doesn't work
             for rk in self.ranks:
                 try:

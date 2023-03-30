@@ -74,13 +74,13 @@ def expand_guide(guide, ranks):
         # start from the lowest ranks up
         # locate all records for the given rank and add them to the expanded table
         rk_tab = guide.loc[guide.Rank == rk]
-        expanded.at[rk_tab.index, rk] = rk_tab.index
+        expanded.loc[rk_tab.index, rk] = rk_tab.index
         # fill parent tax for taxa at the given rank
         filled_rows = expanded.loc[expanded[rk].notna(), rk]
         parents = guide.loc[filled_rows.values, 'parentTaxID'].values
         parent_tab = guide.loc[parents].reset_index().set_index(filled_rows.index)
         for parent_rk, parent_subtab in parent_tab.groupby('Rank'):
-            expanded.at[parent_subtab.index, parent_rk] = parent_subtab.TaxID
+            expanded.loc[parent_subtab.index, parent_rk] = parent_subtab.TaxID
     
     # clear orphans
     for rk_idx, rk in enumerate(ranks):

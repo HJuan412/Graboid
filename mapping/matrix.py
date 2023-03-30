@@ -18,7 +18,8 @@ import re
 #%% vars
 bases = 'nacgt'
 r_bases = 'ntgca'
-special = {char:0 for char in '-rykmswbdhv'}
+special_chars = '-rykmswbdhv'
+special = {char:0 for char in special_chars + special_chars.upper()}
 tr_dict = {base:idx for idx, base in enumerate(bases)} | {base:idx for idx, base in enumerate(bases.upper())}
 tr_dict.update({'u':4, 'U':4})
 tr_dict.update(special)

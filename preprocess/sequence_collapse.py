@@ -15,13 +15,10 @@ from time import time
 logger = logging.getLogger('Graboid.preprocessing.seq_collapsing')
 #%%
 def entropy(matrix):
-    # entropy calcluation for a matrix with no unknown values
     entropy = np.zeros(matrix.shape[1])
     for idx, col in enumerate(matrix.T):
-        values, counts = np.unique(col, return_counts = True)
-        # calculate entropy in matrixes with missing values
-        counts = counts[values != 0]
-        values = values[values != 0]
+        valid_rows = col[col != 0] # only count known values
+        values, counts = np.unique(valid_rows, return_counts = True)
         n_rows = counts.sum()
         freqs = counts / n_rows
         entropy[idx] = -np.sum(np.log2(freqs) * freqs)

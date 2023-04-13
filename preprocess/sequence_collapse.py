@@ -156,6 +156,8 @@ def collapse_window(window):
     #     Two sequences A and B intersect (A ∩ B ≠ Ø) when they have no differing values in any of their common known sites, but both have known sites that are unknown in the other
     #     Sequence A contains B (A ⊃ B) when all of Bs known sites are known in A, A has more known sites, and no differing values are present
     
+    # this function can't handle full empty rows, make sure to filter the window before collapsing
+    
     # we begin by grouping the sequence by completeness level
     t0 = time()
     missing = window == 0

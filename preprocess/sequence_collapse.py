@@ -13,6 +13,7 @@ from time import time
 
 #%% set logger
 logger = logging.getLogger('Graboid.preprocessing.seq_collapsing')
+logger.setLevel(logging.DEBUG)
 #%%
 def entropy(matrix):
     entropy = np.zeros(matrix.shape[1])
@@ -69,41 +70,39 @@ def seq_in_group(seq, group, group_entropy):
     # seq wasn't separated by the variable sites, check static sites
     return (seq[static_cols] != sub_group[0, static_cols]).sum() == 0
 
-def get_overlapping(locations, indexes):
-    # generate a list of arrays indicating all fully overlapping sequences
-    # indexes contains the actual indexes of the sequences with n missing sites, spares having to correct afterwards
+def get_overlapping(locations, tier_indexes):
+    # group the sequences that share the same known sites (not necesarily the same sequences)
+    # return a list of arrays containing the indexes of grouped sequences
     
-    loc_indexes = np.arange(locations.shape[0]) # use this to keep track of placed sequences
+    # locations is a boolean matrix of known sites
+    # tier_indexes contains the actual indexes of the sequences with n missing sites, spares having to correct afterwards
+    
+    ungrouped = np.arange(locations.shape[0]) # use this to keep track of grouped sequences
     n = locations[0].sum() # nuber of known sites in this group of seqs
-    placed = set([]) # this will keep track of sequences that are already placed
     overlaps = []
-    for idx, sequence in enumerate(locations):
-        if idx in placed:
-            # sequence is already placed, continue
-            continue
-        # get the columns corresponding to the current sequence
-        sequence_cols = locations[:, sequence]
+    
+    while len(ungrouped) > 0:
+        sequence = locations[ungrouped[0]] # get the known columns for the first remaining ungrouped sequences
+        # get the columns known in sequence
+        sequence_cols = locations[ungrouped][:, sequence]
         # get the indexes of all rows with n (all) known values in the sequence's columns
-        overlapping = loc_indexes[sequence_cols.sum(1) == n]
-        overlaps.append(indexes[overlapping]) # add the REAL indexes to the overlapping list
-        placed = placed.union(set(overlapping))
+        overlapping = sequence_cols.sum(1) == n
+        grouped = ungrouped[overlapping]
+        ungrouped = ungrouped[~overlapping]
+        overlaps.append(tier_indexes[grouped]) # add the REAL indexes to the overlapping list
     return overlaps
 
-#%%
-def group_incomplete(incomplete_indexes, missing):
-    # for each completeness tier, group sequences that with overlapped known sites
-    if len(incomplete_indexes) == 0:
-        # there are no incomplete tiers
-        return []
-    incomplete_grouped = [] # contains sequence groups in each tier as arrays of indexes
-    for inc_tier in incomplete_indexes:
-        if len(inc_tier) == 1:
+def group_tiers(tier_indexes, missing):
+    # for each completeness tier, group sequences with overlapped known sites
+    grouped = [] # contains sequence groups in each tier as arrays of indexes
+    for tier in tier_indexes:
+        if len(tier) == 1:
             # single row with n missing
-            incomplete_grouped.append([inc_tier])
+            grouped.append([tier])
             continue
-        overlaps = get_overlapping(missing[inc_tier], inc_tier)
-        incomplete_grouped.append(overlaps)
-    return incomplete_grouped
+        overlaps = get_overlapping(missing[tier], tier)
+        grouped.append(overlaps)
+    return grouped
 
 def collapse_tiers(tiers, window, missing):
     # for each tier, collapse each group of fully overlapped sequences into branches
@@ -166,17 +165,9 @@ def collapse_window(window):
     unk_tiers = np.unique(unk_count)
     tier_indexes = [row_indexes[unk_count == uk_tier] for uk_tier in unk_tiers]
     
-    # for each tier, group sequences that are completely overlapped
-    grouped_tiers = []
-    # locate complete tier
-    incomplete_indexes = tier_indexes
-    # remove first completeness tier if it is complete (place it to grouped_tiers)
-    if unk_tiers[0] == 0:
-        grouped_tiers = [[incomplete_indexes[0]]]
-        incomplete_indexes = tier_indexes[1:]
+    # group sequences with matching known sites for each completeness tier
+    grouped_tiers = group_tiers(tier_indexes, missing)
     
-    # group incomplete tiers
-    grouped_tiers += group_incomplete(incomplete_indexes, missing)
     # generate branches for each tier
     tier_branches = collapse_tiers(grouped_tiers, window, missing)
     

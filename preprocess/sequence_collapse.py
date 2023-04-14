@@ -123,7 +123,7 @@ def filter_branches(tier_branches, window, missing):
     # filter out branches that are contained at a lower tier
     if len(tier_branches) == 1:
         # only one tier, no need to filter
-        return tier_branches
+        return tier_branches[0]
     
     # find a representative for each branch at each tier
     branch_reprs = []

@@ -24,7 +24,6 @@ from classification import cost_matrix
 from DATA import DATA
 from preprocess import feature_selection as fsele
 from preprocess import windows as wn
-
 #%% set
 logger = logging.getLogger('Graboid.calibrator')
 logger.setLevel(logging.DEBUG)
@@ -192,13 +191,13 @@ class Calibrator:
         self.warn_dir = warn_dir
         
         # make a directory to store classification reports
-        os.mkdir(self.classif_dir)
+        os.makedirs(self.classif_dir, exist_ok=True)
         # prepare out files
         self.report_file = self.out_dir + f'/{prefix}.report'
         self.classif_file = self.out_dir + f'/{prefix}.classif'
         self.meta_file = self.out_dir + f'/{prefix}.meta'
         
-        self.selector = fsele.Selector(out_dir)
+        self.selector = fsele.Selector(out_dir, 'phylum class order family genus species'.split())
         self.loader = None
         
     @property
@@ -219,7 +218,34 @@ class Calibrator:
     @property
     def ranks(self):
         return self.loader.tax_tab.columns.tolist()
-            
+    
+    def set_database0(self, database):
+        self.db = database
+        try:
+            self.db_dir = DATA.get_database(database)
+        except Exception as excp:
+            logger.error(excp)
+            raise
+        # use meta file from database to locate necessary files
+        with open(self.db_dir + '/meta.json', 'r') as meta_handle:
+            db_meta = json.load(meta_handle)
+        mat_file = db_meta['mat_file']
+        tax_file = db_meta['tax_file']
+        acc_file = db_meta['acc_file']
+        self.guide_file = db_meta['guide_file'] # this isn't used in the calibration process, used in result visualization
+        expguide_file = db_meta['expguide_file']
+        
+        # load matrix and build extended taxonomy
+        map_npz = np.load(mat_file)
+        self.matrix = map_npz['matrix']
+        self.max_pos = self.matrix.shape[1]
+        with open(acc_file, 'r') as handle:
+            self.accs = handle.read().splitlines()
+        tax_tab = pd.read_csv(tax_file, index_col=0).loc[self.accs]
+        # the tax_tab parameter is the extended taxonomy for each record
+        self.tax_tab = pd.read_csv(expguide_file, index_col=0).loc[tax_tab.TaxID.values]
+        self.tax_tab.index = tax_tab.index
+        
     def set_database(self, database):
         if not database in DATA.DBASES:
             print(f'Database {database} not found.')
@@ -256,11 +282,11 @@ class Calibrator:
         
         # adjust window size to get uniform distribution (avoid having to use a "tail" window)
         last_position = self.max_pos - size
-        n_windows = np.ceil(last_position / step, dtype=int)
+        n_windows = int(np.ceil(last_position / step))
         w_start = np.linspace(0, last_position, n_windows, dtype=int)
         self.windows = np.array([w_start, w_start + size]).T
         self.w_type = 'sliding'
-        logger.info(f'Set {n_windows} of size {size} at intervals of {w_start[1] - w_start[0]}')
+        logger.info(f'Set {n_windows} windows of size {size} at intervals of {w_start[1] - w_start[0]}')
     
     def set_custom_windows(self, starts, ends):
         # check that given values are valid: same length, starts < ends, within alignment bounds
@@ -275,11 +301,48 @@ class Calibrator:
         out_of_bounds = ((raw_coords < 0) | (raw_coords >= self.max_pos))
         out_of_bounds = out_of_bounds[:,0] | out_of_bounds[:,1]
         if out_of_bounds.sum() > 0:
-            raise Exception(f'At least one pair of coordinates is out of bounds: {[list(i) for i in raw_coords[out_of_bounds]]}')
+            raise Exception(f'At least one pair of coordinates is out of bounds [0 {self.max_pos}]: {[list(i) for i in raw_coords[out_of_bounds]]}')
         self.windows = raw_coords
         self.w_type = 'custom'
         logger.info(f'Set {raw_coords.shape[0]} custom windows at positions {[list(i) for i in raw_coords]} with lengths {[ln for ln in raw_coords[:,1] - raw_coords[:,0]]}')
-        
+    
+    def grid_search0(self,
+                     row_thresh=0.2,
+                     col_thresh=0.2):
+        print('Beginning calibration...')
+        t0 = time.time()
+        for idx, win in enumerate(self.windows):
+            t0_wn = time.time()
+            print(f'Window {win[0]} - {win[1]} ({idx + 1} of {len(self.windows)})')
+            try:
+                win = wn.Window(matrix = self.matrix,
+                                start = win[0],
+                                end = win[1],
+                                row_thresh = row_thresh,
+                                col_thresh = col_thresh,
+                                tax_tab = self.tax_tab)
+            except Exception as excp:
+                # an exception means the selected window didn't pass some of the given thresholds
+                logger.error(f'Window {idx} ({win[0]} {win[1]}): ' + str(excp))
+                continue
+
+    def grid_search_parallel(self,
+                             row_thresh=0.2,
+                             col_thresh=0.2,
+                             threads=1):
+        print('Beginning calibration...')
+        t0 = time.time()
+        def make_window(start, end, row_thresh, col_thresh):
+            try:
+                return wn.Window(self.matrix, start, end, row_thresh, col_thresh, self.tax_tab)
+            except Exception as excp:
+                # an exception means the selected window didn't pass some of the given thresholds
+                logger.info(f'Window ({start} {end}): ' + str(excp))
+                return None
+        # concurrent futures 
+        with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+            self.collapsed_windows = executor.map(make_window, self.windows[:,0], self.windows[:,1], np.full(len(self.windows), row_thresh), np.full(len(self.windows), col_thresh))
+            
     def set_windows(self, size=np.inf, step=np.inf, starts=0, ends=np.inf):
         # this function establishes the windows to be used in the grid search
         # size and step establish the length and displacement rate of the sliding window

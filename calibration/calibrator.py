@@ -212,6 +212,11 @@ class Calibrator:
             raise
     
     @property
+    def window_len(self):
+        if hasattr(self, 'windows'):
+            return self.windows[:,1] - self.windows[:,0]
+    
+    @property
     def ranks(self):
         return self.loader.tax_tab.columns.tolist()
             
@@ -245,7 +250,35 @@ class Calibrator:
         
         logger.info(f'Set database: {database}')
     
-    def set_windows(self, size=np.inf, step=np.inf, starts=[0], ends=[np.inf]):
+    def set_sliding_windows(self, size, step):
+        if size >= self.max_pos:
+            raise Exception(f'Given window size: {size} is equal or greater than the total length of the alignment {self.max_pos}, please use a smaller window size.')
+        
+        # adjust window size to get uniform distribution (avoid having to use a "tail" window)
+        last_position = self.max_pos - size
+        n_windows = np.ceil(last_position / step, dtype=int)
+        w_start = np.linspace(0, last_position, n_windows, dtype=int)
+        self.windows = np.array([w_start, w_start + size]).T
+        self.w_type = 'sliding'
+    
+    def set_custom_windows(self, starts, ends):
+        # check that given values are valid: same length, starts < ends, within alignment bounds
+        try:
+            raw_coords = np.array([starts, ends], dtype=np.int).T
+            raw_coords = np.reshape(raw_coords, (-1, 2))
+        except ValueError:
+            raise Exception(f'Given starts and ends lengths do not match: {len(starts)} starts, {len(ends)} ends')
+        invalid = raw_coords[:, 0] >= raw_coords[:, 1]
+        if invalid.sum() > 0:
+            raise Exception(f'At least one pair of coordinates is invalid: {raw_coords[invalid]}')
+        out_of_bounds = ((raw_coords < 0) | (raw_coords >= self.max_pos))
+        out_of_bounds = out_of_bounds[:,0] | out_of_bounds[:,1]
+        if out_of_bounds.sum() > 0:
+            raise Exception(f'At least one pair of coordinates is out of bounds: {raw_coords[out_of_bounds]}')
+        self.windows = raw_coords
+        self.w_type = 'custom'
+        
+    def set_windows(self, size=np.inf, step=np.inf, starts=0, ends=np.inf):
         # this function establishes the windows to be used in the grid search
         # size and step establish the length and displacement rate of the sliding window
             # default values use the entire sequence (defined by w_start & w_end) in a single run
@@ -253,11 +286,13 @@ class Calibrator:
         # multiple values of starts & ends allow for calibration on multiple separated windows
             # default values use the entire sequence
         
-        starts = list(starts)
-        ends = list(ends)
-        if len(starts) != len(ends):
+        ends = np.clip(ends, 0, self.max_pos) # ensure all coord ends are within sequence limits
+        try:
+            raw_coords = np.array([starts, ends], dtype=np.int).T
+            raw_coords = np.reshape(raw_coords, (-1, 2)) # do this in case a single coord was given
+        except ValueError:
             raise Exception(f'Given starts and ends lengths do not match: {len(starts)} starts, {len(ends)} ends')
-        raw_coords = np.array([starts, ends]).T
+        
         # clip coordinates outside of boundaries and detect the ones that are flipped
         clipped = np.clip(raw_coords, 0, self.max_pos).astype(int)
         flipped = clipped[:,0] >= clipped[:,1]

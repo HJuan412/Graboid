@@ -50,7 +50,8 @@ def get_consensus_taxonomy(taxa):
 
 #%% classes
 class Window:
-    def __init__(self, matrix, start, end, row_thresh, col_thresh, tax_tab, tax_ext):
+    def __init__(self, matrix, start, end, row_thresh, col_thresh, tax_tab):
+        # tax_tab should be the extended tax table for the matrix
         if start < 0 or end > matrix.shape[1]:
             raise Exception(f'Invalid window boundaries [{start} {end}] must be within [0 {matrix.shape[1]}]')
         if start >= end:
@@ -64,7 +65,7 @@ class Window:
         self.filter_missing(sub_matrix, row_thresh, col_thresh)
         
         # collapse window and build consensus taxonomy
-        self.collapse_window(sub_matrix, tax_tab, tax_ext)
+        self.collapse_window(sub_matrix, tax_tab)
     
     def filter_missing(self, matrix, row_thresh, col_thresh):
         self.row_thresh = row_thresh
@@ -81,7 +82,7 @@ class Window:
         logger.info(f'Column threshold {col_thresh}, max {self.max_unk_cols} unknown values per column. Filtered out {matrix.shape[1] - len(self.cols)} columns.')
         logger.info(f'Filtered matrix has shape [{len(self.rows)} {len(self.cols)}]')
     
-    def collapse_window(self, matrix, tax_tab, tax_ext):
+    def collapse_window(self, matrix, tax_tab):
         t0 = time.time()
         branch_idxs = sq.collapse_window(matrix[self.rows][:, self.cols])
         t1 = time.time()
@@ -94,9 +95,8 @@ class Window:
         # build consensus taxonomy
         self.taxonomy = []
         for br in self.window_idxs:
-            branch_taxa = tax_tab.iloc[br]['TaxID'].values
-            extended_taxa = tax_ext.loc[branch_taxa].to_numpy()
-            self.taxonomy.append(get_consensus_taxonomy(extended_taxa))
+            branch_taxa = tax_tab.iloc[br].to_numpy()
+            self.taxonomy.append(get_consensus_taxonomy(branch_taxa))
             
 class WindowLoader:
     def __init__(self, ranks, logger='WindowLoader'):

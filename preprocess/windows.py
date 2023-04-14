@@ -15,6 +15,10 @@ import pandas as pd
 import time
 
 from preprocess import sequence_collapse as sq
+
+#%%
+logger = logging.getLogger('Graboid.preprocess.windows')
+logger.setLevel(logging.INFO)
 #%%
 # filter matrix
 def filter_matrix(matrix, thresh = 1, axis = 0):
@@ -43,7 +47,57 @@ def get_consensus_taxonomy(taxa):
         # there is consensus at the current level
         last_consensus = lvl_tax[0]
     return last_consensus
+
 #%% classes
+class Window:
+    def __init__(self, matrix, start, end, row_thresh, col_thresh, tax_tab, tax_ext):
+        if start < 0 or end > matrix.shape[1]:
+            raise Exception(f'Invalid window boundaries [{start} {end}] must be within [0 {matrix.shape[1]}]')
+        if start >= end:
+            raise Exception(f'Invalid window boundaries start coordinate ({start}) must be lower than end coordinate ({end})')
+        self.start = start
+        self.end = end
+        sub_matrix = matrix[:, self.start:self.end]
+        logger.info(f'Initialized window of coordinates [{start} {end}], shape {sub_matrix.shape}')
+        
+        # filter matrix by missing values
+        self.filter_missing(sub_matrix, row_thresh, col_thresh)
+        
+        # collapse window and build consensus taxonomy
+        self.collapse_window(sub_matrix, tax_tab, tax_ext)
+    
+    def filter_missing(self, matrix, row_thresh, col_thresh):
+        self.row_thresh = row_thresh
+        self.col_thresh = col_thresh
+        self.max_unk_rows = row_thresh * matrix.shape[1]
+        self.max_unk_cols = col_thresh * matrix.shape[0]
+        self.rows = filter_matrix(matrix, row_thresh, axis = 1)
+        self.cols = filter_matrix(matrix[self.rows], col_thresh, axis = 0)
+        if len(self.rows) == 0:
+            raise Exception(f'No rows passed the filter for row_thresh {row_thresh}')
+        if len(self.cols) == 0:
+            raise Exception(f'No columns passed the filter for col_thresh {col_thresh}')
+        logger.info(f'Row threshold {row_thresh}, max {self.max_unk_rows} unknown values per row. Filtered out {matrix.shape[0] - len(self.rows)} rows.')
+        logger.info(f'Column threshold {col_thresh}, max {self.max_unk_cols} unknown values per column. Filtered out {matrix.shape[1] - len(self.cols)} columns.')
+        logger.info(f'Filtered matrix has shape [{len(self.rows)} {len(self.cols)}]')
+    
+    def collapse_window(self, matrix, tax_tab, tax_ext):
+        t0 = time.time()
+        branch_idxs = sq.collapse_window(matrix[self.rows][:, self.cols])
+        t1 = time.time()
+        logger.info(f'Collapsed matrix of shape ({len(self.rows)}, {len(self.cols)}) into {len(branch_idxs)} branches in {t1 - t0:.3f} seconds')
+        self.window_idxs = [self.rows[br] for br in branch_idxs] # translate each branch's indexes to its original position in the alignment matrix
+        repr_idx = [br[0] for br in self.window_idxs] # get a representative sequence for each branch
+        
+        self.window = matrix[repr_idx][:, self.cols]
+        
+        # build consensus taxonomy
+        self.taxonomy = []
+        for br in self.window_idxs:
+            branch_taxa = tax_tab.iloc[br]['TaxID'].values
+            extended_taxa = tax_ext.loc[branch_taxa].to_numpy()
+            self.taxonomy.append(get_consensus_taxonomy(extended_taxa))
+            
 class WindowLoader:
     def __init__(self, ranks, logger='WindowLoader'):
         self.ranks = ranks
@@ -140,64 +194,64 @@ class WindowLoader:
     #     # Windows are handled as a different class
     #     return Window(self.matrix, start, end, row_thresh, col_thresh, self)
 
-class Window:
-    def __init__(self, matrix, start, end, row_thresh=0.2, col_thresh=0.2, loader=None):
-        self.matrix = matrix
-        self.start = start
-        self.end = end
-        self.loader = loader
-        self.window = None
-        self.window_tax = None
-        self.process_window(row_thresh, col_thresh)
+# class Window:
+#     def __init__(self, matrix, start, end, row_thresh=0.2, col_thresh=0.2, loader=None):
+#         self.matrix = matrix
+#         self.start = start
+#         self.end = end
+#         self.loader = loader
+#         self.window = None
+#         self.window_tax = None
+#         self.process_window(row_thresh, col_thresh)
     
-    @property
-    def tax_tab(self):
-        if self.loader is None:
-            return None
-        return self.loader.tax_tab.iloc[self.rows]
+#     @property
+#     def tax_tab(self):
+#         if self.loader is None:
+#             return None
+#         return self.loader.tax_tab.iloc[self.rows]
     
-    @property
-    def tax_guide(self):
-        if self.loader is None:
-            return None
-        return self.loader.tax_guide
+#     @property
+#     def tax_guide(self):
+#         if self.loader is None:
+#             return None
+#         return self.loader.tax_guide
     
-    @property
-    def ranks(self):
-        if self.loader is None:
-            return None
-        return self.loader.ranks
+#     @property
+#     def ranks(self):
+#         if self.loader is None:
+#             return None
+#         return self.loader.ranks
 
-    def process_window(self, row_thresh, col_thresh, safe=True):
-        # generates a collapsed window using the specified row_thresh and col_thresh
-        # attributes generated are self.window (collapsed window, numpy array) and self.window_tax (consensus taxonomy, segment of tax table, pandas dataframe)
-        # run this method every time you want to change the column threshold
-        self.row_thresh = row_thresh
-        self.col_thresh = col_thresh
+#     def process_window(self, row_thresh, col_thresh, safe=True):
+#         # generates a collapsed window using the specified row_thresh and col_thresh
+#         # attributes generated are self.window (collapsed window, numpy array) and self.window_tax (consensus taxonomy, segment of tax table, pandas dataframe)
+#         # run this method every time you want to change the column threshold
+#         self.row_thresh = row_thresh
+#         self.col_thresh = col_thresh
         
         
-        # crop the portion of interest of the matrix
-        matrix = self.matrix[:, self.start:self.end]
-        # fitler rows first
-        rows = filter_matrix(matrix, row_thresh, axis = 1)
-        cols = filter_matrix(matrix[rows], col_thresh, axis = 0)
+#         # crop the portion of interest of the matrix
+#         matrix = self.matrix[:, self.start:self.end]
+#         # fitler rows first
+#         rows = filter_matrix(matrix, row_thresh, axis = 1)
+#         cols = filter_matrix(matrix[rows], col_thresh, axis = 0)
         
-        self.rows = rows
-        self.cols = cols + self.start
-        self.shape = (len(rows), len(cols))
-        # self.window = window
-        if len(rows) > 0:
-            self.collapse_window()
-        else:
-            self.loader.logger.warning('No rows passed the threshold!')
+#         self.rows = rows
+#         self.cols = cols + self.start
+#         self.shape = (len(rows), len(cols))
+#         # self.window = window
+#         if len(rows) > 0:
+#             self.collapse_window()
+#         else:
+#             self.loader.logger.warning('No rows passed the threshold!')
     
-    def collapse_window(self):
-        t0 = time.time()
-        branches = sq.collapse_window(self.matrix[self.rows][:, self.cols])
-        branch_taxonomy = get_consensus_taxonomy()
-        elapsed = time.time() - t0
-        self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed:.3f} seconds')
-        return
+#     def collapse_window(self):
+#         t0 = time.time()
+#         branches = sq.collapse_window(self.matrix[self.rows][:, self.cols])
+#         branch_taxonomy = get_consensus_taxonomy()
+#         elapsed = time.time() - t0
+#         self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed:.3f} seconds')
+#         return
     
     # OLD
     # def collapse_window(self):

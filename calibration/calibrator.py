@@ -260,6 +260,7 @@ class Calibrator:
         w_start = np.linspace(0, last_position, n_windows, dtype=int)
         self.windows = np.array([w_start, w_start + size]).T
         self.w_type = 'sliding'
+        logger.info(f'Set {n_windows} of size {size} at intervals of {w_start[1] - w_start[0]}')
     
     def set_custom_windows(self, starts, ends):
         # check that given values are valid: same length, starts < ends, within alignment bounds
@@ -270,13 +271,14 @@ class Calibrator:
             raise Exception(f'Given starts and ends lengths do not match: {len(starts)} starts, {len(ends)} ends')
         invalid = raw_coords[:, 0] >= raw_coords[:, 1]
         if invalid.sum() > 0:
-            raise Exception(f'At least one pair of coordinates is invalid: {raw_coords[invalid]}')
+            raise Exception(f'At least one pair of coordinates is invalid: {[list(i) for i in raw_coords[invalid]]}')
         out_of_bounds = ((raw_coords < 0) | (raw_coords >= self.max_pos))
         out_of_bounds = out_of_bounds[:,0] | out_of_bounds[:,1]
         if out_of_bounds.sum() > 0:
-            raise Exception(f'At least one pair of coordinates is out of bounds: {raw_coords[out_of_bounds]}')
+            raise Exception(f'At least one pair of coordinates is out of bounds: {[list(i) for i in raw_coords[out_of_bounds]]}')
         self.windows = raw_coords
         self.w_type = 'custom'
+        logger.info(f'Set {raw_coords.shape[0]} custom windows at positions {[list(i) for i in raw_coords]} with lengths {[ln for ln in raw_coords[:,1] - raw_coords[:,0]]}')
         
     def set_windows(self, size=np.inf, step=np.inf, starts=0, ends=np.inf):
         # this function establishes the windows to be used in the grid search

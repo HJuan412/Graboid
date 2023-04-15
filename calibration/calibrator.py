@@ -325,6 +325,8 @@ class Calibrator:
                 # an exception means the selected window didn't pass some of the given thresholds
                 logger.error(f'Window {idx} ({win[0]} {win[1]}): ' + str(excp))
                 continue
+        t1 = time.time()
+        print(f'Collapsed windows in {t1 - t0:.3f} seconds')
 
     def grid_search_parallel(self,
                              row_thresh=0.2,
@@ -332,16 +334,18 @@ class Calibrator:
                              threads=1):
         print('Beginning calibration...')
         t0 = time.time()
-        def make_window(start, end, row_thresh, col_thresh):
-            try:
-                return wn.Window(self.matrix, start, end, row_thresh, col_thresh, self.tax_tab)
-            except Exception as excp:
-                # an exception means the selected window didn't pass some of the given thresholds
-                logger.info(f'Window ({start} {end}): ' + str(excp))
-                return None
-        # concurrent futures 
+        collapsed_windows = {}
         with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
-            self.collapsed_windows = executor.map(make_window, self.windows[:,0], self.windows[:,1], np.full(len(self.windows), row_thresh), np.full(len(self.windows), col_thresh))
+            future_windows = {executor.submit(wn.Window, self.matrix, win[0], win[1], row_thresh, col_thresh, self.tax_tab):idx for idx, win in enumerate(self.windows)}
+            for future in concurrent.futures.as_completed(future_windows):
+                ft_idx = future_windows[future]
+                try:
+                    collapsed_windows[ft_idx] = future.result()
+                except Exception as excp:
+                    logger.info(f'Window {ft_idx} {self.windows[ft_idx]}: ' + str(excp))
+                    continue
+        t1 = time.time()
+        print(f'Collapsed windows in {t1 - t0:.3f} seconds')
             
     def set_windows(self, size=np.inf, step=np.inf, starts=0, ends=np.inf):
         # this function establishes the windows to be used in the grid search

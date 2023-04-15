@@ -26,6 +26,22 @@ def get_taxid_tab(tax_file, mat_accs):
 
 # information quantification
 @nb.njit
+def entropy_nb(matrix):
+    # calculate entropy for a whole matrix
+    # null columns take an entropy value of + infinite to differentiate them from columns with a single valid value
+    entropy = np.full(matrix.shape[1], np.inf)
+    for idx, col in enumerate(matrix.T):
+        valid_rows = col[col != 0] # only count known values
+        values = np.unique(valid_rows)
+        counts = np.array([(valid_rows == val).sum() for val in values])
+        n_rows = counts.sum()
+        if n_rows > 0:
+            # only calculate entropy for non-null columns
+            freqs = counts / n_rows
+            entropy[idx] = -np.sum(np.log2(freqs) * freqs)
+    return entropy
+
+@nb.njit
 def get_entropy(array):
     valid_rows = array[array != 0]
     n_rows = len(valid_rows)

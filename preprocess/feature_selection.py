@@ -76,6 +76,20 @@ def get_sorted_sites(matrix, tax_table, return_general=False, return_entropy=Fal
         
     return result
 
+def get_nsites(sorted_sites, min_n, max_n, step_n):
+    # takes the resulting array from get_sorted_sites, returns a list with the (unique) n-1:n best sites for the range min_n:max_n with step_
+    
+    n_sites = np.arange(min_n, max_n, step_n)
+    
+    site_lists = []
+    all_sites = np.array([]) # store already included sites here, avoid repetition
+    for n in n_sites:
+        sites = np.unique(sorted_sites[:, :n])
+        sites = sites[~np.isin(sites, all_sites)]
+        site_lists.append(sites)
+        all_sites = np.concatenate((all_sites, sites))
+    return site_lists
+
 @nb.njit
 def get_entropy(array):
     valid_rows = array[array != 0]

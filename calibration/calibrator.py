@@ -229,21 +229,19 @@ class Calibrator:
         # use meta file from database to locate necessary files
         with open(self.db_dir + '/meta.json', 'r') as meta_handle:
             db_meta = json.load(meta_handle)
-        mat_file = db_meta['mat_file']
-        tax_file = db_meta['tax_file']
-        acc_file = db_meta['acc_file']
         self.guide_file = db_meta['guide_file'] # this isn't used in the calibration process, used in result visualization
-        expguide_file = db_meta['expguide_file']
+        self.tax_ext = pd.read_csv(db_meta['expguide_file'], index_col=0)
         
-        # load matrix and build extended taxonomy
-        map_npz = np.load(mat_file)
+        # load matrix & accession codes
+        map_npz = np.load(db_meta['mat_file'])
         self.matrix = map_npz['matrix']
         self.max_pos = self.matrix.shape[1]
-        with open(acc_file, 'r') as handle:
+        with open(db_meta['acc_file'], 'r') as handle:
             self.accs = handle.read().splitlines()
-        tax_tab = pd.read_csv(tax_file, index_col=0).loc[self.accs]
+        # build extended taxonomy
+        tax_tab = pd.read_csv(db_meta['tax_file'], index_col=0).loc[self.accs]
         # the tax_tab parameter is the extended taxonomy for each record
-        self.tax_tab = pd.read_csv(expguide_file, index_col=0).loc[tax_tab.TaxID.values]
+        self.tax_tab = self.tax_ext.loc[tax_tab.TaxID.values]
         self.tax_tab.index = tax_tab.index
         
     def set_database(self, database):
@@ -329,11 +327,17 @@ class Calibrator:
         print(f'Collapsed windows in {t1 - t0:.3f} seconds')
 
     def grid_search_parallel(self,
+                             max_n,
+                             step_n,
                              row_thresh=0.2,
                              col_thresh=0.2,
+                             rank='genus',
+                             min_n=5,
                              threads=1):
         print('Beginning calibration...')
         t0 = time.time()
+        # collapse windows
+        print('Collapsing windows...')
         collapsed_windows = {}
         with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
             future_windows = {executor.submit(wn.Window, self.matrix, win[0], win[1], row_thresh, col_thresh, self.tax_tab):idx for idx, win in enumerate(self.windows)}
@@ -341,11 +345,29 @@ class Calibrator:
                 ft_idx = future_windows[future]
                 try:
                     collapsed_windows[ft_idx] = future.result()
+                    logger.info(f'Window {ft_idx} {self.windows[ft_idx]}: collapsed into matrix of shape {future.result().window.shape}')
                 except Exception as excp:
                     logger.info(f'Window {ft_idx} {self.windows[ft_idx]}: ' + str(excp))
                     continue
         t1 = time.time()
         print(f'Collapsed windows in {t1 - t0:.3f} seconds')
+
+        # select sites
+        window_sites = {}
+        print('Selectiong informative_sites')
+        for idx, win in collapsed_windows.items():
+            win_tax = self.tax_ext.loc[win.taxonomy[[rank]]] # trick: if the taxonomy table passed to get_sorted_sites has a single rank column, entropy difference is calculated for said column
+            sorted_sites = fsele.get_sorted_sites(win.window, win_tax) # remember that you can use return_general, return_entropy and return_difference to get more information
+            window_sites[idx] = fsele.get_nsites(sorted_sites[0], min_n, max_n, step_n)
+            # get_sorted_sites returns by default a matrix with the sorted indexes for each taxon and a taxa array
+            # get the 
+        t1 = time.time()
+        print(f'Done in {t1 - t0:.3f} seconds!')
+        # calculate distances
+        # sort neighbours
+        # classify
+        # get metrics
+        # report
             
     def set_windows(self, size=np.inf, step=np.inf, starts=0, ends=np.inf):
         # this function establishes the windows to be used in the grid search

@@ -41,6 +41,41 @@ def entropy_nb(matrix):
             entropy[idx] = -np.sum(np.log2(freqs) * freqs)
     return entropy
 
+def get_sorted_sites(matrix, tax_table, return_general=False, return_entropy=False, return_difference=False):
+    # calculate entropy difference for every taxon present in matrix
+    # tax_table is an extended taxonomy dataframe for the records contained in matrix
+    # return ordered sites (by ascending entropy difference) for each taxon by default (first sites are the best)
+    # also returns a list of taxa for organization purposes
+    # if return_general is set to True, return the general entropy array
+    # if return_entropy is set to True, return the per taxon entropy array
+    # if return_difference is set to True, return the (unordered) entropy difference matrix
+    general_entropy = entropy_nb(matrix)
+    
+    tax_list = np.array([])
+    tax_entropy = []
+    
+    # get entropy per taxon
+    for rk, col in tax_table.T.iterrows():
+        taxa = col.dropna().unique()
+        tax_list = np.concatenate((tax_list, taxa))
+        for tax in taxa:
+            tax_submat = matrix[col == tax]
+            tax_entropy.append(entropy_nb(tax_submat))
+    tax_entropy = np.array(tax_entropy)
+    
+    ent_diff = tax_entropy - general_entropy
+    ent_diff_order = np.argsort(ent_diff, 1)
+    
+    result = (ent_diff_order, tax_list)
+    if return_general:
+        result += (general_entropy,)
+    if return_entropy:
+        result += (tax_entropy,)
+    if return_difference:
+        result += (ent_diff,)
+        
+    return result
+
 @nb.njit
 def get_entropy(array):
     valid_rows = array[array != 0]
@@ -49,6 +84,7 @@ def get_entropy(array):
     counts = np.array([(valid_rows == val).sum() for val in values])
     freqs = counts / n_rows
     return -np.sum(np.log2(freqs) * freqs, dtype=np.float32)
+
 
 def get_matrix_entropy(matrix):
     entropy = np.zeros(matrix.shape[1], dtype=np.float32)

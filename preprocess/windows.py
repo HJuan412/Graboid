@@ -50,7 +50,7 @@ def get_consensus_taxonomy(taxa):
 
 #%% classes
 class Window:
-    def __init__(self, matrix, start, end, row_thresh, col_thresh, tax_tab):
+    def __init__(self, matrix, tax_tab, start, end, row_thresh=0.1, col_thresh=0.1, min_seqs=50):
         # tax_tab should be the extended tax table for the matrix
         if start < 0 or end > matrix.shape[1]:
             raise Exception(f'Invalid window boundaries [{start} {end}] must be within [0 {matrix.shape[1]}]')
@@ -58,6 +58,7 @@ class Window:
             raise Exception(f'Invalid window boundaries start coordinate ({start}) must be lower than end coordinate ({end})')
         self.start = start
         self.end = end
+        self.min_seqs = min_seqs
         sub_matrix = matrix[:, self.start:self.end]
         logger.info(f'Initialized window of coordinates [{start} {end}], shape {sub_matrix.shape}')
         
@@ -90,6 +91,8 @@ class Window:
         self.window_idxs = [self.rows[br] for br in branch_idxs] # translate each branch's indexes to its original position in the alignment matrix
         repr_idx = [br[0] for br in self.window_idxs] # get a representative sequence for each branch
         
+        if len(self.window_idxs) < self.min_seqs:
+            raise Exception(f'Too few non-redundant sequences: {len(self.window_idxs)} (min = {self.min_seqs})')
         self.window = matrix[repr_idx][:, self.cols]
         
         # build consensus taxonomy

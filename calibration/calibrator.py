@@ -236,6 +236,150 @@ def get_sorted_neighs(sorted_idxs, sorted_dists):
         ordered_neighs[seq_neighs[1] != seq] = seq_neighs[1][seq_neighs[1] != seq]
         neighs.append(ordered_neighs)
     return np.array(neighs), np.array(dists)
+
+# classification
+def compress_dists(distance_array):
+    # for every (sorted) distance array, return unique values with counts (counts are used to group neighbours)
+    return [np.stack(np.unique(dists, return_counts=True)) for dists in distance_array]
+
+def wknn(distance_array):
+    d1 = distance_array[:, [0]]
+    dk = distance_array[:, [-1]]
+    return (dk - distance_array) / (dk - d1)
+
+def dwknn(distance_array, weighted):
+    d1 = distance_array[:, [0]]
+    dk = distance_array[:, [-1]]
+    penal = (dk + d1) / (dk + distance_array)
+    return weighted * penal
+
+class Neighbours:
+    def __init__(self, sorted_neighs, max_k):
+        self.max_k = max_k
+        # group neighbours by distance to query
+        compressed = compress_dists(sorted_neighs[1])
+        dist_pos = []
+        indexes = []
+        for neighs, comp in zip(sorted_neighs[0], compressed):
+            neigh_dist_pos = np.full((2,max_k), np.nan)
+            _k = min(len(comp[0]), max_k)
+            neigh_dist_pos[:, :_k] = comp[:, :_k]
+            dist_pos.append(neigh_dist_pos)
+            indexes.append(neighs[:np.nansum(neigh_dist_pos[1]).astype(int)])
+        dist_pos = np.array(dist_pos)
+        self.distances = dist_pos[:,0] # contains collapsed distances up to the max_k position
+        self.positions = dist_pos[:,1].astype(np.int16) # contains count of unique distance values (used to select indexes at a given orbit)
+        self.indexes = indexes # contains #sequences arrays (of varying lengths) with the indexes of the neighbours that populate the orbits up to the k_max position
+    
+    def get_weights(self, k_range):
+        self.k_range = k_range
+        # weight and double weight distances for multiple values of k
+        weighted = []
+        double_weighted = []
+        
+        for k in k_range:
+            k_weighted = wknn(self.distances[:,:k])
+            weighted.append(k_weighted)
+            double_weighted.append(dwknn(self.distances[:,:k], k_weighted))
+        # both weighted and double weighted are lists containing len(k_range) arrays of weights of increasing size (from min(k_range) to max(k_range) by step_k)
+        
+        # both weighted and double_weighted are lists of len(k_range) elements corresponding to the weighted distances for the different values of K
+        self.weighted = weighted
+        self.double_weighted = weighted
+
+# both classify functions return a list of #sequences elements containing #ranks tuples with an unweighted, weighted and double_weighted classification
+# tax_tab should be the window's extended taxonomy passed as a numpy array
+def orbit_classify(positions, indexes, weights, double_weights, tax_tab):
+    # get all neighbours in the first k orbits
+    k = weights.shape[1] # infer k from the number of calculated weights
+    k_pos = positions[:,:k] # get position locators
+    # get the weights for each orbit
+    orbit_arrays = [] # use this as base to get the corresponding weight/double_weight for each neighbour, depending on the orbit it occupies
+    for poss in k_pos:
+        orbit_arrays.append(np.concatenate([[idx]*pos for idx, pos in enumerate(poss)]))
+    weighted_arrays = [wghts[orbt] for wghts, orbt in zip(weights, orbit_arrays)]
+    double_weighted_arrays = [dwghts[orbt] for dwghts, orbt in zip(double_weights, orbit_arrays)]
+    # retrieve indexes of neighbours located within the k-th orbit
+    k_indexes = [idxs[:len(orbt)] for idxs, orbt in zip(indexes, orbit_arrays)]
+    
+    classifs = []
+    for idxs, w_arr, dw_arr in zip(k_indexes, weighted_arrays, double_weighted_arrays):
+        sub_tax = tax_tab[idxs]
+        rk_classifs = []
+        for rk in sub_tax.T:
+            taxa, counts = np.unique(rk, return_counts=True)
+            tax_locs = [rk == tax for tax in taxa]
+            # unweighted classify, majority_vote
+            u_classif = taxa[np.argmax(counts)]
+            # weighted classify
+            tax_supp_weighted = [w_arr[tax].sum() for tax in tax_locs]
+            w_classif = taxa[np.argmax(tax_supp_weighted)]
+            # double weighted classify
+            tax_supp_double_weighted = [dw_arr[tax].sum() for tax in tax_locs]
+            d_classif = taxa[np.argmax(tax_supp_double_weighted)]
+            rk_classifs.append((u_classif, w_classif, d_classif))
+        classifs.append(rk_classifs)
+    return classifs
+
+def neigh_classify(positions, indexes, weights, double_weights, tax_tab):
+    # get orbits containing the k-th neighbour
+    k = weights.shape[1] # infer k from the number of calculated weights
+    selected_orbits = np.argmax(np.cumsum(positions, axis=1) >= k, axis=1) + 1
+    selected_positions = [pos[:orbt] for pos, orbt in zip(positions, selected_orbits)]
+    orbit_arrays = [] # use this as base to get the corresponding weight/double_weight for each neighbour, depending on the orbit it occupies
+    for poss in selected_positions:
+        orbit_arrays.append(np.concatenate([[idx]*pos for idx, pos in enumerate(poss)]))
+    weighted_arrays = [wghts[orbt] for wghts, orbt in zip(weights, orbit_arrays)]
+    double_weighted_arrays = [dwghts[orbt] for dwghts, orbt in zip(double_weights, orbit_arrays)]
+    # retrieve indexes of neighbours located within the k-th orbit
+    k_indexes = [idxs[:len(orbt)] for idxs, orbt in zip(indexes, orbit_arrays)]
+    
+    classifs = []
+    for idxs, w_arr, dw_arr in zip(k_indexes, weighted_arrays, double_weighted_arrays):
+        sub_tax = tax_tab[idxs]
+        rk_classifs = []
+        for rk in sub_tax.T:
+            taxa, counts = np.unique(rk, return_counts=True)
+            tax_locs = [rk == tax for tax in taxa]
+            # unweighted classify, majority_vote
+            u_classif = taxa[np.argmax(counts)]
+            # weighted classify
+            tax_supp_weighted = [w_arr[tax].sum() for tax in tax_locs]
+            w_classif = taxa[np.argmax(tax_supp_weighted)]
+            # double weighted classify
+            tax_supp_double_weighted = [dw_arr[tax].sum() for tax in tax_locs]
+            d_classif = taxa[np.argmax(tax_supp_double_weighted)]
+            rk_classifs.append((u_classif, w_classif, d_classif))
+        classifs.append(rk_classifs)
+    return classifs
+
+def generate_classifications(sorted_neighbours, k_max, k_step, k_min, tax_tab, threads=3, criterion='orbit'):
+    # criterion: orbit or neighbours
+    # if orbit: get first k orbits, select all sequences from said orbits
+    # if neighbours: set cutoff at the orbit that includes the first k neighs
+    
+    k_range = np.arange(k_min, k_max, k_step)
+    # get max neighbours per level
+    lvl_neighbours = [Neighbours(sorted_neigh, k_max) for sorted_neigh in sorted_neighbours]
+    for lvl in lvl_neighbours:
+        lvl.get_weights(k_range)
+    
+    grid_indexes = [(n_idx, k_idx) for n_idx in np.arange(len(lvl_neighbours)) for k_idx in np.arange(len(k_range))]
+    classifs = {}
+    with concurrent.futures.ProcessPoolExecutor(max_workers = threads) as executor:
+        future_classifs = {executor.submit(orbit_classify,
+                                           lvl_neighbours[n_idx].positions,
+                                           lvl_neighbours[n_idx].indexes,
+                                           lvl_neighbours[n_idx].weighted[k_idx],
+                                           lvl_neighbours[n_idx].double_weighted[k_idx],
+                                           tax_tab): (n_idx, k_idx) for n_idx, k_idx in grid_indexes}
+        for future in concurrent.futures.as_completed(future_classifs):
+            cell = future_classifs[future]
+            classifs[cell] = future.result()
+            print(f'Done with cell {cell}')
+    
+    # return dictionary of the form (n_index, k_index):classifications
+    return classifs
 #%% classes
 class Calibrator:
     def __init__(self, out_dir, warn_dir, prefix='calibration'):

@@ -363,37 +363,18 @@ class Calibrator:
                              cost_mat,
                              row_thresh=0.2,
                              col_thresh=0.2,
+                             min_seqs=50,
                              rank='genus',
                              min_n=5,
                              threads=1):
-        # TODO: Add min window seq threshold to control the minimum sequences during sequence collapsing
         print('Beginning calibration...')
         t0 = time.time()
+        
         # collapse windows
         print('Collapsing windows...')
-        # TODO: keep trying with map, maybe
-        # collapsed_windows = []
-        # win_idxs = []
-        # with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
-        #     future_windows = executor.map(wn.Window,
-        #                                   [self.matrix]*len(self.windows),
-        #                                   [self.tax_tab]*len(self.windows),
-        #                                   self.windows[:,0],
-        #                                   self.windows[:,1],
-        #                                   [row_thresh]*len(self.windows),
-        #                                   [col_thresh]*len(self.windows))
-        #     for win_idx, future_window in enumerate(future_windows):
-        #         try:
-        #             collapsed_windows.append(future_window.result())
-        #             win_idxs.append(win_idx)
-        #             logger.info(f'Window {win_idx} {self.windows[win_idx]}: collapsed into matrix of shape {future_window.result().window.shape}')
-        #         except Exception as excp:
-        #             logger.info(f'Window {win_idx} {self.windows[win_idx]}: ' + str(excp))
-        #             continue
-        
         collapsed_windows = {}
         with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
-            future_windows = {executor.submit(wn.Window, self.matrix, self.tax_tab, win[0], win[1], row_thresh, col_thresh):idx for idx, win in enumerate(self.windows)}
+            future_windows = {executor.submit(wn.Window, self.matrix, self.tax_tab, win[0], win[1], row_thresh, col_thresh, min_seqs):idx for idx, win in enumerate(self.windows)}
             for future in concurrent.futures.as_completed(future_windows):
                 ft_idx = future_windows[future]
                 try:
@@ -435,6 +416,12 @@ class Calibrator:
             sorted_dists = [dists for dists in executor.map(np.argsort, [win_d[0] for win_d in all_win_dists], [1]*len(win_list))] # win_d[0] contains the distances array, win_d[1] contains the paired indexes (used later)
 
         sorted_win_neighbours = []
+        # sorted_win_neighbours is structured as:
+            # window 0:
+                # level 0:
+                    # sorted neighbour idxs
+                    # sorted neighbour dists
+                    # both these arrays have shape n_rows * n_rows - 1, as each row has n_rows - 1 neighbours                    
         for idx, (win_dists, sorted_win_dists) in enumerate(zip(all_win_dists, sorted_dists)):
             sorted_idxs = [win_dists[1][:, lvl] for lvl in sorted_win_dists]
             sorted_distances = [dsts[lvl] for dsts, lvl in zip(win_dists[0], sorted_win_dists)]
@@ -443,8 +430,11 @@ class Calibrator:
                 sorted_win_neighbours.append([ordered for ordered in executor.map(get_sorted_neighs, sorted_idxs, sorted_distances)])
         t4 = time.time()
         print(f'Done in {t4 - t3:.3f} seconds')
-        return sorted_win_neighbours
+        return sorted_win_neighbours, win_list
+        
         # classify
+        print('Classifying...')
+        
         # get metrics
         # report
             

@@ -254,21 +254,40 @@ def dwknn(distance_array, weighted):
     return weighted * penal
 
 class Neighbours:
+    # this class is used to contain and handle the data after distance collapsing
     def __init__(self, sorted_neighs, max_k):
         self.max_k = max_k
         # group neighbours by distance to query
         compressed = compress_dists(sorted_neighs[1])
-        dist_pos = []
+        # TODO: delete this block
+        # dist_pos = []
+        # indexes = []
+        # for neighs, comp in zip(sorted_neighs[0], compressed):
+        #     neigh_dist_pos = np.full((2,max_k), np.nan)
+        #     _k = min(len(comp[0]), max_k)
+        #     neigh_dist_pos[:, :_k] = comp[:, :_k]
+        #     dist_pos.append(neigh_dist_pos)
+        #     indexes.append(neighs[:np.nansum(neigh_dist_pos[1]).astype(int)])
+        # dist_pos = np.array(dist_pos)
+        # self.distances = dist_pos[:,0] # contains collapsed distances up to the max_k position
+        # self.distances[:,-1] = np.nanmax(self.distances, 1)
+        # self.positions = dist_pos[:,1].astype(np.int16) # contains count of unique distance values (used to select indexes at a given orbit)
+        # self.indexes = indexes # contains #sequences arrays (of varying lengths) with the indexes of the neighbours that populate the orbits up to the k_max position
+        #####
+        distances = []
+        positions = []
         indexes = []
         for neighs, comp in zip(sorted_neighs[0], compressed):
-            neigh_dist_pos = np.full((2,max_k), np.nan)
+            neigh_dists = np.full(max_k, max(comp[0]))
+            neigh_poss = np.full(max_k, 0, dtype=np.int16)
             _k = min(len(comp[0]), max_k)
-            neigh_dist_pos[:, :_k] = comp[:, :_k]
-            dist_pos.append(neigh_dist_pos)
-            indexes.append(neighs[:np.nansum(neigh_dist_pos[1]).astype(int)])
-        dist_pos = np.array(dist_pos)
-        self.distances = dist_pos[:,0] # contains collapsed distances up to the max_k position
-        self.positions = dist_pos[:,1].astype(np.int16) # contains count of unique distance values (used to select indexes at a given orbit)
+            neigh_dists[:_k] = comp[0, :_k]
+            neigh_poss[:_k] = comp[1, :_k]
+            distances.append(neigh_dists)
+            positions.append(neigh_poss)
+            indexes.append(neighs[:neigh_poss.sum()].astype(int))
+        self.distances = np.array(distances) # contains collapsed distances up to the max_k position
+        self.positions = np.array(positions) # contains count of unique distance values (used to select indexes at a given orbit)
         self.indexes = indexes # contains #sequences arrays (of varying lengths) with the indexes of the neighbours that populate the orbits up to the k_max position
     
     def get_weights(self, k_range):
@@ -296,34 +315,60 @@ def orbit_classify(positions, indexes, weights, double_weights, tax_tab):
     # get the weights for each orbit
     orbit_arrays = [] # use this as base to get the corresponding weight/double_weight for each neighbour, depending on the orbit it occupies
     for poss in k_pos:
-        orbit_arrays.append(np.concatenate([[idx]*pos for idx, pos in enumerate(poss)]))
+        orbit_arrays.append(np.concatenate([[idx]*pos for idx, pos in enumerate(poss)]).astype(int))
     weighted_arrays = [wghts[orbt] for wghts, orbt in zip(weights, orbit_arrays)]
     double_weighted_arrays = [dwghts[orbt] for dwghts, orbt in zip(double_weights, orbit_arrays)]
     # retrieve indexes of neighbours located within the k-th orbit
     k_indexes = [idxs[:len(orbt)] for idxs, orbt in zip(indexes, orbit_arrays)]
     
     classifs = []
+    # generate a classification for each sequence
     for idxs, w_arr, dw_arr in zip(k_indexes, weighted_arrays, double_weighted_arrays):
-        sub_tax = tax_tab[idxs]
+        sub_tax = tax_tab[idxs] # retrieve neighbour indexes
         rk_classifs = []
+        # classify for each rank
         for rk in sub_tax.T:
+            # count unique taxa in rank, filter out unknown taxa
             taxa, counts = np.unique(rk, return_counts=True)
+            counts = counts[~np.isnan(taxa)]
+            taxa = taxa[~np.isnan(taxa)]
+            if len(taxa) == 0:
+                # no valid taxa in rank, assign as unknown and continue
+                rk_classifs.append(np.array([-1,-1,-1]))
+                continue
+            # get the locations of each member for each taxa (use it to retrieve a taxon's weights)
             tax_locs = [rk == tax for tax in taxa]
+            
+            # for all classifs: if the _classif array has multiple elements, there is a conflict, replace it for [-1] to indicat an unknown
+            
             # unweighted classify, majority_vote
-            u_classif = taxa[np.argmax(counts)]
+            u_classif = taxa[counts == max(counts)]
+            if len(u_classif) > 1:
+                u_classif = [-1]
+            
+            # for weighted and double_weighted classification:
+                # get the cummulative weights for all taxa
+                # select taxon with the highest weight
+            
             # weighted classify
-            tax_supp_weighted = [w_arr[tax].sum() for tax in tax_locs]
-            w_classif = taxa[np.argmax(tax_supp_weighted)]
+            tax_supp_weighted = np.array([w_arr[tax].sum() for tax in tax_locs])
+            w_classif = taxa[tax_supp_weighted == max(tax_supp_weighted)]
+            if len(w_classif) > 1:
+                w_classif = [-1]
+            
             # double weighted classify
             tax_supp_double_weighted = [dw_arr[tax].sum() for tax in tax_locs]
-            d_classif = taxa[np.argmax(tax_supp_double_weighted)]
-            rk_classifs.append((u_classif, w_classif, d_classif))
-        classifs.append(rk_classifs)
-    return classifs
+            d_classif = taxa[tax_supp_double_weighted == max(tax_supp_double_weighted)]
+            if len(d_classif) > 1:
+                d_classif = [-1]
+            
+            rk_classifs.append(np.array([u_classif[0], w_classif[0], d_classif[0]]))
+        classifs.append(np.array(rk_classifs))
+    return np.array(classifs, dtype=int)
 
 def neigh_classify(positions, indexes, weights, double_weights, tax_tab):
-    # get orbits containing the k-th neighbour
     k = weights.shape[1] # infer k from the number of calculated weights
+    # for each sequence, get the orbit containing the k-th neighbour
     selected_orbits = np.argmax(np.cumsum(positions, axis=1) >= k, axis=1) + 1
     selected_positions = [pos[:orbt] for pos, orbt in zip(positions, selected_orbits)]
     orbit_arrays = [] # use this as base to get the corresponding weight/double_weight for each neighbour, depending on the orbit it occupies
@@ -335,25 +380,51 @@ def neigh_classify(positions, indexes, weights, double_weights, tax_tab):
     k_indexes = [idxs[:len(orbt)] for idxs, orbt in zip(indexes, orbit_arrays)]
     
     classifs = []
+    # generate a classification for each sequence
     for idxs, w_arr, dw_arr in zip(k_indexes, weighted_arrays, double_weighted_arrays):
-        sub_tax = tax_tab[idxs]
+        sub_tax = tax_tab[idxs] # retrieve neighbour indexes
         rk_classifs = []
+        # classify for each rank
         for rk in sub_tax.T:
+            # count unique taxa in rank, filter out unknown taxa
             taxa, counts = np.unique(rk, return_counts=True)
+            counts = counts[~np.isnan(taxa)]
+            taxa = taxa[~np.isnan(taxa)]
+            if len(taxa) == 0:
+                # no valid taxa in rank, assign as unknown and continue
+                rk_classifs.append(np.array([-1,-1,-1]))
+                continue
+            # get the locations of each member for each taxa (use it to retrieve a taxon's weights)
             tax_locs = [rk == tax for tax in taxa]
+            
+            # for all classifs: if the _classif array has multiple elements, there is a conflict, replace it for [-1] to indicat an unknown
+            
             # unweighted classify, majority_vote
-            u_classif = taxa[np.argmax(counts)]
+            u_classif = taxa[counts == max(counts)]
+            if len(u_classif) > 1:
+                u_classif = [-1]
+            
+            # for weighted and double_weighted classification:
+                # get the cummulative weights for all taxa
+                # select taxon with the highest weight
+            
             # weighted classify
-            tax_supp_weighted = [w_arr[tax].sum() for tax in tax_locs]
-            w_classif = taxa[np.argmax(tax_supp_weighted)]
+            tax_supp_weighted = np.array([w_arr[tax].sum() for tax in tax_locs])
+            w_classif = taxa[tax_supp_weighted == max(tax_supp_weighted)]
+            if len(w_classif) > 1:
+                w_classif = [-1]
+            
             # double weighted classify
             tax_supp_double_weighted = [dw_arr[tax].sum() for tax in tax_locs]
-            d_classif = taxa[np.argmax(tax_supp_double_weighted)]
-            rk_classifs.append((u_classif, w_classif, d_classif))
-        classifs.append(rk_classifs)
-    return classifs
+            d_classif = taxa[tax_supp_double_weighted == max(tax_supp_double_weighted)]
+            if len(d_classif) > 1:
+                d_classif = [-1]
+            
+            rk_classifs.append(np.array([u_classif[0], w_classif[0], d_classif[0]]))
+        classifs.append(np.array(rk_classifs))
+    return np.array(classifs, dtype=int)
 
-def generate_classifications(sorted_neighbours, k_max, k_step, k_min, tax_tab, threads=3, criterion='orbit'):
+def generate_classifications(sorted_neighbours, k_max, k_step, k_min, tax_tab, threads, criterion='orbit'):
     # criterion: orbit or neighbours
     # if orbit: get first k orbits, select all sequences from said orbits
     # if neighbours: set cutoff at the orbit that includes the first k neighs
@@ -366,8 +437,14 @@ def generate_classifications(sorted_neighbours, k_max, k_step, k_min, tax_tab, t
     
     grid_indexes = [(n_idx, k_idx) for n_idx in np.arange(len(lvl_neighbours)) for k_idx in np.arange(len(k_range))]
     classifs = {}
+    if criterion == 'orbit':
+        classif_func = orbit_classify
+    elif criterion == 'neigh':
+        classif_func = neigh_classify
+    else:
+        raise Exception(f'Invalid criterion value: {criterion}, must be "orbit" or "neigh"')
     with concurrent.futures.ProcessPoolExecutor(max_workers = threads) as executor:
-        future_classifs = {executor.submit(orbit_classify,
+        future_classifs = {executor.submit(classif_func,
                                            lvl_neighbours[n_idx].positions,
                                            lvl_neighbours[n_idx].indexes,
                                            lvl_neighbours[n_idx].weighted[k_idx],
@@ -502,15 +579,19 @@ class Calibrator:
         logger.info(f'Set {raw_coords.shape[0]} custom windows at positions {[list(i) for i in raw_coords]} with lengths {[ln for ln in raw_coords[:,1] - raw_coords[:,0]]}')
     
     def grid_search0(self,
-                             max_n,
-                             step_n,
-                             cost_mat,
-                             row_thresh=0.2,
-                             col_thresh=0.2,
-                             min_seqs=50,
-                             rank='genus',
-                             min_n=5,
-                             threads=1):
+                     max_n,
+                     step_n,
+                     max_k,
+                     step_k,
+                     cost_mat,
+                     row_thresh=0.2,
+                     col_thresh=0.2,
+                     min_seqs=50,
+                     rank='genus',
+                     min_n=5,
+                     min_k=3,
+                     criterion='orbit',
+                     threads=1):
         print('Beginning calibration...')
         t0 = time.time()
         
@@ -574,11 +655,20 @@ class Calibrator:
                 sorted_win_neighbours.append([ordered for ordered in executor.map(get_sorted_neighs, sorted_idxs, sorted_distances)])
         t4 = time.time()
         print(f'Done in {t4 - t3:.3f} seconds')
-        return sorted_win_neighbours, win_list
-        
+        # return sorted_win_neighbours, win_list
         # classify
         print('Classifying...')
-        
+        win_classifs = []
+        for idx, (sorted_neighs, window) in enumerate(zip(sorted_win_neighbours, win_list)):
+            t_classif0 = time.time()
+            window_tax = self.tax_ext.loc[window.taxonomy].to_numpy()
+            win_classifs.append(generate_classifications(sorted_neighs, max_k, step_k, min_k, window_tax, threads = threads, criterion = criterion))
+            t_classif1 = time.time()
+            logger.debug(f'Classified {idx + 1} of {len(win_list)} in {t_classif1 - t_classif0:.3f} seconds')
+        t5 = time.time()
+        print(f'Done in {t5 - t4:.3f} seconds')
+        return win_classifs, win_list
+    
         # get metrics
         # report
             

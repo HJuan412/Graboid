@@ -436,7 +436,7 @@ def generate_classifications(sorted_neighbours, k_max, k_step, k_min, tax_tab, t
         lvl.get_weights(k_range)
     
     grid_indexes = [(n_idx, k_idx) for n_idx in np.arange(len(lvl_neighbours)) for k_idx in np.arange(len(k_range))]
-    classifs = {}
+    classifs = {nk:None for nk in grid_indexes}
     if criterion == 'orbit':
         classif_func = orbit_classify
     elif criterion == 'neigh':
@@ -457,6 +457,99 @@ def generate_classifications(sorted_neighbours, k_max, k_step, k_min, tax_tab, t
     
     # return dictionary of the form (n_index, k_index):classifications
     return classifs
+
+# metrics calculation
+def get_metricas(win_classif, window_tax):
+    # calcualtes the metrics for every parameter combination and taxonomic rank in win_classif
+    
+    # retrieve the (n_sites-k, neighbours) pairs used as keys in win_classif
+    nk_pairs = list(win_classif.keys())
+    # one 3d-array per taxonomic rank: (taxon, method, n-k)
+    
+    # reorganize: make #ranks 3d arrays of shape (n-k, seq_classif, methods(3))
+    rank_mats = []
+    for rk in np.arange(window_tax.shape[1]):
+        rk_mat = []
+        for nk in nk_pairs:
+            rk_mat.append(win_classif[nk][:,rk,:])
+        rank_mats.append(np.array(rk_mat))
+    
+    # calculate the metrics for all the ranks
+    # return a tuple of (accuracies, precisions, recalls and f1 scores arrays for each taxonomic rank)
+    # each metrics array has shape (n-k, rank_taxa, methods(3))
+    return calculate_metrics(rank_mats, window_tax)
+
+def calculate_metrics(rank_mats, tax_tab):
+    rk_accs = []
+    rk_prcs = []
+    rk_recs = []
+    rk_f1s = []
+    
+    # for every rank, calculate metrics using the true (rk) and predicted (rk_mat) arrays
+    for rk, rk_mat in zip(tax_tab.T, rank_mats):
+        # get unique taxa in the current rank
+        rk_taxa = np.unique(rk)
+        rk_taxa = rk_taxa[~np.isnan(rk_taxa)]
+        
+        acc = []
+        prc = []
+        rec = []
+        f1 = []
+        
+        # calculate metrics for each taxon, for each parameter combination
+        for tax_idx, tax in enumerate(rk_taxa):
+            # get locations of taxon in the true and predicted arrays
+            
+            tax_loc = rk == tax
+            # tax_loc is originally an array of shape (#seqs,) in order to use it in logical comparisons with tax_classif_loc (n-k, seq_classif, methods(3)) we need to transform tax_loc in the following line
+            tax_loc_cube = np.array([np.tile(tax_loc, (rk_mat.shape[2],1)).T]*rk_mat.shape[0])
+            # np.tile repeats tax_loc n_methods times, resulting in a 2d array of shape (n_methods, n_seqs)
+            # external np.array of [np.tile.T]*rk_mat.shape[0] transposes internal array and repeats it for the number of n-k combinations
+            # generated array has shape (n-k, n_seqs, n_methods)
+            
+            tax_classif_loc = rk_mat == tax
+            
+            # get metrics, true positives and negatives calculated by comparing the location arrays
+            tp = (tax_loc_cube & tax_classif_loc).sum(1)
+            tn = (~tax_loc_cube & ~tax_classif_loc).sum(1)
+            fp = []
+            fn = []
+            
+            # iterate over the first dimension (n-k pairs) of the rk_mat locations
+            tax_loc_sample = tax_loc_cube[0].T # take the first layer of tax_loc (all are the same) and transpose it, will use it to get false positives and false negatives
+            for nk_tax_classif_loc in tax_classif_loc:
+                # calculate false positives and degatives for each column (method) in nk_tax_classif_loc
+                # this must be done sepparately because sub arrays for each method may have different lengths
+                fp.append(np.array([(~tl_samp[nk_tc_loc]).sum() for tl_samp, nk_tc_loc in zip(tax_loc_sample, nk_tax_classif_loc.T)]))
+                fn.append(np.array([(~nk_tc_loc[tl_samp]).sum() for tl_samp, nk_tc_loc in zip(tax_loc_sample, nk_tax_classif_loc.T)]))
+            fp = np.array(fp)
+            fn = np.array(fn)
+            
+            
+            # calculate metrics (accuracy, precision, recall and F1)
+            tax_acc = (tp + tn) / (tp + tn + fp + fn)
+            pred_pos = tp + fp # predicted positives
+            all_pos = tp + fn # total positives
+            # values of 0 would generate a division by 0 error, replace for -1
+            pred_pos[pred_pos == 0] = -1
+            all_pos[all_pos == 0] = -1
+            # clip ensures negative values are set to 0
+            tax_prc = np.clip(tp / (pred_pos), 0, 1)
+            tax_rec = np.clip(tp / (all_pos), 0, 1)
+            pr = tax_prc + tax_rec # precision * recall
+            # again, values of 0 would generate an error, set to -1 and clip division
+            pr[pr == 0] = -1
+            tax_f1 = np.clip((2 * tax_prc * tax_rec)/pr, 0, 1)
+            
+            acc.append(tax_acc)
+            prc.append(tax_prc)
+            rec.append(tax_rec)
+            f1.append(tax_f1)
+        rk_accs.append(np.array(acc))
+        rk_prcs.append(np.array(prc))
+        rk_recs.append(np.array(rec))
+        rk_f1s.append(np.array(f1))
+    return rk_accs, rk_prcs, rk_recs, rk_f1s
 #%% classes
 class Calibrator:
     def __init__(self, out_dir, warn_dir, prefix='calibration'):
@@ -655,7 +748,7 @@ class Calibrator:
                 sorted_win_neighbours.append([ordered for ordered in executor.map(get_sorted_neighs, sorted_idxs, sorted_distances)])
         t4 = time.time()
         print(f'Done in {t4 - t3:.3f} seconds')
-        # return sorted_win_neighbours, win_list
+        
         # classify
         print('Classifying...')
         win_classifs = []
@@ -667,9 +760,16 @@ class Calibrator:
             logger.debug(f'Classified {idx + 1} of {len(win_list)} in {t_classif1 - t_classif0:.3f} seconds')
         t5 = time.time()
         print(f'Done in {t5 - t4:.3f} seconds')
-        return win_classifs, win_list
-    
+        
         # get metrics
+        print('Calculating metrics...')
+        window_taxes = [self.tax_ext.loc[win.taxonomy].to_numpy() for win in win_list]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=3) as executor:
+            future_metrics = [future for future in executor.map(get_metricas, win_classifs, window_taxes)]
+        t6 = time.time()
+        print(f'Done in {t6 - t5:.3f} seconds')
+        return future_metrics, win_list
+        
         # report
             
     def set_windows(self, size=np.inf, step=np.inf, starts=0, ends=np.inf):

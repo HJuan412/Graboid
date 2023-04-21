@@ -594,6 +594,29 @@ def build_prereport(metrics, report_by, tax_tab):
             report_tab.loc[indexes, win] = best_metrics
             rank_params[rk][np.isin(rank_taxa[rk], win_taxa), win] = best_params
     return report_tab, rank_params
+
+def translate_params(params, n_range, k_range, methods='uwd'):
+    # generate a tuple with the winning parameter combination (n, k, method) for each window/taxon pair
+    # for each rank, generate a 2d array of shape(rk_taxa, n_windows)
+    param_datum = [np.full((rk.shape[0], rk.shape[1]), np.nan, object) for rk in params]
+    
+    grid_indexes = [(n_idx, k_idx) for n_idx in np.arange(len(n_range)) for k_idx in np.arange(len(k_range))]
+    for rk_idx, rk in enumerate(params):
+        # each parameter array in params has two layers, the first one contains the index of the (n/k) pair, the second layer contains the index for the classification method
+        nk_plane = rk[..., 0]
+        meth_plane = rk[..., 1]
+        # get the location of every valid (non -1) cell
+        positions = np.argwhere(nk_plane >= 0)
+        for pos0, pos1 in positions:
+            # retrieve the parameter combinations for each cell
+            nk_idx = nk_plane[pos0, pos1]
+            meth_idx = meth_plane[pos0, pos1]
+            n = n_range[grid_indexes[nk_idx][0]]
+            k = k_range[grid_indexes[nk_idx][1]]
+            m = methods[meth_idx]
+            # update the corresponding cell
+            param_datum[rk_idx][pos0, pos1] = (n,k,m)
+    return param_datum
 #%% classes
 class Calibrator:
     def __init__(self, out_dir, warn_dir, prefix='calibration'):
@@ -823,6 +846,10 @@ class Calibrator:
         pre_report.columns = [f'W{w_idx} [{win.start} - {win.end}]' for w_idx, win in zip(win_indexes, win_list)]
         index_datum = self.guide.loc[pre_report.index.get_level_values(1)]
         pre_report.index = pd.MultiIndex.from_arrays([index_datum.Rank, index_datum.SciName])
+        
+        n_range = np.arange(min_n, max_n, step_n)
+        k_range = np.arange(min_k, max_k, step_k)
+        params = translate_params(params, n_range, k_range)
         t7 = time.time()
         print(f'Done in {t7 - t6:.3f} seconds')
         print(f'Finished in {t7 - t0:.3f} seconds')

@@ -8,13 +8,17 @@ This script retrieves windows from a given data matrix and calculates entropy & 
 """
 
 #%% libraries
-from classification import cost_matrix
-
 import logging
 import numba as nb
 import numpy as np
 import pandas as pd
 import time
+
+from preprocess import sequence_collapse as sq
+
+#%%
+logger = logging.getLogger('Graboid.preprocess.windows')
+logger.setLevel(logging.INFO)
 #%%
 # filter matrix
 def filter_matrix(matrix, thresh = 1, axis = 0):
@@ -28,196 +32,78 @@ def filter_matrix(matrix, thresh = 1, axis = 0):
         
     return filtered.flatten()
 
-#%% Old collapsing functions
-# TODO: delete this entire cell once the new one is tested
-# collapse unique rows
-def build_cons_tax(subtab):
-    # recieves a taxonomc subtable of all the integrants of a sequence cluster
-    # TODO: NOTE: curent confilciting values are left as 0
-    cols = subtab.columns[1:] # drop accession column
-    cons_tax = pd.Series(index=cols, dtype = int)
-    for idx, rk in enumerate(cols):
-        uniq_vals = subtab[rk].unique()
-        if len(uniq_vals) == 1:
-            # if there are no conflicting taxonomies at the given rank (rk), assign it as the consensus taxon
-            # set the lower values as the current unconflicting taxon
-            cons_tax.iloc[idx:] = uniq_vals[0]
-    return cons_tax
-
-# new function to get effective seqs better, stronger faster
-ID_MAT = cost_matrix.id_matrix()
-ID_MAT[-1]=0
-ID_MAT[:,-1]=0
-@nb.njit
-def get_ident(seq0, seq1):
-    # similar to the calc_distance function but interrupts itself at the first difference
-    for site0, site1 in zip(seq0, seq1):
-        if ID_MAT[site0, site1] > 0:
-            return False
-    return True
-
-#
-SH_MAT = np.zeros((17,17), dtype = int)
-SH_MAT[-1,:-1] = -1
-SH_MAT[:-1,-1] = 1
-# build roadmap
-def build_roadmap(matrix):
-    # build a map of the positions of each value in each column of the matrix
-    roadmap = []
-    for col in matrix.T:
-        col_vals = {val:[] for val in np.unique(col)}
-        for idx, val in enumerate(col):
-            col_vals[val].append(idx)
-        col_vals = {k:set(v) for k,v in col_vals.items()}
-        roadmap.append(col_vals)
-    return roadmap
-
-# build nodes
-# should start with idxs as set(np.arange(matrix.shape[0]))
-def build_nodes(seq=[], idxs=set(), roadmap=[]):
-    if len(roadmap) == 0:
-        return [seq], [idxs]
-    total_seqs = []
-    total_idxs = []
-    col_vals = roadmap[0]
-    for val, val_idxs in col_vals.items():
-        overlap = idxs.intersection(val_idxs) # if set is empty there is no overlap
-        if len(overlap) == 0:
+def get_consensus_taxonomy(taxa):
+    # return the consensus taxon at the highest possible level
+    last_consensus = None
+    for lvl in taxa.T:
+        lvl_tax = np.unique(lvl)
+        lvl_tax = lvl_tax[~np.isnan(lvl_tax)]
+        if len(lvl_tax) == 0:
+            # none of the sequences have a known tax for this level
             continue
-        new_seq = seq + [val]
-        branch_seqs, branch_idxs = build_nodes(new_seq, overlap, roadmap[1:])
-        total_seqs += branch_seqs
-        total_idxs += branch_idxs
-    return total_seqs, total_idxs
+        if len(lvl_tax) > 1:
+            # multiple taxa found at this level, conflict
+            return last_consensus
+        # there is consensus at the current level
+        last_consensus = lvl_tax[0]
+    return last_consensus
 
-def collapse_0(matrix):
-    # collapse identical sequences and keep their indexes
-    roadmap = build_roadmap(matrix)
-    init_idxs = set(np.arange(matrix.shape[0]))
-    effective_seqs, effective_idxs = build_nodes(idxs=init_idxs, roadmap=roadmap)
-    effs = np.array(effective_seqs)
-    effi = [list(ei) for ei in effective_idxs]
-    return effs, effi
-
-def get_ident_matrix(eff_seqs):
-    # build a matrix with the pairwise identity between the effective sequences
-    # 1 : sequences have the same identity
-    # 0 : sequences differ in at least one effective site
-    ident_mat = np.zeros((eff_seqs.shape[0], eff_seqs.shape[0]))
-    for idx0, seq0 in enumerate(eff_seqs):
-        for idx1, seq1 in enumerate(eff_seqs[idx0+1:]):
-            ident_mat[idx0, idx1+idx0+1] = get_ident(seq0, seq1)
-    return ident_mat
-
-def get_shscore(seq0, seq1):
-    # get the shared score between sequences with the same identity, keep the one with less missing data
-    # if shscore > 0 : seq0 is more complete than seq1
-    # if shscore < 0 : seq1 is more complete than seq0
-    # if shscore = 0 : seq1 and seq0 are equally complete but missing different sites
-    score = 0
-    for s0, s1 in zip(seq0, seq1):
-        score += SH_MAT[s0, s1]
-    # returns the index of the most incomplete sequence
-    # TODO: what happens if there is a draw?
-    return int(score > 0)
-
-def compare_ident(ident, matrix):
-    # score the pairs of sequences with identity, keep the most complete one in each case
-    pairs = np.argwhere(ident == 1)
-    scores = np.zeros(pairs.shape[0], dtype = int)
-    for idx, pair in enumerate(pairs):
-        seq0 = matrix[pair[0]]
-        seq1 = matrix[pair[1]]
-        scores[idx] = get_shscore(seq0, seq1)
-    return pairs, scores
-
-def get_winners(nseqs, pairs, scores):
-    # return the indexes of the winners (sequences to keep)
-    # losers (sequences to drop) are repeated sequences with more missing data
-    winners = np.arange(nseqs, dtype = int)
-    losers = np.zeros(len(pairs), dtype = int)
-    for idx, (pair, sc) in enumerate(zip(pairs, scores)):
-        losers[idx] = pair[sc]
-    losers = np.unique(losers)
-    winners = np.delete(winners, losers)
-    return winners
-
-def crop_effectives(effective_seqs, effective_idxs):
-    # remove redundant sequences from the effective sequences cluster
-    ident = get_ident_matrix(effective_seqs)
-    pairs, scores = compare_ident(ident, effective_seqs)
-    winners = get_winners(len(effective_seqs), pairs, scores)
-    cropped_seqs = effective_seqs[winners]
-    cropped_idxs = [effective_idxs[wn] for wn in winners]
-    return cropped_seqs, cropped_idxs
-
-def collapse_1(matrix, tax_tab):
-    # directs construction of the collapsed matrix and taxonomy table
-    effective_seqs, effective_idxs = collapse_0(matrix)
-    cropped_seqs, cropped_idxs = crop_effectives(effective_seqs, effective_idxs)
-
-    collapsed_tax = pd.DataFrame(index = np.arange(len(cropped_idxs)), columns = tax_tab.columns[1:], dtype = int)
-    
-    for idx, clust in enumerate(cropped_idxs):
-        if len(clust) == 1:
-            collapsed_tax.at[idx] = tax_tab.loc[clust[0]] # add the representative's taxonomy to the consensus tab (if it is the only member of the group)
-        else:
-            # build consensus taxonomy for all the integrants of the cluster
-            subtab = tax_tab.loc[clust]
-            collapsed_tax.at[idx] = build_cons_tax(subtab)
-    
-    collapsed_tax.reset_index(drop=True, inplace=True)
-    return cropped_seqs, collapsed_tax.astype(int)
-
-#%% New collapsing functions
-# TODO: Test these
-def build_effective_matrix(eff_idxs, matrix):
-    # construct the effective sequence for each given custer
-    effective_matrix = np.zeros((len(eff_idxs), matrix.shape[1]), dtype=np.int8)
-    for idx, cluster in enumerate(eff_idxs):
-        # since unknown values are 0 and each column can have AT MOST two values
-        # effective sequence is the maximum value for each column
-        effective_matrix[idx] = np.max(matrix[cluster], axis = 0)
-    return effective_matrix
-
-def build_effective_taxonomy(eff_idxs, tax_tab):
-    # construct the effective taxonomy for each cluster
-    n_ranks = tax_tab.shape[1]
-    effective_taxes = np.zeros((len(eff_idxs), n_ranks))
-    # turn table to array, easier to handle
-    tax_mat = tax_tab.to_numpy()
-    for idx0, cluster in enumerate(eff_idxs):
-        # prepare consensus taxonomy
-        clust_tax = np.zeros(n_ranks)
-        # transpose sub_mat to iterate trough columns
-        sub_mat = tax_mat[cluster].T
-        # previous unconflicting taxon, starts as 0
-        p_tax = 0
-        for idx, rank in enumerate(sub_mat):
-            uniq_vals = np.unique(rank)
-            if len(uniq_vals) > 1:
-                # rank contains multiple taxa. Conflict, set this and all subsequent positions as last unconflicting taxon and break
-                clust_tax[idx:] = p_tax
-                break
-            # no conflict, set taxon and update p_tax
-            clust_tax[idx] = uniq_vals[0]
-            p_tax = uniq_vals
-        # add completed taxonomy
-        effective_taxes[idx0] = clust_tax
-    effective_taxes = pd.DataFrame(effective_taxes, columns = tax_tab.columns)
-    return effective_taxes
-
-def collapse_window(matrix, tax_tab):
-    tree = Tree()
-    tree.build(matrix)
-    
-    eff_idxs = [lv[0] for lv in tree.leaves]
-    eff_mat = build_effective_matrix(eff_idxs, matrix)
-    eff_tax = build_effective_taxonomy(eff_idxs, tax_tab)
-    return eff_mat, eff_tax
 #%% classes
+class Window:
+    def __init__(self, matrix, tax_tab, start, end, row_thresh=0.1, col_thresh=0.1, min_seqs=50):
+        # tax_tab should be the extended tax table for the matrix
+        if start < 0 or end > matrix.shape[1]:
+            raise Exception(f'Invalid window boundaries [{start} {end}] must be within [0 {matrix.shape[1]}]')
+        if start >= end:
+            raise Exception(f'Invalid window boundaries start coordinate ({start}) must be lower than end coordinate ({end})')
+        self.start = start
+        self.end = end
+        self.min_seqs = min_seqs
+        sub_matrix = matrix[:, self.start:self.end]
+        logger.info(f'Initialized window of coordinates [{start} {end}], shape {sub_matrix.shape}')
+        
+        # filter matrix by missing values
+        self.filter_missing(sub_matrix, row_thresh, col_thresh)
+        
+        # collapse window and build consensus taxonomy
+        self.collapse_window(sub_matrix, tax_tab)
+    
+    def filter_missing(self, matrix, row_thresh, col_thresh):
+        self.row_thresh = row_thresh
+        self.col_thresh = col_thresh
+        self.max_unk_rows = row_thresh * matrix.shape[1]
+        self.max_unk_cols = col_thresh * matrix.shape[0]
+        self.rows = filter_matrix(matrix, row_thresh, axis = 1)
+        self.cols = filter_matrix(matrix[self.rows], col_thresh, axis = 0)
+        if len(self.rows) == 0:
+            raise Exception(f'No rows passed the filter for row_thresh {row_thresh}')
+        if len(self.cols) == 0:
+            raise Exception(f'No columns passed the filter for col_thresh {col_thresh}')
+        logger.info(f'Row threshold {row_thresh}, max {self.max_unk_rows} unknown values per row. Filtered out {matrix.shape[0] - len(self.rows)} rows.')
+        logger.info(f'Column threshold {col_thresh}, max {self.max_unk_cols} unknown values per column. Filtered out {matrix.shape[1] - len(self.cols)} columns.')
+        logger.info(f'Filtered matrix has shape [{len(self.rows)} {len(self.cols)}]')
+    
+    def collapse_window(self, matrix, tax_tab):
+        t0 = time.time()
+        branch_idxs = sq.collapse_window(matrix[self.rows][:, self.cols])
+        t1 = time.time()
+        logger.info(f'Collapsed matrix of shape ({len(self.rows)}, {len(self.cols)}) into {len(branch_idxs)} branches in {t1 - t0:.3f} seconds')
+        self.window_idxs = [self.rows[br] for br in branch_idxs] # translate each branch's indexes to its original position in the alignment matrix
+        repr_idx = [br[0] for br in self.window_idxs] # get a representative sequence for each branch
+        
+        if len(self.window_idxs) < self.min_seqs:
+            raise Exception(f'Too few non-redundant sequences: {len(self.window_idxs)} (min = {self.min_seqs})')
+        self.window = matrix[repr_idx][:, self.cols]
+        
+        # build consensus taxonomy
+        self.taxonomy = []
+        for br in self.window_idxs:
+            branch_taxa = tax_tab.iloc[br].to_numpy()
+            self.taxonomy.append(get_consensus_taxonomy(branch_taxa))
+            
 class WindowLoader:
-    def __init__(self, logger='WindowLoader'):
+    def __init__(self, ranks, logger='WindowLoader'):
+        self.ranks = ranks
         # logger set at initialization (because this class may be used by multiple modules)
         self.logger = logging.getLogger(logger)
         self.logger.setLevel(logging.DEBUG)
@@ -226,6 +112,7 @@ class WindowLoader:
         self.mat_file = mat_file
         self.acc_file = acc_file
         self.tax_file = tax_file
+        self.guide_file = guide_file # should be the extended guide
         # load matrix
         try:
             matrix_data = np.load(mat_file)
@@ -238,101 +125,155 @@ class WindowLoader:
         self.dims = self.matrix.shape
         # load acclist & tax tab
         with open(acc_file, 'r') as acc_handle:
-                self.acclist = acc_handle.read().splitlines()
+                self.acclist = np.array(acc_handle.read().splitlines())
         
-        # build a full taxonomy table for the retrieved records
-        record_taxs = pd.read_csv(tax_file, index_col=0)
-        tax_guide = pd.read_csv(guide_file, index_col=0) # use the EXPANDED guide here
-        self.tax_tab = tax_guide.loc[record_taxs.TaxID].set_index(record_taxs.index)
+        # load the taxonomy table and guide file
+        self.tax_tab = pd.read_csv(tax_file, index_col=0)
+        self.tax_guide = pd.read_csv(guide_file, index_col=0)
     
-    def get_window(self, start, end, row_thresh=0.2, col_thresh=0.2):
-        if self.dims is None:
-            return
-
-        if start < 0 or end > self.dims[1]:
-            raise Exception(f'Invalid window dimensions: start: {start}, end: {end}. Must be between 0 and {self.dims[1]}')
-
-        # Windows are handled as a different class
-        out_window = Window(self.matrix, start, end, row_thresh, col_thresh, self)
-        return out_window
-
-class Window:
-    def __init__(self, matrix, start, end, row_thresh=0.2, col_thresh=0.2, loader=None):
-        self.matrix = matrix
-        self.start = start
-        self.end = end
-        self.loader = loader
-        self.process_window(row_thresh, col_thresh)
-    
-    @property
-    def window(self):
-        return self.matrix[self.rows][:, self.cols]
-    @property
-    def eff_mat(self):
-        # eff mat_contains the effective rows for the given window, but all the columns
-        # to get a specific set of columns use self.cols or a subset obtained trough feature selection
-        return self.matrix[self.eff_rows]
-    
-    @property
-    def tax_tab(self):
-        if self.loader is None:
-            return None
-        return self.loader.tax_tab.iloc[self.rows]
-
-    def process_window(self, row_thresh, col_thresh):
-        # run this method every time you want to change the column threshold
-        self.row_thresh = row_thresh
-        self.col_thresh = col_thresh
+    def get_window(self, row_thresh=0.2, col_thresh=0.2, **kwargs):
+        # returns a collapsed matrix, a list of the indexes of the used columns and a list with the generated consensus for every row
+        # commented variable branch_accs list the accessions of the sequences that went into each branch
+        # row_thresh and col_thresh determine the maximum proportion of empty siter per row and column respectively (rows are checked first)
+        # window bounds must be presented as kwargs:
+            # start and/or end coordinates select the range of columns in between them (if only one is provided, the range goes from the given coordinate to the start/end of the alignment)
+            # cols takes an array of possibly discontinuous column positions (overrides start/end if present)
+            # if neither bound types are provided, get_window works over the entire alignment (NOT RECOMMENDED, as it will be time intensive and yield uninformative results)
         
+        # determine window boundaries
+        start = 0
+        end = self.dims[1]
+        if 'start' in kwargs.keys():
+            start = kwargs['start']
+        if 'end' in kwargs.keys():
+            end = kwargs['end']
+        window_cols = np.arange(start, end)
+        if 'cols' in kwargs.keys():
+            window_cols = np.array(kwargs['cols'])
+        if window_cols.min() < 0 or window_cols.max() > self.dims[1]:
+            raise Exception(f'Invalid window dimensions: start: {window_cols.min()}, end: {window_cols.max()}. Must be between 0 and {self.dims[1]}')
         
-        # crop the portion of interest of the matrix
-        matrix = self.matrix[:, self.start:self.end]
-        # fitler rows first
-        rows = filter_matrix(matrix, row_thresh, axis = 1)
-        cols = filter_matrix(matrix[rows], col_thresh, axis = 0)
+        # filter out too incomplete rows and columns
+        window_mat = self.matrix[:, window_cols]
+        rows = filter_matrix(window_mat, row_thresh, axis = 1)
+        cols = filter_matrix(window_mat[rows], col_thresh, axis = 0)
         
-        self.rows = rows
-        self.cols = cols + self.start
-        self.shape = (len(rows), len(cols))
-        # self.window = window
+        # collapse redundant sequences
         if len(rows) > 0:
-            self.collapse_window()
+            t0 = time.time()
+            branches = sq.collapse_window(window_mat[rows][:, cols])
+            branch_indexes = [rows[br] for br in branches] # translate each branch's indexes to its original position in the alignment matrix
+            elapsed = time.time() - t0
+            self.logger.debug(f'Collapsed window of shape ({len(rows)}, {len(cols)}) into {len(branches)} in {elapsed:.3f} seconds')
         else:
-            self.eff_rows = []
+            self.logger.warning('No rows passed the threshold!')
+        
+        # get collapsed sequence taxonomy
+        window_taxonomy = []
+
+        for br in branch_indexes:
+            branch_taxa = self.tax_tab.iloc[br]['TaxID'].values
+            extended_taxa = self.tax_guide.loc[branch_taxa].to_numpy()
+            window_taxonomy.append(get_consensus_taxonomy(extended_taxa))
+        
+        window_reprs = [br[0] for br in branch_indexes]
+        window = window_mat[window_reprs][:, cols]
+        
+        # These two variables list the accession codes included in each branch and the column indexes (from the entire alignment) of the used columns
+        # currently have no use to them, but leave them at hand just in case
+        # branch_accs = [self.acclist[br] for br in branch_indexes]
+        columns = window_cols[cols]
+        
+        return window, columns, window_taxonomy
     
-    def collapse_window(self):
-        t0 = time.time()
-        # self.eff_mat, self.eff_idxs = seq_collapse_nb(self.matrix[self.rows][:, self.cols])
-        self.eff_rows, self.eff_idxs = seq_collapse_nb(self.matrix[self.rows][:, self.cols])
-        self.n_seqs = len(self.eff_rows)
-        self.eff_tax = build_effective_taxonomy(self.eff_idxs, self.tax_tab)
-        elapsed = time.time() - t0
-        self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed:.3f} seconds')
+    # OLD method
+    # def get_window(self, start, end, row_thresh=0.2, col_thresh=0.2):
+    #     if self.dims is None:
+    #         return
+
+    #     if start < 0 or end > self.dims[1]:
+    #         raise Exception(f'Invalid window dimensions: start: {start}, end: {end}. Must be between 0 and {self.dims[1]}')
+
+    #     # Windows are handled as a different class
+    #     return Window(self.matrix, start, end, row_thresh, col_thresh, self)
+
+# class Window:
+#     def __init__(self, matrix, start, end, row_thresh=0.2, col_thresh=0.2, loader=None):
+#         self.matrix = matrix
+#         self.start = start
+#         self.end = end
+#         self.loader = loader
+#         self.window = None
+#         self.window_tax = None
+#         self.process_window(row_thresh, col_thresh)
+    
+#     @property
+#     def tax_tab(self):
+#         if self.loader is None:
+#             return None
+#         return self.loader.tax_tab.iloc[self.rows]
+    
+#     @property
+#     def tax_guide(self):
+#         if self.loader is None:
+#             return None
+#         return self.loader.tax_guide
+    
+#     @property
+#     def ranks(self):
+#         if self.loader is None:
+#             return None
+#         return self.loader.ranks
+
+#     def process_window(self, row_thresh, col_thresh, safe=True):
+#         # generates a collapsed window using the specified row_thresh and col_thresh
+#         # attributes generated are self.window (collapsed window, numpy array) and self.window_tax (consensus taxonomy, segment of tax table, pandas dataframe)
+#         # run this method every time you want to change the column threshold
+#         self.row_thresh = row_thresh
+#         self.col_thresh = col_thresh
+        
+        
+#         # crop the portion of interest of the matrix
+#         matrix = self.matrix[:, self.start:self.end]
+#         # fitler rows first
+#         rows = filter_matrix(matrix, row_thresh, axis = 1)
+#         cols = filter_matrix(matrix[rows], col_thresh, axis = 0)
+        
+#         self.rows = rows
+#         self.cols = cols + self.start
+#         self.shape = (len(rows), len(cols))
+#         # self.window = window
+#         if len(rows) > 0:
+#             self.collapse_window()
+#         else:
+#             self.loader.logger.warning('No rows passed the threshold!')
+    
+#     def collapse_window(self):
+#         t0 = time.time()
+#         branches = sq.collapse_window(self.matrix[self.rows][:, self.cols])
+#         branch_taxonomy = get_consensus_taxonomy()
+#         elapsed = time.time() - t0
+#         self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed:.3f} seconds')
+#         return
+    
+    # OLD
+    # def collapse_window(self):
+    #     t0 = time.time()
+    #     # collapse the sequences of the selected rows and columns
+    #     self.branches, seq_guide = seq_collapse_nb(self.matrix[self.rows][:, self.cols])
+    #     self.window = build_collapsed(self.branches, seq_guide)
+    #     self.n_seqs = len(self.branches)
+    #     # generate the consensus taxonomy
+    #     tax = []
+    #     for branch in self.branches:
+    #         accs = self.tax_tab.iloc[branch].index.values
+    #         tax.append(build_effective_taxonomy(accs, self.tax_tab, self.tax_guide, self.ranks))
+    #     self.window_tax = self.tax_guide.loc[tax]
+    #     elapsed = time.time() - t0
+    #     self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed:.3f} seconds')
         
 
 #%%
-@nb.njit
-def get_leaves(col, indexes, matrix):
-    # print(col)
-    leaves = [np.array([i]) for i in range(0)]
-    # get unique non-zero values in column col, rows indexes. Get indexes of zeros separately
-    array = matrix[indexes, col]
-    values = np.unique(array)
-    values = values[values != 0]
-    zero_idxs = np.argwhere(array == 0).flatten()
-    
-    for val in values:
-        # get indexes of value + indexes of zeros
-        val_idxs = np.argwhere(array == val).flatten()
-        joint_idxs = np.concatenate((zero_idxs, val_idxs))
-        sub_indexes = indexes[joint_idxs]
-        # stop conditions, end of the matrix or single sequence remaining
-        if col == matrix.shape[1] - 1 or len(sub_indexes) == 1:
-            leaves.append(sub_indexes)
-        else:
-            leaves += get_leaves(col + 1, sub_indexes, matrix)
-    return leaves
-
 @nb.njit
 def seq_collapse_nb(matrix):
     # matrix data
@@ -340,14 +281,21 @@ def seq_collapse_nb(matrix):
     seq_len = matrix.shape[1]
     n_seqs = matrix.shape[0]
     # set up branch container and guide
-    # seq_guide indicates which branches are available for a given value in a given position
-    # value 0 always contains all possible branches (can't be used to discard)
     branches = [[0 for i in range(0)] for seq in range(n_seqs)]
+    # branches is a list containing the indexes of all members of each generated branch
+    # used to recover accession codes and generar consensus taxonomies after collapsing is done
     seq_guide = [[set([0 for i in range(0)]) for char in range(base_range)] for site in range(seq_len)]
-    # all_branches: same variable referenced by position 0 of all sites in seq_guide
+    # seq_guide is a list of lists of shape (5 (unique bases + n), window length)
+    # each cell indicates what EXISTING branches contain a given value in a given position
+    # when a sequence is being evaluated, its values are used to check what existing branches it is compatible with
+    # the number of available branches always decreases, if it reaches 0, the sequence generates a new branch
+    # value 0 always contains all possible branches (can't be used to discard)
     all_branches = set([0 for i in range(0)])
     for site_idx in range(seq_len):
         seq_guide[site_idx][0] = all_branches
+    # all_branches same variable referenced by position 0 of all sites in seq_guide
+    # this ensures that missing values don't spawn new branches
+    
     # initialize branch counter as 0
     n_branch = 0
     # make a single pass along the entire matrix
@@ -356,62 +304,116 @@ def seq_collapse_nb(matrix):
         possible_branches = all_branches
         # discard invalid branches by checking the seq_guide for each site
         for base_idx, base in enumerate(seq):
-            possible_branches = possible_branches.intersection(seq_guide[base_idx][base])
-            # all existing branches discarded, this one is new
+            # possible_branches is updated to keep only those elements already in it that have base in position base_idx
+            # possible_branches always decreases
+            merged = set([0 for i in range(0)])
+            for b in seq_guide[base_idx][1:]:
+                merged = merged.union(b)
+            wrong_branches = merged.difference(seq_guide[base_idx][base])
+            possible_branches = possible_branches.difference(wrong_branches)
             if len(possible_branches) == 0:
-                # define new branch, update all_branches and branch counter
+                # all existing branches discarded, this sequence represents a new branch
+                # HOWEVER, maybe the current_branches had an unknown value at this place
+                # possible_branches is empty, add the new branch n_branch
+                # also update all_branches
                 possible_branches.add(n_branch)
                 all_branches.add(n_branch)
+                # update counter
                 n_branch += 1
                 break
         # update branches and seq_guide
-        # allways do this in case an existing branch has incorporated new non ambiguous data
+        # always do this in case an existing branch has incorporated new non ambiguous data
         for br in possible_branches:
+            # if a new branch was defined, add the current seq_idx to it
+            # if the current sequence could be added to an existing branch
+            #   (the remaining value un possible_branches after completing the loop),
+            #   add its seq_idx to that branch
             branches[br].append(seq_idx)
         for base_idx in np.argwhere(seq != 0).flatten():
+            # add the current sequence's values to the seq_guide
+            # this step should be done even if no new branch was generated
+            #   as the newly incorporated sequence may have clarified missing values in the branch it incorporated to
             base = seq[base_idx]
             for br in possible_branches:
                 seq_guide[base_idx][base].add(br)
-    # generate collapsed matrix
-    # collapsed = np.zeros((n_branch, seq_len), dtype = matrix.dtype)
-    # for br_idx, br in enumerate(branches[:n_branch]):
-    #     sub_mat = matrix[np.array(br, dtype=np.int64)]
-    #     collapsed[br_idx] = np.array([col.max() for col in sub_mat.T])
-
-    # return collapsed, branches[:n_branch]
     
+    # return a list of branches (with the index of every belonging sequence)
+    # return seq_guide (used to build the collapsed matrix)
+    return branches[:n_branch], seq_guide
+
+def build_collapsed(branches, guide):
+    # generate collapsed map
+    # ths step ensures the collapsed map contains the least amount of missing sites (choose to fill a site whenever possible)
+    collapsed = np.zeros((len(branches), len(guide)), dtype=np.int16)
+    for site, br_values in enumerate(guide):
+        for base, seqs in enumerate(br_values[1:]):
+            collapsed[list(seqs), site] = base + 1
+    return collapsed
+
+@nb.njit
+def seq_collapse_nb0(matrix):
+    # matrix data
+    base_range = matrix.max() + 1
+    seq_len = matrix.shape[1]
+    n_seqs = matrix.shape[0]
+    # set up branch container and guide
+    branches = [[0 for i in range(0)] for seq in range(n_seqs)]
+    # branches is a list containing the indexes of all members of each generated branch
+    # used to recover accession codes and generar consensus taxonomies after collapsing is done
+    seq_guide = [[set([0 for i in range(0)]) for char in range(base_range)] for site in range(seq_len)]
+    # seq_guide is a list of lists of shape (5 (unique bases + n), window length)
+    # each cell indicates what EXISTING branches contain a given value in a given position
+    # when a sequence is being evaluated, its values are used to check what existing branches it is compatible with
+    # the number of available branches always decreases, if it reaches 0, the sequence generates a new branch
+    # value 0 always contains all possible branches (can't be used to discard)
+    all_branches = set([0 for i in range(0)])
+    for site_idx in range(seq_len):
+        seq_guide[site_idx][0] = all_branches
+    # all_branches same variable referenced by position 0 of all sites in seq_guide
+    # this ensures that missing values don't spawn new branches
+    
+    # initialize branch counter as 0
+    n_branch = 0
+    # make a single pass along the entire matrix
+    for seq_idx, seq in enumerate(matrix):
+        # all branches are possible at first
+        possible_branches = all_branches
+        # discard invalid branches by checking the seq_guide for each site
+        for base_idx, base in enumerate(seq):
+            # possible_branches is updated to keep only those elements already in it that have base in position base_idx
+            # possible_branches always decreases
+            possible_branches = possible_branches.intersection(seq_guide[base_idx][base])
+            if len(possible_branches) == 0:
+                # all existing branches discarded, this sequence represents a new branch
+                # possible_branches is empty, add the new branch n_branch
+                # also update all_branches
+                possible_branches.add(n_branch)
+                all_branches.add(n_branch)
+                # update counter
+                n_branch += 1
+                break
+        # update branches and seq_guide
+        # always do this in case an existing branch has incorporated new non ambiguous data
+        for br in possible_branches:
+            # if a new branch was defined, add the current seq_idx to it
+            # if the current sequence could be added to an existing branch
+            #   (the remaining value un possible_branches after completing the loop),
+            #   add its seq_idx to that branch
+            branches[br].append(seq_idx)
+        for base_idx in np.argwhere(seq != 0).flatten():
+            # add the current sequence's values to the seq_guide
+            # this step should be done even if no new branch was generated
+            #   as the newly incorporated sequence may have clarified missing values in the branch it incorporated to
+            base = seq[base_idx]
+            for br in possible_branches:
+                seq_guide[base_idx][base].add(br)
+    
+    # generate collapsed map
+    # ths step ensures the collapsed map contains the least amount of missing sites (choose to fill a site whenever possible)
+    collapsed = np.zeros((n_branch, seq_len), dtype=np.int16)
+    for site, br_values in enumerate(seq_guide):
+        for base, branches in enumerate(br_values[1:]):
+            collapsed[branches, site] = base + 1
     # get effective indexes
     eff_rows = [i[0] for i in branches[:n_branch]]
     return eff_rows, branches[:n_branch]
-
-# TODO: test these
-# TODO: maybe coud be changed into a numba function
-class Tree:
-    def build(self, matrix):
-        self.leaves = []
-        t_matrix = matrix.T
-        Node(0, None, t_matrix[0], np.arange(t_matrix.shape[1]), t_matrix, self)
-
-class Node:
-    def __init__(self, lvl, value, row, indexes, matrix, tree):
-        self.lvl = lvl
-        self.row = row
-        self.indexes = indexes
-        self.matrix = matrix
-        self.tree = tree
-        self.children = []
-        if lvl + 1 < len(matrix):
-            self.get_children()
-        else:
-            tree.leaves.append(indexes)
-    
-    def get_children(self):
-        vals = np.unique(self.row)
-        vals = vals[vals != 0]
-        zeros = np.argwhere(self.row == 0).flatten()
-        for val in vals:
-            indexes = np.argwhere(self.row == val).flatten()
-            indexes = np.concatenate((zeros, indexes))
-            indexes = self.indexes[indexes]
-            row = self.matrix[self.lvl + 1, indexes]
-            self.children.append(Node(self.lvl + 1, val, row, indexes, self.matrix, self.tree))

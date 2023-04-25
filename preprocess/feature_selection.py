@@ -26,6 +26,71 @@ def get_taxid_tab(tax_file, mat_accs):
 
 # information quantification
 @nb.njit
+def entropy_nb(matrix):
+    # calculate entropy for a whole matrix
+    # null columns take an entropy value of + infinite to differentiate them from columns with a single valid value
+    entropy = np.full(matrix.shape[1], np.inf)
+    for idx, col in enumerate(matrix.T):
+        valid_rows = col[col != 0] # only count known values
+        values = np.unique(valid_rows)
+        counts = np.array([(valid_rows == val).sum() for val in values])
+        n_rows = counts.sum()
+        if n_rows > 0:
+            # only calculate entropy for non-null columns
+            freqs = counts / n_rows
+            entropy[idx] = -np.sum(np.log2(freqs) * freqs)
+    return entropy
+
+def get_sorted_sites(matrix, tax_table, return_general=False, return_entropy=False, return_difference=False):
+    # calculate entropy difference for every taxon present in matrix
+    # tax_table is an extended taxonomy dataframe for the records contained in matrix
+    # return ordered sites (by ascending entropy difference) for each taxon by default (first sites are the best)
+    # also returns a list of taxa for organization purposes
+    # if return_general is set to True, return the general entropy array
+    # if return_entropy is set to True, return the per taxon entropy array
+    # if return_difference is set to True, return the (unordered) entropy difference matrix
+    general_entropy = entropy_nb(matrix)
+    
+    tax_list = np.array([])
+    tax_entropy = []
+    
+    # get entropy per taxon
+    for rk, col in tax_table.T.iterrows():
+        taxa = col.dropna().unique()
+        tax_list = np.concatenate((tax_list, taxa))
+        for tax in taxa:
+            tax_submat = matrix[col == tax]
+            tax_entropy.append(entropy_nb(tax_submat))
+    tax_entropy = np.array(tax_entropy)
+    
+    ent_diff = tax_entropy - general_entropy
+    ent_diff_order = np.argsort(ent_diff, 1)
+    
+    result = (ent_diff_order, tax_list)
+    if return_general:
+        result += (general_entropy,)
+    if return_entropy:
+        result += (tax_entropy,)
+    if return_difference:
+        result += (ent_diff,)
+        
+    return result
+
+def get_nsites(sorted_sites, min_n, max_n, step_n):
+    # takes the resulting array from get_sorted_sites, returns a list with the (unique) n-1:n best sites for the range min_n:max_n with step_
+    
+    n_sites = np.arange(min_n, max_n, step_n)
+    
+    site_lists = []
+    all_sites = np.array([]) # store already included sites here, avoid repetition
+    for n in n_sites:
+        sites = np.unique(sorted_sites[:, :n])
+        sites = sites[~np.isin(sites, all_sites)]
+        site_lists.append(sites)
+        all_sites = np.concatenate((all_sites, sites))
+    return site_lists
+
+@nb.njit
 def get_entropy(array):
     valid_rows = array[array != 0]
     n_rows = len(valid_rows)
@@ -33,6 +98,7 @@ def get_entropy(array):
     counts = np.array([(valid_rows == val).sum() for val in values])
     freqs = counts / n_rows
     return -np.sum(np.log2(freqs) * freqs, dtype=np.float32)
+
 
 def get_matrix_entropy(matrix):
     entropy = np.zeros(matrix.shape[1], dtype=np.float32)

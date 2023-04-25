@@ -40,13 +40,6 @@ def unfold_lineage(record):
     unfolded_lineage.update({lin['Rank']:[int(lin['TaxId']), lin['ScientificName']] for lin in record['LineageEx']})
     return unfolded_lineage
 
-def unfold_records(records):
-    # generates a dictionary with the unfolded taxonomy of every retrieved record (including the rank of the queried TaxID)
-    unfolded = {}
-    for record in records:
-        unfolded[int(record['TaxId'])] = unfold_lineage(record)
-    return unfolded
-
 #%% classes
 class Taxer:
     def generate_outfiles(self):
@@ -85,7 +78,7 @@ class TaxonomistNCBI(Taxer):
         # attempts to download the taxonomic records in chunks of size chunksize
         chunks = tax_slicer(tax_list, chunksize)
         n_chunks = int(np.ceil(len(tax_list)/chunksize))
-        retrieved = []
+        retrieved = {}
         failed = []
         print(f'Downloading {len(tax_list)} records from NCBI...')
         for idx, chunk in enumerate(chunks):
@@ -105,9 +98,9 @@ class TaxonomistNCBI(Taxer):
             if len(tax_records) != len(chunk):
                 failed += list(chunk)
                 continue
-            retrieved += tax_records
+            retrieved.update({r_id:unfold_lineage(record) for r_id, record in zip(chunk, tax_records)})
         self.failed = failed
-        self.tax_records.update(unfold_records(retrieved))
+        self.tax_records.update(retrieved)
     
     def retry_dl(self, max_attempts=3):
         # if some taxids couldn't be downloaded, rety up to max_attempts times
@@ -125,8 +118,10 @@ class TaxonomistNCBI(Taxer):
         # generates a dataframe containing the complete taxonomy of every retrieved record, including only the specified ranks
         # generated dictionary {TaxID:[SciName, rank, parentTaxID]}
         taxes = {}
+        base_rank = self.ranks[0]
         for record in self.tax_records.values():
-            prev_tx = 0
+            prev_tx = record[base_rank][0]
+            # prev_tx = 0 # TODO: revert to this if fix doesn't work
             for rk in self.ranks:
                 try:
                     rk_taxon = record[rk]

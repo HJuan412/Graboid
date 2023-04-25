@@ -32,6 +32,15 @@ def add_map(database, fasta, map_file, acc_file, evalue=None, dropoff=None, min_
     MAPS[database].update({fasta:{'map':map_file, 'acc':acc_file, 'evalue':evalue, 'dropoff':dropoff, 'min_height':min_height, 'min_width':min_width}})
     update_maps(MAPS)
 
+def get_database(database):
+    if not database in DBASES:
+        print(f'Database {database} not found.')
+        print('Current databases include:')
+        for db, desc in DBASE_LIST.items():
+            print(f'\tDatabase: {db} \t:\t{desc}')
+        raise Exception('Database not found')
+    return DATAPATH + '/' + database
+
 def add_calibration(database, fasta, report, meta):
     MAPS[database][fasta]['cal'] = report
     MAPS[database][fasta]['cal_meta'] = meta

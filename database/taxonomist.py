@@ -16,25 +16,16 @@ import http
 import logging
 import numpy as np
 import pandas as pd
+import re
 
 #%% setup logger
 logger = logging.getLogger('Graboid.database.taxonomist')
+logging.captureWarnings(True)
 
 #%% variables
 valid_databases = ['BOLD', 'NCBI']
 
 #%% functions
-def detect_taxidfiles(file_list):
-    # NOTE: this function behaves exactly like lister.detect_summ(), may need more analogs to it in the future, may define a generic one in a tools module
-    # given a list of taxID files, identify the database to which each belongs
-    # works under the assumption that there is a single file per database
-    taxid_files = {}
-    for file in file_list:
-        database = file.split('_')[-1].split('.')[0]
-        if database in valid_databases:
-            taxid_files[database] = file
-    return taxid_files
-
 def tax_slicer(tax_list, chunksize=500):
     # NOTE: this function behaves exactly like fetcher.acc_slicer(), may need more analogs to it in the future, may define a generic one in a tools module
     # slice the list of taxids into chunks
@@ -42,212 +33,268 @@ def tax_slicer(tax_list, chunksize=500):
     for i in np.arange(0, n_taxs, chunksize):
         yield tax_list[i:i+chunksize]
 
-def extract_tax_data(record):
-    # generates taxonomy dictionary ({rank:ScientificName, rank_id:TaxID, ...}) for the given records
-    taxonomy = {}
-    
-    lineage = record['LineageEx'] + [{'TaxId':record['TaxId'], 'ScientificName':record['ScientificName'], 'Rank':record['Rank']}]
-    for lin in lineage:
-        taxonomy[lin['Rank']] = lin['ScientificName']
-        taxonomy[f'{lin["Rank"]}_id'] = lin['TaxId']
-    
-    return taxonomy
+def unfold_lineage(record):
+    # extracts data from a taxonomic record
+    # generates lineage dict : {rank:[TaxID, SciName]}
+    unfolded_lineage = {record['Rank']:[int(record['TaxId']), record['ScientificName']]}
+    unfolded_lineage.update({lin['Rank']:[int(lin['TaxId']), lin['ScientificName']] for lin in record['LineageEx']})
+    return unfolded_lineage
+
+def unfold_records(records):
+    # generates a dictionary with the unfolded taxonomy of every retrieved record (including the rank of the queried TaxID)
+    unfolded = {}
+    for record in records:
+        unfolded[int(record['TaxId'])] = unfold_lineage(record)
+    return unfolded
 
 #%% classes
 class Taxer:
     def generate_outfiles(self):
-        header = self.taxid_file.split('/')[-1].split('.')[0]
-        self.tax_out = f'{self.out_dir}/{header}.tax'
-    
-    def fill_blanks(self):
-        # fills missing records with the last known taxon name or id
-        # get locarions of missing values in ALL RANKS
-        blanks = self.tax_tab0[self.ranks].isnull()
-        # begin filling from the SECOND highest rank
-        for idx, rk in enumerate(self.ranks[1:]):
-            parent_rk = self.ranks[idx]
-            # locations of missing values in current rank
-            blanks_in_rk = blanks[rk].values
-            
-            rk_vals = self.tax_tab0[[rk, f'{rk}_id']].values
-            parent_vals = self.tax_tab0[[parent_rk, f'{parent_rk}_id']].values
-            rk_vals[blanks_in_rk] = parent_vals[blanks_in_rk]
-            self.tax_tab0[[rk, f'{rk}_id']] = rk_vals
-
+        self.tax_out = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '.tax', self.taxid_file))
+        self.guide_out = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '.guidetmp', self.taxid_file))
+        
 class TaxonomistNCBI(Taxer):
     # procures the taxonomic data for the NCBI records
-    def __init__(self, taxid_file, ranks, out_dir):
+    def __init__(self, taxid_file, ranks, out_dir, warn_dir):
         self.taxid_file = taxid_file
         self.ranks = ranks
         self.out_dir = out_dir
-        
+        self.warn_dir = warn_dir
         self.generate_outfiles()
-        self.read_taxid_file()
-        self.make_tax_tables()
-        
-        self.logger = logging.getLogger('Graboid.database.taxonomist.NCBI')
-        
+        self.tax_records = {}
         self.failed = []
-    
+        
     def read_taxid_file(self):
         # reads the acc:taxid table
-        self.taxid_list = None
+        self.taxid_tab = None
         self.taxid_reverse = None
         self.uniq_taxs = None
-
-        taxid_list = pd.read_csv(self.taxid_file, index_col = 0, header = None)
         
-        # generates a warning if taxid_list is empty
-        if len(taxid_list) == 0:
-            self.logger.error(f'Summary file {self.in_file} is empty')
-            return
+        # index : accessions, values : taxids
+        self.taxid_tab = pd.read_csv(self.taxid_file, index_col = 0)
+        
+        # generates a warning if taxid_tab is empty
+        if len(self.taxid_tab) == 0:
+            raise Exception(f'Summary file {self.in_file} is empty')
 
-        self.taxid_list = taxid_list[1] # index are the accession codes
         # get a reversed taxid list and a list of unique taxes
-        self.taxid_reverse = pd.Series(index = self.taxid_list.values, data = taxid_list.index)
-        self.uniq_taxs = np.unique(taxid_list)
+        self.taxid_reverse = pd.Series(index = self.taxid_tab.values.flatten(), data = self.taxid_tab.index)
+        self.uniq_taxs = np.unique(self.taxid_tab)
     
-    def make_tax_tables(self):
-        # generate empty taxonomy table (with two columns per rank one for name, one for ID), guide table link a taxid with its full taxonomy
-        cols = [f'{rk}{tail}' for rk in self.ranks for tail in ('', '_id')]
-        self.tax_table = pd.DataFrame(index = self.taxid_list.index, columns = cols)
-        # name tax_tab0 used for compatibility with method fill_blanks
-        self.tax_tab0 = pd.DataFrame(index = self.uniq_taxs, columns = cols) # this will be used to store the taxonomic data and later distribute it to each record
-    
-    def dl_tax_records(self, tax_list, chunksize=500, max_attemps=3):
+    def dl_tax_records(self, tax_list, chunksize=500, max_attempts=3):
         # attempts to download the taxonomic records in chunks of size chunksize
         chunks = tax_slicer(tax_list, chunksize)
         n_chunks = int(np.ceil(len(tax_list)/chunksize))
+        retrieved = []
         failed = []
+        print(f'Downloading {len(tax_list)} records from NCBI...')
         for idx, chunk in enumerate(chunks):
-            print(f'Retrieving taxonomy. Chunk {idx + 1} of {n_chunks}')
+            print(f'Downloading chunk {idx + 1} of {n_chunks}')
             tax_records = []
-            for attempt in range(max_attemps):
+            for attempt in range(max_attempts):
                 try:
                     tax_handle = Entrez.efetch(db = 'taxonomy', id = chunk, retmode = 'xml')
                     tax_records = Entrez.read(tax_handle)
                     break
                 except IOError:
-                    logger.debug('Interrupted taxing due to conection error')
+                    logger.warning(f'Interrupted taxing due to conection error. {max_attempts - attempt - 1} attempts remaining')
                     continue
-                except http.client.client.Incomplete:
-                    logger.debug('Interrupted taxing due to bad file')
+                except http.client.HTTPException:
+                    logger.warning(f'Interrupted taxing due to bad file.  {max_attempts - attempt - 1} attempts remaining')
                     continue
             if len(tax_records) != len(chunk):
                 failed += list(chunk)
                 continue
-            try:
-                self.update_guide(chunk, tax_records)
-            except KeyError:
-                failed += list(chunk)
-                continue
-        
+            retrieved += tax_records
         self.failed = failed
-        if len(failed) > 0:
-            self.logger.warning(f'Failed to download {len(failed)} taxIDs of {len(self.uniq_taxs)}')
+        self.tax_records.update(unfold_records(retrieved))
     
     def retry_dl(self, max_attempts=3):
         # if some taxids couldn't be downloaded, rety up to max_attempts times
         attempt = 1
         while attempt <= max_attempts and len(self.failed) > 0:
+            logger.warning(f'Attempting to download {len(self.failed)} failed taxIDs of {len(self.uniq_taxs)} from NCBI. Attempt {attempt} of {max_attempts}...')
             self.dl_tax_records(self.failed)
-            
-    def update_guide(self, taxids, records):
-        # extract data from a single record and updates the guide table
-        tax_dicts = [extract_tax_data(record) for record in records]
-        tax_tab = pd.DataFrame(tax_dicts, index = taxids)
-        tax_tab = tax_tab[[f'{rk}{tail}' for rk in self.ranks for tail in ('', '_id')]]
-        self.tax_tab0.update(tax_tab)
+            attempt += 1
+        if len(self.failed) > 0:
+            logger.warning(f'Failed to download {len(self.failed)} records from NCBI after {max_attempts} retries. A list of the failed records was saved as {self.warn_dir}/failed_tax.ncbi')
+            with open(self.warn_dir + '/failed_tax.ncbi', 'w') as handle:
+                handle.write('\n'.join(self.failed))
     
-    def update_tables(self):
-        # write the final taxonomic tables using the complete guide tables
-        for taxid in self.uniq_taxs:
-            instances = self.taxid_reverse.loc[taxid] # records with the given ID
-            self.tax_table.at[instances] = self.tax_tab0.loc[taxid].values
+    def build_guide(self):
+        # generates a dataframe containing the complete taxonomy of every retrieved record, including only the specified ranks
+        # generated dictionary {TaxID:[SciName, rank, parentTaxID]}
+        taxes = {}
+        for record in self.tax_records.values():
+            prev_tx = 0
+            for rk in self.ranks:
+                try:
+                    rk_taxon = record[rk]
+                    taxes.update({rk_taxon[0]:[rk_taxon[1], rk, prev_tx]})
+                    prev_tx = rk_taxon[0]
+                except KeyError:
+                    # rank not found in lineage
+                    continue
+        self.guide = pd.DataFrame.from_dict(taxes, orient='index', columns='SciName Rank parentTaxID'.split()).rename_axis('TaxID') # leave Rank column with uppercase to enable use of  dot notation (.Rank)
+        # TODO: uncomment this line if you decide to use numeric codes for the ranks
+        # self.guide.Rank = self.guide.Rank.replace({rk:idx for idx, rk in enumerate(self.ranks)})
+    
+    def build_tax_tab(self):
+        tax_tab = self.taxid_tab.copy()
+        # see if any of the sequence records is missing its taxonomic code in the guide table
+        # this can happen if the record's tax ID is not among the specified ranks
+        taxid_values = set(self.taxid_tab.TaxID.values)
+        missing = taxid_values.difference(self.guide.index)
+        # any missing taxID is replaced by the last known one for its retrieved record
+        to_replace = {}
+        for ms in missing:
+            to_replace[ms] = None
+            missing_record = self.tax_records[ms]
+            for rk in self.ranks[::-1]:
+                try:
+                    to_replace[ms] = missing_record[rk][0]
+                    break
+                except KeyError:
+                    continue
+        # replace missing taxonomy codes and add ranks
+        tax_tab.TaxID = tax_tab.TaxID.replace(to_replace)
+        tax_tab['Rank'] = self.guide.loc[tax_tab.TaxID, 'Rank'].values
+        self.tax_tab = tax_tab
     
     def taxing(self, chunksize=500, max_attempts=3):
-        if self.taxid_list is None:
+        if self.taxid_tab is None:
             return
 
         self.dl_tax_records(self.uniq_taxs, chunksize)
         self.retry_dl(max_attempts)
-        self.fill_blanks()
-        self.update_tables()
-        
-        self.tax_table.to_csv(self.tax_out)
+        self.build_guide()
+        self.build_tax_tab()
+    
+    def store_files(self):
+        self.tax_tab.to_csv(self.tax_out)
+        self.guide.to_csv(self.guide_out)
 
 class TaxonomistBOLD(Taxer):
     # generates the taxomoic tables for the records downloaded from BOLD
-    def __init__(self, taxid_file, ranks, out_dir):
+    def __init__(self, taxid_file, ranks, out_dir, warn_dir):
         self.taxid_file = taxid_file
-        self.ranks = ranks
         self.out_dir = out_dir
-
+        self.warn_dir = warn_dir
         self.generate_outfiles()
         self.__set_marker_vars()
+        self.ranks = ranks
         
-        self.read_taxid_file()
-        
-        self.logger = logging.getLogger('Graboid.database.taxonomist.BOLD')
-
     def __set_marker_vars(self):
         # BOLD records may have variations of the marker name (18S/18s, COI-3P/COI-5P)
-        marker = self.taxid_file.split('/')[-1].split('_')[1]
+        marker = re.sub('.*/', '', self.taxid_file).split('_')[1]
         self.marker_vars = list(marker)
     
     def read_taxid_file(self):
         bold_tab = pd.read_csv(self.taxid_file, index_col = 0)
-
         if len(bold_tab) == 0:
-            self.logger.error(f'Summary file {self.in_file} is empty')
-            self.bold_tab = None
-            return
+            # interrupt execution and let constructor know
+            raise Exception(f'Summary file {self.in_file} is empty')
+        valid_ranks = []
+        invalid_ranks = []
+        for rk in self.ranks:
+            if rk + '_taxID' in bold_tab.columns:
+                valid_ranks.append(rk)
+            else:
+                invalid_ranks.append(rk)
+        if len(invalid_ranks) > 0:
+            logger.warning(f'Ranks {" ".join(invalid_ranks)} are not found in the BOLD table and will be ommited')
+        if len(valid_ranks) == 0:
+            raise Exception('None of the given ranks ({" ".join(self.ranks)}) were found in the BOLD table')
         self.bold_tab = bold_tab
+    
+    def build_guide(self):
+        # flatten the bold taxonomy table into a taxonomy guide like the one from NCBI
+        # use reversed ranks to begin by the lowest one
+        rv_ranks = [rk for rk in self.ranks[::-1]]
+
+        rank_tabs = []
+        for idx, rk in enumerate(rv_ranks[:-1]):
+            # get the parent rank to select the parent rank ids
+            parent_rk = rv_ranks[idx + 1]
+            tax_unique = self.bold_tab.loc[~self.bold_tab[rk + '_taxID'].duplicated(), [rk + '_taxID', rk + '_name', parent_rk + '_taxID']]
+            tax_unique = tax_unique.loc[tax_unique[rk + '_taxID'].notna()]
+            tax_unique.columns = ['TaxID', 'SciName', 'parentTaxID']
+            tax_unique['Rank'] = rk
+            rank_tabs.append(tax_unique.astype({'TaxID':int, 'parentTaxID':int}).set_index('TaxID'))
+        # add the first (last) rank, set parent tax ids as 0
+        head = self.ranks[0]
+        head_rank = self.bold_tab.loc[~(self.bold_tab[head + '_taxID'].duplicated()), [head + '_taxID', head + '_name']]
+        head_rank.columns = ['TaxID', 'SciName']
+        head_rank['Rank'] = head
+        head_rank['parentTaxID'] = 0
+        rank_tabs.append(head_rank.astype({'TaxID':int, 'parentTaxID':int}).set_index('TaxID'))
+
+        self.guide = pd.concat(rank_tabs)
+        # TODO: uncomment this line if you decide to use numeric codes for the ranks
+        # self.guide.Rank = self.guide.Rank.replace({rk:idx for idx, rk in enumerate(ranks)})
+    
+    def build_tax_tab(self):
+        bold_tab = self.bold_tab.copy()
+        # use reversed ranks to begin by the lowest one
+        rv_ranks = [rk for rk in self.ranks[::-1]]
         
-    def get_tax_tab(self):
-        # extract the relevant columns (tax name and taxID) fro the BOLD table
-        cols = [f'{rk}_{tail}' for rk in self.ranks for tail in ('name', 'taxID')]
-        tax_tab = self.bold_tab.loc[:, cols]
-        # rename columns (replace '_name' and '_taxID' sufixes for '' and '_id')
-        # name tax_tab0 used for compatibility with method fill_blanks
-        self.tax_tab0 = tax_tab.rename(columns = {f'{rk}_{tail0}':f'{rk}{tail1}' for rk in self.ranks for tail0, tail1 in zip(('name', 'taxID'), ('', '_id'))})
+        tax_tab = []
+        # begin searching from the lowest rank
+        for rk in rv_ranks:
+            # all records found in the current rank are added and removed so that they don't appear in higher ranks
+            sub_tab = bold_tab.loc[bold_tab[rk + '_taxID'].notna(), [rk + '_taxID']].rename(columns = {rk + '_taxID':'TaxID'})
+            sub_tab['Rank'] = rk
+            tax_tab.append(sub_tab)
+            bold_tab = bold_tab.drop(index = sub_tab.index)
+            if len(bold_tab) == 0:
+                # no more records to assign
+                break
+        self.tax_tab = pd.concat(tax_tab).astype({'TaxID':int})
+        self.tax_tab.index.name = 'Accession'
     
     def taxing(self, chunksize=None, max_attempts=None):
         # chunksize and max_attempts kept for compatibility
-        self.get_tax_tab()
-        self.fill_blanks()
-        
-        self.tax_tab0.to_csv(self.tax_out)
-
-taxer_dict = {'BOLD':TaxonomistBOLD,
-              'NCBI':TaxonomistNCBI}
+        self.build_guide()
+        self.build_tax_tab()
+    
+    def store_files(self):
+        self.tax_tab.to_csv(self.tax_out)
+        self.guide.to_csv(self.guide_out)
 
 class Taxonomist:
-    def __init__(self, out_dir):
+    # class attribute dictionary containing usable taxonomist tools
+    taxer_dict = {'BOLD':TaxonomistBOLD,
+                  'NCBI':TaxonomistNCBI}
+    def __init__(self, out_dir, warn_dir, ranks=None):
         self.taxid_files = {}
-        self.set_ranks()
+        self.set_ranks(ranks)
         self.out_dir = out_dir
+        self.warn_dir = warn_dir
         
-        self.out_files = {}
+        self.tax_files = {}
+        self.guide_files = {}
     
-    def get_taxidfiles(self, taxid_files):
-        self.taxid_files = taxid_files
-        # check that summaries are a list 
-        if isinstance(self.taxid_files, list):
-            self.taxid_files = detect_taxidfiles(taxid_files)
-    
-    def set_ranks(self, ranklist=['phylum', 'class', 'order', 'family', 'genus', 'species']):
-        self.ranks = ranklist
+    def set_ranks(self, ranks=None):
+        if ranks is None:
+            self.ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']
+        self.ranks = ranks
     
     def taxing(self, taxid_files, chunksize=500, max_attempts=3):
-        # taxid_files dict with {database:taxid_file}
+        # taxid_files : dict with {database:taxid_file}
+        # taxid_file : pandas dataframe with index = accessions, columns = taxid if NCBI or full taxonomy if BOLD
         # check that summ_file container is not empty
         if len(taxid_files) == 0:
-            logger.error('No valid taxid files detected')
-            return
+            raise Exception('No valid taxid files detected')
         
         for database, taxid_file in taxid_files.items():
-            taxer = taxer_dict[database](taxid_file, self.ranks, self.out_dir)
+            taxer = self.taxer_dict[database](taxid_file, self.ranks, self.out_dir, self.warn_dir)
+            try:
+                taxer.read_taxid_file()
+            except Exception as ex:
+                logger.error(ex)
+                raise
             taxer.taxing(chunksize, max_attempts)
-            logger.info(f'Finished retrieving taxonomy data from {database} database. Saved to {taxer.tax_out}')
-            self.out_files[database] = taxer.tax_out
+            taxer.store_files()
+            logger.info(f'Finished retrieving taxonomy data from {database} database.')
+            self.tax_files[database] = taxer.tax_out
+            self.guide_files[database] = taxer.guide_out

@@ -9,79 +9,60 @@ Build an alignment matrix from the blast report
 
 #%% libraries
 from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
-import logging
+from glob import glob
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
-#%% set logger
-logger = logging.getLogger('Graboid.mapper.Matrix')
+import re
 
 #%% vars
-bases = 'nacgturykmswbdhv'
+bases = 'nacgtrykmswbdhv'
+r_bases = 'ntgcarykmswbdhv'
 tr_dict = {base:idx for idx, base in enumerate(bases)} | {base:idx for idx, base in enumerate(bases.upper())}
-tr_dict['-'] = 0
+tr_dict.update({'-':0, 'u':4, 'U':4})
 # compliment dict, used to translate revese complement sequences
-rc_dict = tr_dict.copy()
-rc_dict['a'] = 4
-rc_dict['A'] = 4
-rc_dict['c'] = 3
-rc_dict['C'] = 3
-rc_dict['g'] = 2
-rc_dict['G'] = 2
-rc_dict['t'] = 1
-rc_dict['T'] = 1
-rc_dict['u'] = 1
-rc_dict['U'] = 1
+rc_dict = {base:idx for idx, base in enumerate(r_bases)} | {base:idx for idx, base in enumerate(r_bases.upper())}
+rc_dict.update({'-':0, 'u':1, 'U':1})
 
 #%% functions
-def make_transdict():
-    translation_dict = {}
-    translation_dict['lower'] = {base:idx for idx, base in enumerate(bases)}
-    translation_dict['upper'] = {base:idx for idx, base in enumerate(bases.upper())}
-    return translation_dict
-
 # read blast file
 def read_blast(blast_file, evalue = 0.005):
     # read blast file, register match orientations, flip reversed matches, sort by qseqid and qstart, subtract 1 from qstart and sstart to adjust for python indexing
-    colnames = 'qseqid pident length qstart qend sstart send evalue'.split(' ')
-    blast_tab = pd.read_csv(blast_file,
-                            sep = '\t',
-                            header = None,
-                            names = colnames)
-    # blast_tab.rename(columns = columns, inplace = True)
-    blast_tab = blast_tab.loc[blast_tab['evalue'] <= evalue]
-    smat = blast_tab[['sstart', 'send']].values
+    # blast file preformatted (comma separated), contains column names and last row with qseqid = Reference, length = reference marker length
+    # returns processed blast table and used marker length
+    blast_tab = pd.read_csv(blast_file)
+    marker_len = 0
     
+    # check for empty report
+    if len(blast_tab) == 0:
+        raise Exception(f'Blast report {blast_file} is empty. Verify that the blast parameters are correct.')
+
+    marker_len = blast_tab.iloc[-1].loc['length']
+    
+    # filter blast report for evalue
+    blast_tab = blast_tab.loc[blast_tab['evalue'] <= evalue]
+    if len(blast_tab) == 0:
+        raise Exception(f'No matches in the blast report {blast_file} passed the filter (evalue <= {evalue})')
+        
+    # process match coordinates
+    subject_coords = blast_tab[['sstart', 'send']].values    
     # get orients (0: forward, 1:reverse)
-    orients = (smat[:,0] > smat[:,1]).reshape((-1,1)).astype(int)
+    orients = (subject_coords[:,0] > subject_coords[:,1]).reshape((-1,1)).astype(int)
     # flip inverted matches
-    smat = np.sort(smat, 1)
-    # adjust for python indexing
+    subject_coords = np.sort(subject_coords, 1)
+    # adjust for python indexing (shift 1 position to the left)
     blast_tab.qstart -= 1
-    smat[:,0] -= 1
+    subject_coords[:,0] -= 1
     # update values
-    blast_tab[['sstart', 'send']] = smat
+    blast_tab[['sstart', 'send']] = subject_coords
     blast_tab['orient'] = orients
     blast_tab.sort_values(['qseqid', 'qstart'], ignore_index=True, inplace=True)
-    return blast_tab
-
-def make_guide(values):
-    # buils a guide to the position of the matches for each sequence in the blast report
-    # used to speed up matrix construction
-    # returns list of lists [acc, idx of first match, idx of last match]
-    accs, idxs0 = np.unique(values, return_index = True)
-    order = np.argsort(idxs0)
-    accs = accs[order]
-    idxs0 = idxs0[order]
-    idxs1 = np.append(idxs0[1:], len(values))
-    guide = [[acc, idx0, idx1] for acc, idx0, idx1 in zip(accs, idxs0, idxs1)]
-    return guide
+    return blast_tab, marker_len
 
 def get_mat_dims(blast_tab):
     # get total dimensions for the sequence matrix
     nrows = len(blast_tab.qseqid.unique())
-    subject_coords = blast_tab[['sstart', 'send']].to_numpy()
+    subject_coords = blast_tab[['sstart', 'send']].to_numpy().astype(int)
     subject_coords.sort(axis=1)
     lower = subject_coords[:,0].min()
     upper = subject_coords[:,1].max()
@@ -100,22 +81,67 @@ def read_seqfile(seq_file):
             
     return seq_dict
 
-# DEPRECATED
-def get_seqs(seq_file, blast_tab):
-    # get matched sequences and convert to numerical values
-    accs = blast_tab.qseqid.unique()
-    seq_dict = read_seqfile(seq_file)
-    # filtered_seqs = {}
-    # for acc in accs:
-    #     filtered_seqs[acc] = np.array([tr_dict[base] for base in seq_dict[acc]], dtype = np.int8)
-    filtered_seqs = {seq_dict[acc] for acc in accs}
-    return filtered_seqs
-
 def get_numseq(seq, trans_dict):
     # turn sequence to numeric code
     numseq = np.array([trans_dict[base] for base in seq], dtype = np.int8)
     return numseq
 
+def load_map(map_dir):
+    # load a map and a corresponding accession list
+    # returns accession list, alignment map, alignment bounds
+    map_file = glob(map_dir + '*__map.npz')[0]
+    acc_file = glob(map_dir + '*__map.accs')[0]
+    map_npz = np.load(map_file)
+    with open(acc_file, 'r') as acc_handle:
+        accs = acc_handle.read().splitlines()
+    
+    return accs, map_npz['matrix'], map_npz['bounds'], map_npz['coverage']
+        
+def get_coverage(coords, ref_len):
+    coverage = np.zeros(ref_len, dtype=np.int32)
+    for coo in coords:
+        coverage[coo[0]:coo[1]] += 1
+    return coverage
+
+def get_mesas(coverage, dropoff=0.05, min_height=0.1, min_width=2):
+    # returns an array with columns [mesa start, mesa end, mesa width, mesa average height]
+    # dropoff : percentage of a mesa's max height to determine dropoff threshold (mesa's edge)
+    # min_width : minimum width of a mesa
+    # if min_height is a percentage of the max coverage, calculate and replace
+    if isinstance(min_height, float):
+        min_height = max(coverage) * min_height
+    # edge values of 0 inserted into cov to indicate the ends of the alignment
+    cov = np.insert([.0,.0], 1, coverage.astype(float))
+    diffs = np.diff(cov).astype(float)
+    mesas = []
+    # get index of highest location and its height
+    top = np.argmax(cov)
+    height = coverage[top]
+    while height > min_height:
+        drop_threshold = height * dropoff
+        # get upper bound
+        # first crossing of the threshold AFTER top (at least 1 position to the right of top)
+        upper = top + np.argmax(abs(diffs[top:]) >= drop_threshold)
+        upper = min(upper, len(coverage))
+        # get lower bound
+        # last crossing of the threshold BEFORE upper
+        lower = upper - np.argmax(abs(diffs[:upper][::-1]) >= drop_threshold) - 1
+        lower = max(lower, 0)
+        mean_height = coverage[lower:upper].mean()
+        mesas.append([lower, upper, mean_height])
+        # replace mesa values from coverage & diff arrays with -inf so it is never chosen as top and always breaks a window
+        # displaced 1 to the right to account for leading value inserted
+        cov[lower + 1:upper + 1] = -np.inf
+        diffs[lower + 1:upper + 1] = -np.inf
+        top = np.argmax(cov)
+        height = cov[top]
+    
+    mesas = np.array(mesas)
+    # filter messas by min_width & sort by position, add widths
+    mesas = np.insert(mesas, 2, np.diff(mesas[:,:2]).flatten(), 1)
+    mesas = mesas[mesas[:,2] > min_width]
+    mesas = mesas[np.argsort(mesas[:,0]).flatten()]
+    return mesas
 #%%
 def plot_coverage_data(blast_file, evalue = 0.005, figsize=(12,7)):
     # TODO: save plot to file
@@ -145,70 +171,74 @@ def plot_coverage_data(blast_file, evalue = 0.005, figsize=(12,7)):
 class MatBuilder:
     def __init__(self, out_dir):
         self.out_dir = out_dir
-        
-        self.acclist = []
         self.mat_file = None
         self.acc_file = None
         
-    def generate_outnames(self, seq_file, out_name=None):
-        file_name = seq_file.split('/')[-1].split('.')[0]
-        if not out_name is None:
-            self.mat_file = f'{self.out_dir}/{out_name}.npz'
-            self.acc_file = f'{self.out_dir}/{out_name}.accs'
-        else:
-            self.mat_file = f'{self.out_dir}/{file_name}.npz'
-            self.acc_file = f'{self.out_dir}/{file_name}.accs'
+        self.matrix = None
+        self.bounds = None
+        self.coverage = None
+        self.acclist = None
         
-    def build(self, blast_file, seq_file, out_name=None, evalue=0.005, keep=False):
+    def build(self, blast_file, seq_file, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, keep=True):
+        # generate out names
+        out_name = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '__map', seq_file))
+        self.mat_file = out_name + '.npz'
+        self.acc_file = out_name + '.accs'
         # load blast report
         print('Reading blast report...')
-        blast_tab = read_blast(blast_file, evalue)
-        if len(blast_tab) == 0:
-            logger.warning(f'No matches in the blast report {blast_file} passed the filter (evalue <= {evalue})')
-            return
+        try:
+            blast_tab, marker_len = read_blast(blast_file, evalue)
+            self.marker_len = marker_len
+        except Exception as excp:
+            raise excp
         
-        # get dimensions
+        # get dimensions & coverage
         nrows, ncols, lower, upper = get_mat_dims(blast_tab)
         bounds = np.array([lower, upper])
         offset = lower # lower value already shifted 1 to the left by read_blast
         
         # get coordinates
-        coord_mat = blast_tab[['qstart', 'qend', 'sstart', 'send', 'orient']].to_numpy()
-        # offset subject coordinates (substract the lower bound of the match coordinates)
+        coord_mat = blast_tab[['qstart', 'qend', 'sstart', 'send', 'orient']].to_numpy().astype(int)
+        # get coverage
+        coverage = get_coverage(coord_mat[:, [2,3]], marker_len)
+        mesas = get_mesas(coverage, dropoff, min_height, min_width)
+        # offset subject coordinates (substract the lower bound of the subject coordinates)
+        # columns 0 and 1 are the coordinates to extract from the query sequene
+        # columns 2 and 3 are their position on the matrix (corrected with the offset)
+        # column 4 indicates the sequence orientation
         coord_mat[:, [2,3]] -= offset
         
         # get filtered sequences
         print('Retrieving sequences...')
-        # sequences = get_seqs(seq_file, blast_tab)
         sequences = read_seqfile(seq_file)
         
         # build matrix
         print('Building matrix...')
+        acclist = []
         matrix = np.zeros((nrows, ncols), dtype=np.int8)
         for q_idx, (qry, qry_tab) in enumerate(blast_tab.groupby('qseqid')):
+            # get acc and indexes for each sequence
             seq = sequences[qry]
             coords = coord_mat[qry_tab.index]
             for match in coords:
-                # if orient (row 4) is 0, get original sequence, else get reversed
+                # if orient (row 4) is 0, get original sequence, else get reversed complemened
                 if match[4] == 0:
                     numseq = get_numseq(seq[match[0]:match[1]], tr_dict)
                 else:
                     numseq = get_numseq(seq[match[0]:match[1]][::-1], rc_dict)
                 matrix[q_idx, match[2]:match[3]] = numseq
-            self.acclist.append(qry)
-        
-        # generate out_files
-        self.generate_outnames(seq_file, out_name)
-        
+            acclist.append(qry)
+        self.acclist = acclist
         # store output
-        # np.save(self.mat_file, matrix, allow_pickle=False)
-        np.savez(self.mat_file, bounds=bounds, matrix=matrix) # save the matrix along with the bounds array
+        # save the matrix along with the bounds and coverage array (coverage array done over the entire length of the marker reference)
+        np.savez_compressed(self.mat_file, bounds=bounds, matrix=matrix, coverage=coverage, mesas=mesas)
         with open(self.acc_file, 'w') as list_handle:
             list_handle.write('\n'.join(self.acclist))
-        logger.info(f'Stored matrix of dimensions {matrix.shape} in {self.mat_file}')
-        logger.info(f'Stored accession_list in {self.acc_file}')
         
         if keep:
-            # use this to retrieve generating directly from this method
-            return matrix, bounds, self.acclist
-        return None
+            self.matrix = matrix
+            self.bounds = bounds
+            self.coverage = coverage
+            self.mesas = mesas
+            self.acclist = acclist
+        return

@@ -12,7 +12,9 @@ from Bio.Blast.Applications import NcbiblastnCommandline as blast_cline
 from Bio.Blast.Applications import NcbimakeblastdbCommandline as makeblast_cline
 from glob import glob
 import logging
-import os
+import pandas as pd
+import re
+import subprocess
 
 #%% set logger
 logger = logging.getLogger('Graboid.mapper.blast')
@@ -29,6 +31,17 @@ def blast(query, ref, out_file, threads=1):
                         ungapped=True,
                         num_threads=threads)
     cline()
+    # retrieve reference marker data
+    bdbcmd_cline = f'blastdbcmd -db {ref} -dbtype nucl -entry all -outfmt %l'.split()
+    ref_marker_len = int(re.sub('\\n', '', subprocess.run(bdbcmd_cline, capture_output=True).stdout.decode()))
+    blast_tab = pd.read_csv(out_file, sep='\t', header=None, names='qseqid pident length qstart qend sstart send evalue'.split())
+    if len(blast_tab) == 0:
+        raise Exception(f'Blast search of file {query} on database {ref} yielded no results')
+    ref_row = pd.Series(index=blast_tab.columns, dtype=float)
+    # add the reference length as an extra row in the report
+    ref_row.at['qseqid', 'length', 'evalue'] = ['Reference', ref_marker_len, 100] # evalue of 100 means this row is always filtered out
+    # overwrite blast report with column names and reference row
+    pd.concat([blast_tab, ref_row.to_frame().T]).to_csv(out_file, index=False)
 
 def makeblastdb(ref_file, db_prefix):
     # build the reference BLAST database
@@ -40,49 +53,36 @@ def makeblastdb(ref_file, db_prefix):
     cline()
 
 def check_db_dir(db_dir):
-    db_files = glob(f'{db_dir}/*.n*')
-    check = False
+    # counts the database files present at the given location, check returns True if six .n* files are found
+    db_files = glob(db_dir + '/*.n*')
     if len(db_files) == 6:
-        check = True
-    return check, db_files
+        db_name = re.sub('\..*', '', db_files[0])
+        return db_name
+    raise Exception(f'Incomplete BLAST database ({len(db_files)} files found)')
 
 #%% classes
 class Blaster:
     def __init__(self, out_dir):
         self.report = None
         self.out_dir = out_dir
-
-    def make_ref_db(self, ref_file, db_dir, clear=False):
-        check, db_files = check_db_dir(db_dir)
-        if clear or not check:
-            # found db files are incomplete or option 'clear' is enabled
-            # delete previous files and create new databases
-            for file in db_files:
-                os.remove(file)
-            makeblastdb(ref_file, f'{db_dir}/ref')
-            logger.info(f'Generated blast reference databse at directory {db_dir}')
-            return
-        logger.warning(f'Directory {db_dir} already contains a database. Set \'clear\' to False if you wish to replace it.')
     
-    def blast(self, fasta_file, db_dir, out_name=None, threads=1):
-        check, db_files = check_db_dir(db_dir)
-        if not check:
-            logger.error(f'Incomplete BLAST database ({len(db_files)} files found)')
-            return
-        db_prefix = db_files[0].split('.n')[0]
+    def blast(self, fasta_file, db_dir, threads=1):
+        self.report = None
+        try:
+            db_name = check_db_dir(db_dir)
+        except Exception as excp:
+            logger.error(excp)
+            raise
         
         # set output name
-        if not out_name is None:
-            blast_out = f'{self.out_dir}/{out_name}.BLAST'
-        else:
-            blast_out = fasta_file.split('/')[-1].split('.')[0]
-            blast_out = f'{self.out_dir}/{blast_out}.BLAST'
+        blast_out = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '.BLAST', fasta_file))
+        
         # perform BLAST
         print(f'Blasting {fasta_file}')
         try:
-            blast(fasta_file, db_prefix, blast_out, threads)
+            blast(fasta_file, db_name, blast_out, threads)
             self.report = blast_out
             logger.info(f'Generated blast report at {blast_out}')
-        except:
-            # TODO develop warning
-            logger.error(f'Unable to blast {fasta_file}')
+        except Exception as excp:
+            logger.error(excp)
+            raise

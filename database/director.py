@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Wed Sep 22 10:53:46 2021
+Created on Wed Mar 15 10:08:53 2023
 
 @author: hernan
-Director for database creation and updating
+This script contains de database director, which handles sequence lookup and retrieval
 """
 
 #%% libraries
 import logging
 import os
-import shutil
+import re
 
-from Bio import Entrez
 from database import surveyor as surv
 from database import lister as lstr
 from database import fetcher as ftch
@@ -20,25 +19,9 @@ from database import taxonomist as txnm
 from database import merger as mrgr
 
 #%% set logger
-logger = logging.getLogger('Graboid.database')
-logger.setLevel(logging.DEBUG)
+logger = logging.getLogger('Graboid.database.director')
 
-#%% functions
-# Entrez
-def set_entrez(email, apikey):
-    Entrez.email = email
-    Entrez.api_key = apikey
-# handle fasta
-def fasta_name(fasta):
-    return fasta.split('/')[-1].split('.')[0]
-
-def move_file(file, dest, mv=False):
-    if mv:
-        shutil.move(file, dest)
-    else:
-        shutil.copy(file, dest)
-
-#%% Main
+#%% classes
 class Director:
     def __init__(self, out_dir, tmp_dir, warn_dir):
         self.out_dir = out_dir
@@ -47,80 +30,114 @@ class Director:
         
         # set workers
         self.surveyor = surv.Surveyor(tmp_dir)
-        self.lister = lstr.Lister(tmp_dir)
+        self.lister = lstr.Lister(out_dir)
         self.fetcher = ftch.Fetcher(tmp_dir)
-        self.taxonomist = txnm.Taxonomist(tmp_dir)
+        self.taxonomist = txnm.Taxonomist(tmp_dir, warn_dir)
         self.merger = mrgr.Merger(out_dir)
-        
-        # get outfiles
-        self.get_out_files()
     
-    def clear_tmp(self):
-        tmp_files = self.get_tmp_files()
-        for file in tmp_files:
-            os.remove(file)
+    def clear_tmp(self, keep=True):
+        if keep:
+            return
+        for file in os.listdir(self.tmp_dir):
+            os.remove(self.tmp_dir + '/' + file)
     
-    def set_ranks(self, ranks=['phylum', 'class', 'order', 'family', 'genus', 'species']):
-        fmt_ranks = [rk.lower() for rk in ranks]
-        logger.INFO(f'Taxonomic ranks set as {" ".join(fmt_ranks)}')
-        self.taxonomist.set_ranks(fmt_ranks)
-        self.merger.set_ranks(fmt_ranks)
-
-    def direct_fasta(self, fasta_file, chunksize=500, max_attempts=3, mv = False):
-        seq_path = f'{self.out_dir}/{fasta_name(fasta_file)}.fasta'
-        if mv:
-            shutil.move(fasta_file, seq_path)
+    def set_ranks(self, ranks=None):
+        # set taxonomic ranks to retrieve for the training data.
+        # this method ensures the taxonomic ranks are sorted in descending order, regarless of how they were input by the user
+        # also checks that ranks are valid
+        valid_ranks = 'domain subdomain superkingdom kingdom phylum subphylum superclass class subclass division subdivision superorder order suborder superfamily family subfamily genus subgenus species subspecies'.split()
+        if ranks is None:
+            ranks=['phylum', 'class', 'order', 'family', 'genus', 'species']
         else:
-            shutil.copy(fasta_file, seq_path)
-        logger.info(f'Moved fasta file {fasta_file} to location {self.out_dir}')
-        # generate taxtmp file
-        print(f'Retrieving TaxIDs for {fasta_file}...')
-        self.fetcher.fetch_tax_from_fasta(fasta_file)
-        
-        print('Reconstructing taxonomies...')
-        # taxonomy needs no merging so it is saved directly to out_dir
-        self.taxonomist.out_dir = self.out_dir # dump tax table to out_dir
-        self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
-        
-        print('Building output files...')
-        self.merger.merge_from_fasta(seq_path, self.taxonomist.out_files['NCBI'])
-        self.get_out_files()
-        self.taxonomist.out_files = {} # clear out_files container so the generated file is not found by get_tmp_files
-        print('Done!')
+            rks_formatted = set([rk.lower() for rk in ranks])
+            rks_sorted = []
+            for rk in valid_ranks:
+                if rk in rks_formatted:
+                    rks_sorted.append(rk)
+            ranks = rks_sorted
+            if len(ranks) == 0:
+                logger.warning("Couldn't read given ranks. Using default values instead")
+                ranks = ['phylum', 'class', 'order', 'family', 'genus', 'species']
+                
+        # propagate to taxonomist and merger
+        logger.info(f'Taxonomic ranks set as: {" ".join(ranks)}')
+        self.taxonomist.set_ranks(ranks)
+        self.merger.set_ranks(ranks)
+        self.ranks = ranks
     
-    def direct(self, taxon, marker, databases, chunksize=500, max_attempts=3):
+    def retrieve_fasta(self, fasta_file, chunksize=500, max_attempts=3):
+        # retrieve sequence data from a prebuilt fasta file
+        # sequences should have a valid genbank accession
+        print('Retrieving sequences from file {fasta_file}')
+        seq_path = re.sub('.*/', self.out_dir + '/', re.sub('.fa.*', '__fasta.seqtmp', fasta_file))
+        os.symlink(fasta_file, seq_path)
+        # create a symbolic link to the fasta file to follow file nomenclature system without moving the original file
+        print(f'Retrieving TaxIDs from {fasta_file}...')
+        self.fetcher.fetch_tax_from_fasta(seq_path)
+    
+    def retrieve_download(self, taxon, marker, databases, chunksize=500, max_attempts=3):
+        # retrieve sequence data from databases
+        # needs a valid taxon (ideally at a high level such as phylum or class) and marker gene
+        if taxon is None:
+            raise Exception('No taxon provided')
+        if marker is None:
+            raise Exception('No marker provided')
+        if databases is None:
+            raise Exception('No databases provided')
         print('Surveying databases...')
         for db in databases:
             self.surveyor.survey(taxon, marker, db, max_attempts)
         print('Building accession lists...')
-        self.lister.build_list(self.surveyor.out_files)
+        try:
+            self.lister.build_list(self.surveyor.out_files)
+        except Exception as excp:
+            logger.warning(excp)
+            raise excp
         print('Fetching sequences...')
-        self.fetcher.set_bold_file(self.surveyor.out_files['BOLD'])
-        self.fetcher.fetch(self.lister.out_file, chunksize, max_attempts)
+        self.fetcher.fetch(self.lister.out_file, self.surveyor.out_files, chunksize, max_attempts)
+        
+    def process(self, chunksize=500, max_attempts=3):
         print('Reconstructing taxonomies...')
         self.taxonomist.taxing(self.fetcher.tax_files, chunksize, max_attempts)
-        print('Merging sequences...')
-        self.merger.merge(self.fetcher.seq_files, self.taxonomist.out_files)
-        self.get_out_files()
-        print('Done!')
-    
-    def get_tmp_files(self):
-        tmp_files = []
-        for file in self.surveyor.out_files.values():
-            tmp_files.append(file)
-        tmp_files.append(self.lister.out_file)
-        for file in self.fetcher.seq_files.values():
-            tmp_files.append(file)
-        for file in self.fetcher.tax_files.values():
-            tmp_files.append(file)
-        for file in self.taxonomist.out_files.values():
-            tmp_files.append(file)
-        return tmp_files
-    
-    def get_out_files(self):
-        self.seq_file = self.merger.seq_out
-        self.acc_file = self.merger.acc_out
-        self.tax_file = self.merger.tax_out
-        self.guide_file = self.merger.taxguide_out
-        self.rank_file = self.merger.rank_dict_out
-        self.valid_file = self.merger.valid_rows_out
+        print('Merging data...')
+        self.merger.merge(self.fetcher.seq_files, self.taxonomist.tax_files, self.taxonomist.guide_files)
+        
+    def direct(self, taxon, marker, databases, fasta_file, chunksize=500, max_attempts=3):
+        # retrieve sequence and taxonomy data
+        if fasta_file is None:
+            self.retrieve_download(taxon, marker, databases, chunksize, max_attempts)
+        else:
+            self.retrieve_fasta(fasta_file, chunksize, max_attempts)
+        # process data
+        self.process(chunksize, max_attempts)
+        
+    @property
+    def seq_file(self):
+        return self.merger.seq_out
+    @property
+    def acc_file(self):
+        return self.merger.acc_out
+    @property
+    def tax_file(self):
+        return self.merger.tax_out
+    @property
+    def guide_file(self):
+        return self.merger.taxguide_out
+    @property
+    def expguide_file(self):
+        return self.merger.expguide_out
+    @property
+    def nseqs(self):
+        return self.merger.nseqs
+    @property
+    def rank_counts(self):
+        return self.merger.rank_counts.loc[self.merger.ranks]
+    @property
+    def tax_summ(self):
+        return self.merger.taxsumm_out
+    @property
+    def tax_tab(self):
+        return self.merger.tax_tab
+    @property
+    def ext_guide(self):
+        return self.merger.ext_guide

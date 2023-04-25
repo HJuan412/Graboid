@@ -8,22 +8,14 @@ This script retrieves windows from a given data matrix and calculates entropy & 
 """
 
 #%% libraries
+from classification import cost_matrix
+
 import logging
 import numba as nb
 import numpy as np
 import pandas as pd
-from classification import cost_matrix
-
+import time
 #%%
-# tax table manipulation
-def get_taxid_tab(tax_file):
-    # formats the given tax table (keeps only tax_id columns and removes the '_id' tail)
-    tax_tab = pd.read_csv(tax_file, index_col=0)
-    cols = [col for col in tax_tab if len(col.split('_')) > 1]
-    tr_dict = {col:col.split('_')[0] for col in cols}
-    taxid_tab = tax_tab[cols].rename(columns = tr_dict)
-    return taxid_tab
-
 # filter matrix
 def filter_matrix(matrix, thresh = 1, axis = 0):
     # filter columns (axis = 0) or rows (axis = 1) according to a maximum number of empty values
@@ -230,34 +222,38 @@ class WindowLoader:
         self.logger = logging.getLogger(logger)
         self.logger.setLevel(logging.DEBUG)
         
-    def set_files(self, mat_file, acc_file, tax_file):
+    def set_files(self, mat_file, acc_file, tax_file, guide_file):
         self.mat_file = mat_file
         self.acc_file = acc_file
         self.tax_file = tax_file
         # load matrix
-        matrix_data = np.load(mat_file)
+        try:
+            matrix_data = np.load(mat_file)
+        except ValueError:
+            raise Exception(f'Error: matrix file {mat_file} is not a valid numpy file')
         self.matrix = matrix_data['matrix']
         self.bounds = matrix_data['bounds']
+        self.coverage = matrix_data['coverage']
+        self.mesas = matrix_data['mesas']
         self.dims = self.matrix.shape
-        # load acclist
+        # load acclist & tax tab
         with open(acc_file, 'r') as acc_handle:
-            self.acclist = acc_handle.read().splitlines()
-        # load tax tab
-        self.tax_tab = get_taxid_tab(tax_file)
+                self.acclist = acc_handle.read().splitlines()
+        
+        # build a full taxonomy table for the retrieved records
+        record_taxs = pd.read_csv(tax_file, index_col=0)
+        tax_guide = pd.read_csv(guide_file, index_col=0) # use the EXPANDED guide here
+        self.tax_tab = tax_guide.loc[record_taxs.TaxID].set_index(record_taxs.index)
     
     def get_window(self, start, end, row_thresh=0.2, col_thresh=0.2):
-        self.rows = []
-        
         if self.dims is None:
             return
 
         if start < 0 or end > self.dims[1]:
-            self.logger.error(f'Invalid window dimensions: start: {start}, end: {end}. Must be between 0 and {self.dims[1]}')
-            return
+            raise Exception(f'Invalid window dimensions: start: {start}, end: {end}. Must be between 0 and {self.dims[1]}')
 
-        window = np.array(self.matrix[:, start:end])
         # Windows are handled as a different class
-        out_window = Window(window, start, end, row_thresh, col_thresh, self)
+        out_window = Window(self.matrix, start, end, row_thresh, col_thresh, self)
         return out_window
 
 class Window:
@@ -266,31 +262,34 @@ class Window:
         self.start = start
         self.end = end
         self.loader = loader
-        self.shape = (0,0)
         self.process_window(row_thresh, col_thresh)
     
     @property
     def window(self):
         return self.matrix[self.rows][:, self.cols]
+    @property
+    def eff_mat(self):
+        # eff mat_contains the effective rows for the given window, but all the columns
+        # to get a specific set of columns use self.cols or a subset obtained trough feature selection
+        return self.matrix[self.eff_rows]
     
     @property
     def tax_tab(self):
         if self.loader is None:
             return None
         return self.loader.tax_tab.iloc[self.rows]
-    
-    @property
-    def col_idxs(self):
-        return self.cols + self.start
 
     def process_window(self, row_thresh, col_thresh):
         # run this method every time you want to change the column threshold
         self.row_thresh = row_thresh
         self.col_thresh = col_thresh
         
+        
+        # crop the portion of interest of the matrix
+        matrix = self.matrix[:, self.start:self.end]
         # fitler rows first
-        rows = filter_matrix(self.matrix, row_thresh, axis = 1)
-        cols = filter_matrix(self.matrix[rows], col_thresh, axis = 0)
+        rows = filter_matrix(matrix, row_thresh, axis = 1)
+        cols = filter_matrix(matrix[rows], col_thresh, axis = 0)
         
         self.rows = rows
         self.cols = cols + self.start
@@ -299,17 +298,16 @@ class Window:
         if len(rows) > 0:
             self.collapse_window()
         else:
-            self.eff_mat = np.zeros((0, len(cols)))
+            self.eff_rows = []
     
     def collapse_window(self):
-        # tree = Tree()
-        # tree.build(self.window)
-        # self.eff_idxs = [lv[0] for lv in tree.leaves]
-        # self.eff_idxs = get_leaves(0, np.arange(len(self.window)), self.window)
-        # self.eff_mat = build_effective_matrix(self.eff_idxs, self.window)
-        self.eff_mat, self.eff_idxs = seq_collapse_nb(self.window)
-        # print(self.eff_idxs)
+        t0 = time.time()
+        # self.eff_mat, self.eff_idxs = seq_collapse_nb(self.matrix[self.rows][:, self.cols])
+        self.eff_rows, self.eff_idxs = seq_collapse_nb(self.matrix[self.rows][:, self.cols])
+        self.n_seqs = len(self.eff_rows)
         self.eff_tax = build_effective_taxonomy(self.eff_idxs, self.tax_tab)
+        elapsed = time.time() - t0
+        self.loader.logger.debug(f'Collapsed window of size {self.shape}) in {elapsed:.3f} seconds')
         
 
 #%%
@@ -375,17 +373,16 @@ def seq_collapse_nb(matrix):
             for br in possible_branches:
                 seq_guide[base_idx][base].add(br)
     # generate collapsed matrix
-    collapsed = np.zeros((n_branch, seq_len), dtype = matrix.dtype)
-    for br_idx, br in enumerate(branches[:n_branch]):
-        sub_mat = matrix[np.array(br, dtype=np.int64)]
-        collapsed[br_idx] = np.array([col.max() for col in sub_mat.T])
-    # # remove repeated sequences
-    # repeats = set([0 for i in range(0)])
-    # for idx0, br0 in enumerate(branches):
-    #     for idx1, br1 in enumerate(branches[idx0+1]):
-            
-            
-    return collapsed, branches[:n_branch]
+    # collapsed = np.zeros((n_branch, seq_len), dtype = matrix.dtype)
+    # for br_idx, br in enumerate(branches[:n_branch]):
+    #     sub_mat = matrix[np.array(br, dtype=np.int64)]
+    #     collapsed[br_idx] = np.array([col.max() for col in sub_mat.T])
+
+    # return collapsed, branches[:n_branch]
+    
+    # get effective indexes
+    eff_rows = [i[0] for i in branches[:n_branch]]
+    return eff_rows, branches[:n_branch]
 
 # TODO: test these
 # TODO: maybe coud be changed into a numba function

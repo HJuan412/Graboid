@@ -23,25 +23,24 @@ class SurveyTool:
     def __init__(self, taxon, marker, out_dir):
         self.taxon = taxon
         self.marker = marker
-        self.database = self.get_dbase()
-        self.get_logger()
-        self.generate_outfile(out_dir)
+        self.out_dir = out_dir
+        self.out_file = f'{out_dir}/{taxon}_{marker}__{self.database}.summ' # database identifier separated by __
         self.attempt = 1
         self.max_attempts = 3
         self.done = False
-    
-    def generate_outfile(self, out_dir):
-        self.out_file = f'{out_dir}/{self.taxon}_{self.marker}_{self.database}.summ'
     
     def survey(self, max_attempts=3):
         self.max_attempts = max_attempts
         self.attempt_dl()
         if self.done:
-            self.logger.info(f'Done getting summary from {self.database} in {self.attempt} attempts.')
+            logger.info(f'Done getting summary from {self.database} in {self.attempt} attempts.')
         else:
             # surveyor was unable to download a summary, generate a warning, delete incomplete file
-            self.logger.warning(f'Failed to get summary from {self.database} after {self.max_attempts} attempts.')
-            os.remove(self.out_file)
+            logger.warning(f'Failed to get summary from {self.database} after {self.max_attempts} attempts.')
+            try:
+                os.remove(self.out_file)
+            except:
+                pass
 
 class SurveyWAPI(SurveyTool):
     # Survey tool using an API
@@ -62,43 +61,37 @@ class SurveyWAPI(SurveyTool):
                 r.release_conn()
                 self.done = True # signal success
                 break
-            except:
+            except Exception as excp:
                 # update attempt count
+                logger.warning(f'Download of {self.taxon} {self.marker} interrupted (Exception: {excp}), {self.ntries - self.attempt} attempts remaining')
                 self.attempt += 1
-                self.logger.warning(f'Download of {self.taxon} {self.marker} interrupted, {self.ntries - self.attempt} attempts remaining')
 
 # Specific survey tools
 # each of these uses a survey method to attempt to download a summary
 class SurveyBOLD(SurveyWAPI):
-    # consider using the full data retrieval API
-    def get_logger(self):
-        self.logger = logging.getLogger('Graboid.database.surveyor.BOLD')
-    
-    def get_dbase(self):
+    @property
+    def database(self):
         return 'BOLD'
-
+    
     def get_url(self):
         apiurl = f'http://www.boldsystems.org/index.php/API_Public/combined?taxon={self.taxon}&marker={self.marker}&format=tsv' # this line downloads sequences AND taxonomies
         return apiurl
 
 class SurveyENA(SurveyWAPI):
-    def get_logger(self):
-        self.logger = logging.getLogger('Graboid.database.surveyor.BOLD.surveyor.ENA')
-    def get_dbase(self):
+    @property
+    def database(self):
         return 'ENA'
-
+    
     def get_url(self):
         apiurl = f'https://www.ebi.ac.uk/ena/browser/api/tsv/textsearch?domain=embl&result=sequence&query=%22{self.taxon}%22%20AND%20%22{self.marker}%22'
         return apiurl
 
 class SurveyNCBI(SurveyTool):
-    # This surveyor uses the Entrez package instead of an API, defines its own survey method
-    def get_logger(self):
-        self.logger = logging.getLogger('Graboid.database.surveyor.NCBI')
-    
-    def get_dbase(self):
+    @property
+    def database(self):
         return 'NCBI'
-
+    
+    # This surveyor uses the Entrez package instead of an API, defines its own survey method
     def attempt_dl(self):
         self.attempt = 1
         while self.attempt <= self.max_attempts:
@@ -110,7 +103,8 @@ class SurveyNCBI(SurveyTool):
                     handle.write('\n'.join(search_record['IdList']))
                 self.done = True # signal success
                 break
-            except:
+            except Exception as excp:
+                logger.warning(f'Download of {self.taxon} {self.marker} interrupted (Exception: {excp}), {self.max_attempts - self.attempt} attempts remaining')
                 self.attempt += 1
 
 class Surveyor:
@@ -128,13 +122,15 @@ class Surveyor:
     def survey(self, taxon, marker, database, max_attempts=3):
         # Survey each given database for the taxon / marker duo.
         # ntries determines the number of attempts
-        if not database in Surveyor.tooldict.keys():
+        try:
+            tool = Surveyor.tooldict[database](taxon, marker, self.out_dir)
+        except KeyError:
             logger.error(f'Database name {database} is not valid')
-            return
-        
-        tool = Surveyor.tooldict[database](taxon, marker, self.out_dir)
+            raise
+            
         print(f'Surveying database {database} for {taxon} {marker}')
-        
         tool.survey(max_attempts)
         if tool.done:
             self.out_files[database] = tool.out_file
+        else:
+            raise Exception(f'Failed survey for {taxon} {marker} in {database} database')

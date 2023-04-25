@@ -8,108 +8,135 @@ Direct dataset_construction
 """
 
 #%% Libraries
-from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 import logging
+import os
+from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
+from glob import glob
+
 from mapping import blast
 from mapping import matrix
-import os
 
 #%% set logger
-logger = logging.getLogger('Graboid.mapper')
-logger.setLevel(logging.DEBUG)
+map_logger = logging.getLogger('Graboid.mapper')
+map_logger.setLevel(logging.INFO)
 
-#%% functions
-def make_dirs(base_dir):
-    os.makedirs(f'{base_dir}/data', exist_ok=bool)
-    os.makedirs(f'{base_dir}/warnings', exist_ok=bool)
-
+#%% aux functions
 def check_fasta(fasta_file):
     # checks the given file contains at least one fasta sequence
     nseqs = 0
     with open(fasta_file, 'r') as fasta_handle:
-        for rec in sfp(fasta_handle):
+        for title, seq in sfp(fasta_handle):
             nseqs += 1
     return nseqs
+
+def get_header(fasta_file):
+    # use this to extract the header of the reference fasta sequence
+    with open(fasta_file, 'r') as fasta_handle:
+        for title, seq in sfp(fasta_handle):
+            return title
+        
+def check_ref(ref_file):
+    nseqs = 0
+    marker_len = 0
+    with open(ref_file, 'r') as fasta_handle:
+        for title, seq in sfp(fasta_handle):
+            nseqs += 1
+            marker_len = len(seq)
+        if nseqs > 1:
+            raise Exception(f'Reference file must contain ONE sequence. File {ref_file} contains {nseqs}')
+    return marker_len
+            
+def build_blastdb(ref_seq, db_dir, clear=False, logger=map_logger):
+    # build a blast database
+    # ref_seq : fasta file containing the reference sequences
+    # db_dir : directory to where the generated db files will be stored
+    # clear : overwrite existing db files
+    
+    # check database directory
+    try:
+        db_name = blast.check_db_dir(db_dir)
+        # base exists 
+        if clear:
+            logger.info(f'Overwriting database {db_name} using file {ref_seq}')
+        else:
+            logger.info('A blast database of the name {db_name} already exists in the specified route. To overwrite it run this function again with clear set as True')
+            return
+    except Exception:
+        db_name = db_dir + '/db'
+    # clear previous db_files (if present)
+    for file in glob(db_dir + '/*.n'):
+        os.remove(file)
+    # check that reference file is valid
+    marker_len = check_ref(ref_seq)
+    ref_header = get_header(ref_seq)
+    # build the blast database
+    blast.makeblastdb(ref_seq, db_name)
+    logger.info(f'Generated blast databse from reference sequence "{ref_header}" of length {marker_len} bp')
+    logger.info(f'Blast database was built using the file {ref_seq} and stored in directory {db_dir}')
+    return marker_len
+
 #%% classes
 class Director:
-    def __init__(self, out_dir, warn_dir):
+    def __init__(self, out_dir, warn_dir, logger=map_logger):
+        # directories
         self.out_dir = out_dir
         self.warn_dir = warn_dir
         
         # attributes
         self.db_dir = None
-        self.blast_report = None
-        self.mat_file = None
-        self.acc_file = None
-        self.dims = None
         
         # workers
         self.blaster = blast.Blaster(out_dir)
         self.mapper = matrix.MatBuilder(out_dir)
-    
+        
+        self.logger = logger
     @property
     def accs(self):
         return self.mapper.acclist
-    def get_files(self, seq_file, seq_name=None):
-        # use this to check if a map file already exists
-        self.mapper.generate_outnames(seq_file, seq_name=None)
-        return self.mapper.mat_file, self.mapper.acc_file
-    
-    def set_blastdb(self, db_dir):
-        # establish db_dir as the blast database (must contain 6 *.n* files)
-        check, db_files = blast.check_db_dir(db_dir)
-        n_files = len(db_files)
-        if not check:
-            logger.error(f'Found {n_files} files in {db_dir}. Must contain 6')
-            return
-        self.db_dir = db_dir
+    @property
+    def blast_report(self):
+        return self.blaster.report
+    @property
+    def mat_file(self):
+        return self.mapper.mat_file
+    @property
+    def acc_file(self):
+        return self.mapper.acc_file
+    @property
+    def matrix(self):
+        return self.mapper.matrix
+    @property
+    def bounds(self):
+        return self.mapper.bounds
+    @property
+    def coverage(self):
+        return self.mapper.coverage
+    @property
+    def mesas(self):
+        return self.mapper.mesas
         
-    def build_blastdb(self, ref_seq, ref_name=None, clear=True):
-        # build a blast database
-        # check sequences in ref_seq
-        n_refseqs = check_fasta(ref_seq)
-        if n_refseqs != 1:
-            logger.error(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
-            return
-        # build database directory
-        if not ref_name is None:
-            db_dir = f'{self.out_dir}/{ref_name}'
-        else:
-            ref = ref_seq.split('/')[-1].split('.')[0]
-            db_dir = f'{self.out_dir}/{ref}'
-        os.mkdir(db_dir)
-        # build database
-        self.blaster.make_ref_db(ref_seq, db_dir, clear)
-        self.db_dir = db_dir
-        
-    def direct(self, fasta_file, out_name=None, evalue=0.005, threads=1, keep=False):
+    def direct(self, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1, keep=True):
         # fasta file is the file to be mapped
-        # out_name, optional file name for the generated matrix, otherwise generated automatically
         # evalue is the max evalue threshold for the blast report
+        # db_dir points to the blast database: should be <path to db files>/<db prefix>
         
-        # build reference database (if not already present)
-        if self.db_dir is None:
-            logger.error('No BLAST database set. Set or create one with methods set_blastdb() or build_blastdb()')
-            return
+        self.db_dir = db_dir
         
-        print(f'Performing blast alignment of {fasta_file}...')
+        print('Performing blast alignment of retrieved sequences against reference sequence...')
         # perform BLAST
-        self.blaster.blast(fasta_file, self.db_dir, out_name, threads)
-        self.blast_report = self.blaster.report
-        if self.blast_report is None:
-            logger.error('No blast report found. What happened?')
-            return
+        try:
+            self.blaster.blast(fasta_file, db_dir, threads)
+        except Exception:
+            raise
         print('BLAST is Done!')
         
-        # generate matrix
+        # generate matrix, register mesas
         print('Building alignment matrix...')
-        # if keep == True, keep generated matrix, bounds and acclist in map_data, otherwise map_data is None
-        map_data = self.mapper.build(self.blast_report, fasta_file, out_name, evalue, keep)
-        self.mat_file = self.mapper.mat_file
-        self.acc_file = self.mapper.acc_file
+        try:
+            self.mapper.build(self.blast_report, fasta_file, evalue, dropoff, min_height, min_width, keep)
+        except Exception as excp:
+            self.logger.error(excp)
         print('Done!')
-        if keep:
-            self.matrix = map_data[0]
-            self.bounds = map_data[1]
-            self.acclist = map_data[2]
+        self.logger.info(f'Stored alignment matrix of dimensions {self.matrix.shape} in {self.mat_file}')
+        self.logger.info(f'Stored accession list with {len(self.accs)} records in {self.acc_file}')
         return

@@ -17,9 +17,12 @@ import http
 import logging
 import numpy as np
 import pandas as pd
+import re
 
 #%% setup logger
 logger = logging.getLogger('Graboid.database.fetcher')
+logging.captureWarnings(True)
+
 #%% functions
 # accession list handling
 def acc_slicer(acc_list, chunksize):
@@ -45,22 +48,15 @@ def fetch_seqs(acc_list, database, out_header, bold_file=None, chunk_size=500, m
             failed += chunk
     return failed
 
-def get_accs_from_fasta(fasta_file):
-    # this function is used to retrieve accessions when a fasta file is already provided
-    accs = []
-    with open(fasta_file, 'r') as fasta_handle:
-        for acc, seq in sfp(fasta_handle):
-            accs.append(acc)
-    return accs
 #%% classes
 class NCBIFetcher:
     # This class handles record download from NCBI
+    # bold_file kept for compatibility
     def __init__(self, out_header, bold_file=None):
         # out_header is used to generate the names for the output files
         self.out_seqs = f'{out_header}.seqtmp'
         self.out_taxs = f'{out_header}.taxtmp'
-        self.logger = logging.getLogger('Graboid.database.fetcher.NCBI')
-
+        
     def fetch(self, acc_list, chunk_size=500, max_attempts=3):
         # download acc_list sequences from NCBI to a fasta file and tax ids to an acc:taxID list
         # chunks that can't be downloaded are returned in the failed list
@@ -68,7 +64,7 @@ class NCBIFetcher:
         # split acc_list
         chunks = acc_slicer(acc_list, chunk_size)
         n_chunks = int(np.ceil(len(acc_list)/chunk_size))
-        
+        print(f'Downloading {len(acc_list)} records from NCBI...')
         for chunk_n, chunk in enumerate(chunks):
             print(f'Downloading chunk {chunk_n + 1} of {n_chunks}')
             seq_recs = []
@@ -93,22 +89,20 @@ class NCBIFetcher:
             if len(seq_recs) != len(chunk):
                 failed += chunk
                 continue
-            seqs = []
-            taxs = {'Accession':[], 'TaxID':[]}
             
-            # generate seq records and acc:taxid series
+            # generate seq records and retrieve taxids
+            seqs = []
+            taxids = []
             for acc, seq in zip(chunk, seq_recs):
                 seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
-                taxs['Accession'].append(acc)
-                taxs['TaxID'].append(seq['TSeq_taxid'])
-                
+                taxids.append(seq['TSeq_taxid'])
+            
             # save seq recods to fasta
             with open(self.out_seqs, 'a') as out_handle0:
                 SeqIO.write(seqs, out_handle0, 'fasta')
             # save tax table to csv
-            taxs = pd.DataFrame(taxs)
-            taxs.to_csv(self.out_taxs, header = False, index = False, mode='a')
-            
+            taxs = pd.DataFrame({'Accession':chunk, 'TaxID':taxids})
+            taxs.to_csv(self.out_taxs, header = chunk_n == 0, index = False, mode='a')
         return failed
 
 class BOLDFetcher:
@@ -116,8 +110,7 @@ class BOLDFetcher:
         self.out_seqs = f'{out_header}.seqtmp'
         self.out_taxs = f'{out_header}.taxtmp'
         self.bold_file = bold_file
-        self.logger = logging.getLogger('Graboid.database.fetcher.BOLD')
-
+        
     def fetch(self, acc_list, chunk_size=0, max_attempts=3):
         # read table and get records in acc_list
         bold_tab = pd.read_csv(self.bold_file, sep = '\t', encoding = 'latin-1', dtype = str) # latin-1 to parse BOLD files
@@ -134,61 +127,51 @@ class BOLDFetcher:
         with open(self.out_seqs, 'a') as out_handle:
             SeqIO.write(records, out_handle, 'fasta')
         tax_subtab.to_csv(self.out_taxs)
-        
         return [] # empty list returned for compatibility with NCBIFetcher's failed list
 
 fetch_dict = {'BOLD':BOLDFetcher,
               'NCBI':NCBIFetcher}
 
 class Fetcher():
+    # class attribute containing valid fetcher tools
+    fetch_dict = {'BOLD':BOLDFetcher,
+                  'NCBI':NCBIFetcher}
     def __init__(self, out_dir):
-        self.out_header = ''
         self.out_dir = out_dir
         self.seq_files = {}
         self.tax_files = {}
         self.bold_file = None
     
-    def load_accfile(self, acc_file):
+    def load_acctab(self, acc_file):
         self.acc_file = acc_file
         self.acc_tab = pd.read_csv(acc_file, index_col = 0)
         
         # generate header for output files
-        out_header = acc_file.split('/')[-1].split('.')[0]
-        self.out_header = f'{self.out_dir}/{out_header}'
-        self.failed_file = f'{self.out_dir}/{out_header}_failed.acc'
-    
-    def set_bold_file(self, bold_file):
-        # Bold summary file needed to extract sequences and taxonomic data from
-        self.bold_file = bold_file
-        
-    def check_accs(self):
+        self.out_header = re.sub('.*/', self.out_dir + '/', re.sub('\..*', '', acc_file))
+        self.failed_file = self.out_header +'_failed.acc'
+        # check that acc tab is not empty
         if len(self.acc_tab) == 0:
-            logger.warning(f'Accession table from {self.acc_file} is empty')
-            return False
-        if 'BOLD' in self.acc_tab['Database']:
-            if self.bold_file is None:
-                logger.error(f'BOLD records detected in {self.acc_file} but no BOLD.summ file was provided')
-                return False
-        return True
+            raise Exception(f'Accession table from {self.acc_file} is empty')
 
-    def fetch(self, acc_file, chunk_size=500, max_attempts=3):
+    def fetch(self, acc_tab, summ_files, chunk_size=500, max_attempts=3):
         # Fetches sequences and taxonomies, splits acc lists into chunks of chunk_size elements
         # for each chunk, try to download up to max_attempts times
         
-        self.load_accfile(acc_file)
-
-        if not self.check_accs():
-            # acc_table is empty
-            return
+        # load and check files
+        try:
+            self.load_acctab(acc_tab)
+        except Exception as excp:
+            logger.warning(excp)
+            raise
         
         failed = [] # here we store accessions that failed to download
         
         # split the acc_table by database
         for database, sub_tab in self.acc_tab.groupby('Database'):
             acc_list = sub_tab['Accession'].to_list()
-            out_header = f'{self.out_header}_{database}'
-            # set fetcher
-            fetcher = fetch_dict[database](out_header, self.bold_file)
+            out_header = f'{self.out_header}__{database}'
+            # set fetcher, include corresponding summary file (does nothing for mcbi fetcher)
+            fetcher = fetch_dict[database](out_header, summ_files[database])
             # update out file containers
             self.seq_files[database] = fetcher.out_seqs
             self.tax_files[database] = fetcher.out_taxs
@@ -196,9 +179,10 @@ class Fetcher():
             failed0 = fetcher.fetch(acc_list, chunk_size, max_attempts)
             # do a second pass if some sequences couldn't be downloaded
             if len(failed0) == 0:
+                logger.info(f'Retrieved {len(acc_list)}/{len(acc_list)} sequences from {database} database.')
                 continue
             failed0 = fetcher.fetch(failed0, chunk_size, max_attempts)
-            
+            logger.info(f'Retrieved {len(acc_list) - len(failed0)}/{len(acc_list)} sequences from {database} database.')
             if len(failed0) > 0:
                 # failed to download sequences after two passes
                 logger.warning(f'Failed to download {len(failed0)} of {len(acc_list)} records from {database}. Failed accessions saved to {self.failed_file}')
@@ -214,25 +198,26 @@ class Fetcher():
         logger.info(f'Finished retrieving {total_records - failed_records} of {total_records} records.')
         if failed_records > 0:
             logger.info(f'{failed_records} saved to {self.failed_files}')
+        if len(failed) == len(self.acc_tab):
+            raise Exception('Failed to retrieve sequences')
     
     def fetch_tax_from_fasta(self, fasta_file):
         # generate output file
-        header = fasta_file.split('/')[-1].split('.fasta')[0]
-        out_file = f'{self.out_dir}/{header}.taxtmp'
+        out_file = re.sub('.*/', self.out_dir + '/', re.sub('.seqtmp', '.taxtmp', fasta_file))
+        self.seq_files['NCBI'] = fasta_file
         self.tax_files['NCBI'] = out_file
         
         # get list of accessions
-        acc_list = get_accs_from_fasta(fasta_file)
+        with open(fasta_file, 'r') as fasta_handle:
+            acc_list = [re.sub(' .*', '', acc) for acc, seq in sfp(fasta_handle)]
         
+        if len(acc_list) == 0:
+            raise Exception(f'No valid accession codes could be retrieved from file {fasta_file}')
         # retrieve taxIDs and build TaxID tab
-        taxs = {'Accession':[], 'TaxID':[]}
         summ_handle = Entrez.esummary(db='nucleotide', id=acc_list, retmode='xml')
         summ_recs = Entrez.read(summ_handle)
+        taxids = [int(summ['TaxId']) for summ in summ_recs]
         
-        for acc, summ in zip(acc_list, summ_recs):
-            taxs['Accession'].append(acc)
-            taxs['TaxID'].append(int(summ['TaxId']))
-        
+        taxs = pd.DataFrame({'Accession':acc_list, 'TaxID':taxids})
         # save tax table to csv
-        taxs = pd.DataFrame(taxs)
         taxs.to_csv(out_file, header=False, index=False)

@@ -9,6 +9,7 @@ Classifier class, handles steps: database loading, query blasting, custom calibr
 """
 
 #%% libraries
+from datetime import datetime
 import json
 import logging
 import matplotlib.pyplot as plt
@@ -17,6 +18,8 @@ import os
 import pandas as pd
 import re
 # Graboid libraries
+from calibration import cal_calibrator as ccb
+from classification import cost_matrix
 from DATA import DATA
 from mapping import director as mp
 
@@ -113,6 +116,9 @@ def plot_ref_v_qry(ref_coverage, ref_mesas, qry_coverage, qry_mesas, overlapps, 
     
     # TODO: save plot
 
+def select_params_per_window(params):
+    # TODO: retrieve param combinations from params.json
+    pass
 #%% classes
 class Classifier:
     def __init__(self):
@@ -140,6 +146,8 @@ class Classifier:
         # load matrix & accession codes
         map_npz = np.load(db_meta['mat_file'])
         self.ref_matrix = map_npz['matrix']
+        self.ref_mesas = map_npz['mesas']
+        self.ref_coverage = map_npz['coverage']
         self.max_pos = self.matrix.shape[1]
         with open(db_meta['acc_file'], 'r') as handle:
             self.ref_accs = handle.read().splitlines()
@@ -152,6 +160,22 @@ class Classifier:
         
         logger.info(f'Set database: {database}')
     
+    def set_outdir(self, out_dir):
+        self.out_dir = out_dir
+        self.calibration_dir = out_dir + '/calibration'
+        self.classif_dir = out_dir + '/classification'
+        self.warn_dir = out_dir + '/warnings'
+        
+        try:
+            os.mkdir(out_dir)
+        except FileExistsError:
+            raise Exception(f'Specified output directory "{out_dir}" already exists. Pick a different name or set argmuent "clear" as True')
+        # make a directory to store classification reports
+        os.makedirs(self.calibration_dir)
+        os.makedirs(self.classif_dir)
+        os.makedirs(self.warn_dir)
+        
+    # load and map query file
     def set_query(self, query_file, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1):
         if not hasattr(self, 'db'):
             raise Exception('No database set. Aborting')
@@ -165,8 +189,96 @@ class Classifier:
         self.query_matrix = matrix
         self.query_coverage = coverage
         self.query_mesas = mesas
+    
+    # locate overlapping regions between reference and query maps
+    def get_overlaps(self, min_width):
+        self.overlapps = get_mesas_overlap(self.ref_mesas, self.qry_mesas)
+    
     # custom calibrate
+    def custom_calibrate(self,
+                         max_n,
+                         step_n,
+                         max_k,
+                         step_k,
+                         mat_code,
+                         row_thresh,
+                         col_thresh,
+                         min_seqs,
+                         rank,
+                         metric,
+                         min_n,
+                         min_k,
+                         criterion,
+                         threads=1,
+                         **kwargs):
+        # set calibrator
+        calibrator = ccb.Calibrator()
+        calibrator.set_database(self.db)
+        
+        if 'w_starts' in kwargs.keys() and 'w_ends' in kwargs.keys():
+            calibrator.set_custom_windows(kwargs['w_starts'], kwargs['w_ends'])
+        elif hasattr(self, 'overlapps'):
+            calibrator.set_custom_windows(self.overlapps[:,0], self.overlapps[:,1])
+        else:
+            raise Exception('Missing parameters to set calibration windows. Run the get_overlapps method to get overlapping sections of query and reference data or provide matching sets of custom start and end positions')
+        try:
+            calibrator.set_outdir(self.calibration_dir + '/' + kwargs['cal_dir'])
+        except KeyError:
+            cal_dir = datetime.now().strftime("%Y%m%d_%H%M%S")
+            calibrator.set_outdir(self.calibration_dir + '/' + cal_dir)
+        
+        cost_mat = cost_matrix.get_matrix(mat_code)
+        calibrator.grid_search(max_n,
+                               step_n,
+                               max_k,
+                               step_k,
+                               cost_mat,
+                               row_thresh,
+                               col_thresh,
+                               min_seqs,
+                               rank,
+                               metric,
+                               min_n,
+                               min_k,
+                               criterion,
+                               threads)
     # select parameters
+    def select_params(self, metric, cal_dir=None, **kwargs):
+        # specify taxa
+        tax_idxs = self.guide.index.to_numpy()
+        if 'rank' in kwargs.keys():
+            rank = kwargs['rank'].lower()
+            if rank in self.ranks:
+                tax_idxs = self.guide.loc[self.guide.Rank == rank]
+            else:
+                raise Exception(f'Specified rank {rank} not found among: {" ".join(self.ranks)}')
+        if 'taxa' in kwargs.keys():
+            taxa = list(kwargs['taxa'])
+            upper_taxa = set([upp for upp in map(lambda x : x.upper, taxa)])
+            upper_guide = [upp for upp in map(lambda x : x.upper, self.guide.SciName.tolist())]
+            rev_guide = self.guide.reset_index()
+            rev_guide.index = upper_guide
+            tax_intersect = set(upper_guide).intersection(upper_taxa)
+            if len(tax_intersect) == 0:
+                raise Exception('None of the given taxa: {' '.join(taxa)} found in the database')
+            tax_idxs = rev_guide.loc[tax_intersect.TaxID].to_numpy()
+        
+        # locate calibration directory
+        if cal_dir is None:
+            cal_dirs = os.listdir(self.calibration_dir)
+            cal_dirs.sort()
+            if len(cal_dirs) == 0:
+                raise Exception(f'No calibration reports found at location')
+            cal_dir = cal_dirs[-1]
+        
+        # open metric report
+        report_file = cal_dir + f'/calibration_{metric}.report'
+        params_file = cal_dir + f'/calibration_{metric}.params'
+        
+        params = pd.read_csv(params_file, index_col=[0,1], header=[0,1]).loc[:].loc[tax_idxs]
+        # select parameters combinations for each window
+        return
+    
     # classify
     # report
 

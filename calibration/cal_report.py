@@ -78,11 +78,11 @@ def translate_params(params, n_range, k_range, methods='uwd'):
             param_datum[rk_idx][pos0, pos1] = (n,k,m)
     return param_datum
 
-def build_report(win_list, metrics, metric, tax_ext, guide, n_range, k_range, win_indexes):
+def build_report(win_list, metrics, metric, tax_ext, guide, n_range, k_range):
     met_codes = {'acc':0, 'prc':1, 'rec':2, 'f1':3}
     pre_report, params = build_prereport(metrics, met_codes[metric], tax_ext)
     # process report
-    pre_report.columns = [f'W{w_idx} [{win.start} - {win.end}]' for w_idx, win in zip(win_indexes, win_list)]
+    pre_report.columns = [(win.start, win.end) for win in win_list]
     index_datum = guide.loc[pre_report.index.get_level_values(1)]
     pre_report.index = pd.MultiIndex.from_arrays([index_datum.Rank, index_datum.SciName])
     

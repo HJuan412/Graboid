@@ -194,19 +194,30 @@ class Calibrator:
                     handle.write(f'\t{n} sites: {n_sites}\n')
     
     def report_metrics(self, report, params, metric):
+        # report already has tax_names as the second level of the multiindex
+        if not self.save:
+            return
         # translate report tax names
-        tax_idxs = report.index.get_level_values(1)
-        tax_names = self.guide.loc[tax_idxs].sort_values('SciName')
-        report.to_csv(self.reports_dir + '/calibration_{metric}.report')
-        # build params table
-        for rk_idx, rk in enumerate(self.ranks):
-            rk_report = report.loc[rk]
-            sort_taxa = np.argsort(rk_report.index)
-            rk_report = rk_report.sort_index()
-            rk_params = params[rk_idx][sort_taxa]
-            rk_annot = build_annot(rk_params)
-        # TODO: ensure that the calibration reports are built with rows sorted by the taxnames
-            
+        tax_names = [i for i in map(lambda x : x.upper(), report.index.get_level_values(1).tolist())]
+        # may need to change type of column headers because csv doesn't like tuples
+        # report has a multiindex (rank, tax_name)
+        report.to_csv(self.reports_dir + '/{metric}_calibration.csv')
+        
+        # build params dictionary
+        windows = {}
+        merged_params = np.concatenate(params, 0)
+        for w_idx, (win, param_row) in enumerate(zip(report.columns.tolist(), merged_params.T)):
+            win_keys = {i for i in set(param_row) if isinstance(i, tuple)}
+            win_keys.add(np.nan)
+            win_dict = dict.fromkeys(win_keys, [])
+            for tax_idx, param_combo in zip(tax_names, param_row):
+                win_dict[param_combo].append(tax_idx)
+            windows[win] = win_dict
+        with open(self.reports_dir + '/{metric}_params.json', 'w') as handle:
+            # windows dictionary has structure:
+                # windows = {(w0_start, w0_end) : {(n0, k0, m0) : [TAX_NAME0, ..., TAX_NAMEn]}} # TAX_NAMEs are not separated by rank. This json dictionary will be used to locate the best param combination for specified taxa in the classification step
+            json.dump(windows, handle)
+    
     def grid_search(self,
                     max_n,
                     step_n,
@@ -292,6 +303,10 @@ class Calibrator:
         prc_report, prc_params = cal_report.build_report(win_list, metrics, 'prc', self.tax_ext, self.guide, n_range, k_range)
         rec_report, rec_params = cal_report.build_report(win_list, metrics, 'rec', self.tax_ext, self.guide, n_range, k_range)
         f1_report, f1_params = cal_report.build_report(win_list, metrics, 'f1', self.tax_ext, self.guide, n_range, k_range)
+        self.report_metrics(acc_report, acc_params, 'acc')
+        self.report_metrics(prc_report, prc_params, 'prc')
+        self.report_metrics(rec_report, rec_params, 'rec')
+        self.report_metrics(f1_report, f1_params, 'f1')
         t7 = time.time()
         print(f'Done in {t7 - t6:.3f} seconds')
         

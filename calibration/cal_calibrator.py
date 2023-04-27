@@ -73,17 +73,10 @@ def select_sites(win_list, tax_ext, rank, min_n, max_n, step_n):
 
 #%% classes
 class Calibrator:
-    def __init__(self, out_dir, warn_dir, prefix='calibration'):
-        self.out_dir = out_dir
-        self.classif_dir = out_dir + '/classification'
-        self.warn_dir = warn_dir
-        
-        # make a directory to store classification reports
-        os.makedirs(self.classif_dir, exist_ok=True)
-        # prepare out files
-        self.report_file = self.out_dir + f'/{prefix}.report'
-        self.classif_file = self.out_dir + f'/{prefix}.classif'
-        self.meta_file = self.out_dir + f'/{prefix}.meta'
+    def __init__(self, out_dir=None):
+        self.save = False # indicates if a save location is set, if True, calibration reports are stored to files
+        if not out_dir is None:
+            self.set_outdir(out_dir)
     
     @property
     def window_len(self):
@@ -97,12 +90,28 @@ class Calibrator:
             return len(self.windows)
         return 0
     
+    def set_outdir(self, out_dir):
+        self.out_dir = out_dir
+        self.reports_dir = out_dir + '/reports'
+        self.classif_dir = out_dir + '/classification'
+        self.warn_dir = out_dir + '/warnings'
+        
+        try:
+            os.mkdir(out_dir)
+        except FileExistsError:
+            raise Exception(f'Specified output directory "{out_dir}" already exists. Pick a different name or set argmuent "clear" as True')
+        self.save = True
+        # make a directory to store classification reports
+        os.makedirs(self.reports_dir)
+        os.makedirs(self.classif_dir)
+        os.makedirs(self.warn_dir)
+        
     def set_database(self, database):
         self.db = database
         try:
             self.db_dir = DATA.get_database(database)
-        except Exception as excp:
-            raise excp
+        except Exception:
+            raise
         # use meta file from database to locate necessary files
         with open(self.db_dir + '/meta.json', 'r') as meta_handle:
             db_meta = json.load(meta_handle)
@@ -159,14 +168,53 @@ class Calibrator:
         for coor_idx, coords in raw_coords:
             logger.info(f'\tWindow {coor_idx}: [{coords[0]} - {coords[1]}] (length {coords[1] - coords[0]})')
     
+    # report functions
+    def report_windows(self, win_indexes, win_list, rej_indexes, rej_list):
+        if not self.save:
+            return
+        with open(self.reports_dir + '/windows.report', 'w') as handle:
+            if len(win_list) > 0:
+                handle.write('Collapsed windows:\n\n')
+                for w_idx, win in zip(win_indexes, win_list):
+                    handle.write(f'Window {w_idx} {self.windows[w_idx]}: collapsed into matrix of shape {win.window.shape}\n')
+                handle.write('\n')
+            if len(rej_list) > 0:
+                handle.write('Rejected windows:\n\n')
+                for r_idx, rej in zip(rej_indexes, rej_list):
+                    handle.write(f'Window {r_idx} {self.windows[r_idx]}: ' + rej)
+    
+    def report_sites(self, window_sites, win_list, win_indexes, n_range):
+        if not self.save:
+            return
+        with open(self.reports_dir + '/sites.report', 'w') as handle:
+            handle.write('Selected sites:\n')
+            for w_idx, win, win_sites in zip(win_indexes, win_list, window_sites):
+                handle.write(f'Sites for window {w_idx} {self.windows[w_idx]}:\n')
+                for n, n_sites in zip(n_range, win_sites):
+                    handle.write(f'\t{n} sites: {n_sites}\n')
+    
+    def report_metrics(self, report, params, metric):
+        # translate report tax names
+        tax_idxs = report.index.get_level_values(1)
+        tax_names = self.guide.loc[tax_idxs].sort_values('SciName')
+        report.to_csv(self.reports_dir + '/calibration_{metric}.report')
+        # build params table
+        for rk_idx, rk in enumerate(self.ranks):
+            rk_report = report.loc[rk]
+            sort_taxa = np.argsort(rk_report.index)
+            rk_report = rk_report.sort_index()
+            rk_params = params[rk_idx][sort_taxa]
+            rk_annot = build_annot(rk_params)
+        # TODO: ensure that the calibration reports are built with rows sorted by the taxnames
+            
     def grid_search(self,
                     max_n,
                     step_n,
                     max_k,
                     step_k,
                     cost_mat,
-                    row_thresh=0.2,
-                    col_thresh=0.2,
+                    row_thresh=0.1,
+                    col_thresh=0.1,
                     min_seqs=50,
                     rank='genus',
                     metric='f1',
@@ -198,14 +246,8 @@ class Calibrator:
         # collapse windows
         print('Collapsing windows...')
         win_indexes, win_list, rej_indexes, rej_list = collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
-        # log window collapses
-        logger.info('=' * 10 + 'Collapsed windows:')
-        for w_idx, win in zip(win_indexes, win_list):
-            logger.info(f'Window {w_idx} {self.windows[w_idx]}: collapsed into matrix of shape {win.window.shape}')
-
-        logger.info('=' * 10 + 'Rejected windows:')
-        for r_idx, rej in zip(rej_indexes, rej_list):
-            logger.info(f'Window {r_idx} {self.windows[r_idx]}: ' + rej)
+        self.report_windows(win_indexes, win_list, rej_indexes, rej_list)
+        
         t1 = time.time()
         print(f'Collapsed windows in {t1 - t0:.3f} seconds')
         # abort calibration if no collapsed windows are generated
@@ -216,6 +258,7 @@ class Calibrator:
         # select sites
         print('Selecting informative sites...')
         window_sites = select_sites(win_list, self.tax_ext, rank, min_n, max_n, step_n)
+        self.report_sites(window_sites, win_list, win_indexes, n_range)
         t2 = time.time()
         print(f'Sitee selection finished  in {t2 - t1:.3f} seconds')
         
@@ -239,31 +282,26 @@ class Calibrator:
         
         # get metrics
         print('Calculating metrics...')
-        # window_taxes = [self.tax_ext.loc[win.taxonomy].to_numpy() for win in win_list]
-        # with concurrent.futures.ProcessPoolExecutor(max_workers=3) as executor:
-        #     future_metrics = [future for future in executor.map(cal_metrics.get_metricas, win_classifs, window_taxes)]
         metrics = cal_metrics.get_metrics(win_list, win_classifs, self.tax_ext, threads)
         t6 = time.time()
         print(f'Done in {t6 - t5:.3f} seconds')
         
         # report
         print('Building report...')
-        # met_codes = {'acc':0, 'prc':1, 'rec':2, 'f1':3}
-        # pre_report, params = cal_report.build_prereport(metrics, met_codes[metric], self.tax_ext)
-        # # process report
-        # pre_report.columns = [f'W{w_idx} [{win.start} - {win.end}]' for w_idx, win in zip(win_indexes, win_list)]
-        # index_datum = self.guide.loc[pre_report.index.get_level_values(1)]
-        # pre_report.index = pd.MultiIndex.from_arrays([index_datum.Rank, index_datum.SciName])
-        
-        # params = cal_report.translate_params(params, n_range, k_range)
-        report, params = cal_report.build_report(win_list, metrics, metric, self.tax_ext, self.guide, n_range, k_range, win_indexes)
+        acc_report, acc_params = cal_report.build_report(win_list, metrics, 'acc', self.tax_ext, self.guide, n_range, k_range)
+        prc_report, prc_params = cal_report.build_report(win_list, metrics, 'prc', self.tax_ext, self.guide, n_range, k_range)
+        rec_report, rec_params = cal_report.build_report(win_list, metrics, 'rec', self.tax_ext, self.guide, n_range, k_range)
+        f1_report, f1_params = cal_report.build_report(win_list, metrics, 'f1', self.tax_ext, self.guide, n_range, k_range)
         t7 = time.time()
         print(f'Done in {t7 - t6:.3f} seconds')
         
         # # plot results
         print('Plotting results...')
-        cal_plot.plot_results(report, params, metric, self.plot_prefix, self.ranks) # TODO: define plot_prefix
+        cal_plot.plot_results(acc_report, acc_params, metric, self.plot_prefix, self.ranks) # TODO: define plot_prefix
+        cal_plot.plot_results(prc_report, prc_params, metric, self.plot_prefix, self.ranks) # TODO: define plot_prefix
+        cal_plot.plot_results(rec_report, rec_params, metric, self.plot_prefix, self.ranks) # TODO: define plot_prefix
+        cal_plot.plot_results(f1_report, f1_params, metric, self.plot_prefix, self.ranks) # TODO: define plot_prefix
         t8 = time.time()
         print(f'Done in {t8 - t7:.3f} seconds')
         print(f'Finished in {t7 - t0:.3f} seconds')
-        return report, params
+        return

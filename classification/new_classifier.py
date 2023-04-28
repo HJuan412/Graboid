@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
+import pickle
 import re
 # Graboid libraries
 from calibration import cal_calibrator as ccb
@@ -116,9 +117,49 @@ def plot_ref_v_qry(ref_coverage, ref_mesas, qry_coverage, qry_mesas, overlapps, 
     
     # TODO: save plot
 
-def select_params_per_window(params):
-    # TODO: retrieve param combinations from params.json
-    pass
+def select_window_params(window_dict, rep_column):
+    # select parameters of taxa with values in rep_column above 0 (null or 0 value are worthless)
+    # for win, win_dict in params.items():
+    #     for tax in taxa:
+    #         for combo, tx in win_dict.items():
+    #             if tax in tx:
+    #                 tax_params[win].update({tax:combo})
+    #                 params_per_win[win].add(combo)
+    return
+
+def select_params_per_window(params, report, **kwargs):
+    report_taxa = report.index.get_level_values(1)
+    tax_idx = [tx.upper() for tx in report.index.get_level_values(1)]
+    # specify rank and/or taxa
+    if 'rank' in kwargs.keys():
+        rank = kwargs['rank'].lower()
+        report_ranks = report.index.get_level_values(0)
+        if not rank in report_ranks:
+            raise Exception(f'Specified rank {rank} not found among: {" ".join(report_ranks)}')
+        report_taxa = report.loc[rank].index.values
+        tax_idx = [tx.upper() for tx in report_taxa]
+        
+    if 'taxa' in kwargs.keys():
+        taxa = list(kwargs['taxa'])
+        upper_taxa = set([upp for upp in map(lambda x : x.upper, taxa)])
+        upper_rep_taxa = set([upp for upp in map(lambda x : x.upper, report_taxa)])
+        tax_idx = set(upper_rep_taxa).intersection(upper_taxa)
+        if len(tax_idx) == 0:
+            raise Exception('None of the given taxa: {' '.join(taxa)} found in the database')
+    
+    report_cp = report.droplevel(level=0)
+    report_cp.index = [tx.upper() for tx in report_cp.index]
+    report_cp = report_cp.loc[tax_idx]
+    # takes a parameters dictionary and a taxa list
+    params_per_win = {win:set() for win in params.keys()}
+    tax_params = {win:{} for win in params.keys()}
+    
+    for win, rep_column in report_cp.T.iterrows():
+        win_params, win_tax_params = select_window_params(params[win], rep_column)
+        params_per_win[win] = win_params
+        tax_params[win] = win_tax_params
+
+    return params_per_win, tax_params
 #%% classes
 class Classifier:
     def __init__(self):
@@ -248,9 +289,7 @@ class Classifier:
         tax_idxs = self.guide.index.to_numpy()
         if 'rank' in kwargs.keys():
             rank = kwargs['rank'].lower()
-            if rank in self.ranks:
-                tax_idxs = self.guide.loc[self.guide.Rank == rank]
-            else:
+            if not rank in self.ranks:
                 raise Exception(f'Specified rank {rank} not found among: {" ".join(self.ranks)}')
         if 'taxa' in kwargs.keys():
             taxa = list(kwargs['taxa'])
@@ -272,14 +311,20 @@ class Classifier:
             cal_dir = cal_dirs[-1]
         
         # open metric report
+        # TODO: correct file names
         report_file = cal_dir + f'/calibration_{metric}.report'
         params_file = cal_dir + f'/calibration_{metric}.params'
         
-        params = pd.read_csv(params_file, index_col=[0,1], header=[0,1]).loc[:].loc[tax_idxs]
+        report = pd.read_csv(report_file, index_col=[0,1], header=[0,1])
+        # Load parameters using pickles
+        with open(params_file, 'rb') as handle:
+            params = pickle.load(handle)
         # select parameters combinations for each window
         return
     
     # classify
+    # classify using different parameter combinations, register which parameter 
+    
     # report
 
 #%%

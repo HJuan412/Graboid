@@ -94,6 +94,7 @@ class Calibrator:
     def set_outdir(self, out_dir):
         self.out_dir = out_dir
         self.reports_dir = out_dir + '/reports'
+        self.plots_dir = out_dir + '/plots'
         self.classif_dir = out_dir + '/classification'
         self.warn_dir = out_dir + '/warnings'
         
@@ -231,10 +232,10 @@ class Calibrator:
                     col_thresh=0.1,
                     min_seqs=50,
                     rank='genus',
-                    metric='f1',
                     min_n=5,
                     min_k=3,
                     criterion='orbit',
+                    collapse_hm=True,
                     threads=1):
         
         # prepare n, k ranges
@@ -250,7 +251,6 @@ class Calibrator:
         logger.info(f'Max unknowns per site: {col_thresh * 100}%')
         logger.info(f'Min non-redundant sequences: {min_seqs}')
         logger.info(f'Rank used for site selection: {rank}')
-        logger.info(f'Choose by metric: {metric}')
         logger.info(f'Classification criterion: {criterion}')
         logger.info(f'Threads: {threads}')
         
@@ -312,14 +312,15 @@ class Calibrator:
         self.report_metrics(f1_report, f1_params, 'f1')
         t7 = time.time()
         print(f'Done in {t7 - t6:.3f} seconds')
-        return (acc_report, acc_params), (prc_report, prc_params), (rec_report, rec_params), (f1_report, f1_params)
+        
         # # plot results
         print('Plotting results...')
-        cal_plot.plot_results(acc_report, acc_params, metric, self.plot_prefix, self.ranks) # TODO: define plot_prefix
-        cal_plot.plot_results(prc_report, prc_params, metric, self.plot_prefix, self.ranks) # TODO: define plot_prefix
-        cal_plot.plot_results(rec_report, rec_params, metric, self.plot_prefix, self.ranks) # TODO: define plot_prefix
-        cal_plot.plot_results(f1_report, f1_params, metric, self.plot_prefix, self.ranks) # TODO: define plot_prefix
-        t8 = time.time()
-        print(f'Done in {t8 - t7:.3f} seconds')
+        if self.save:
+            cal_plot.plot_results(acc_report, acc_params, 'acc', self.plots_dir, self.ranks, collapse_hm)
+            cal_plot.plot_results(prc_report, prc_params, 'prc', self.plots_dir, self.ranks, collapse_hm)
+            cal_plot.plot_results(rec_report, rec_params, 'rec', self.plots_dir, self.ranks, collapse_hm)
+            cal_plot.plot_results(f1_report, f1_params, 'f1', self.plots_dir, self.ranks, collapse_hm)
+            t8 = time.time()
+            print(f'Done in {t8 - t7:.3f} seconds')
         print(f'Finished in {t7 - t0:.3f} seconds')
         return

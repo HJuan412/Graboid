@@ -13,6 +13,7 @@ import logging
 import numpy as np
 import os
 import pandas as pd
+import pickle
 import sys
 import time
 # Graboid libraries
@@ -58,7 +59,7 @@ def collapse_windows(windows, matrix, tax_tab, row_thresh=0.1, col_thresh=0.1, m
     win_list = [collapsed_windows[idx] for idx in win_indexes]
     
     rej_indexes = np.sort(list(rejected_windows.keys()))
-    rej_list = [rejected_windows[idx] for idx in win_indexes]
+    rej_list = [rejected_windows[idx] for idx in rej_indexes]
     
     return win_indexes, win_list, rej_indexes, rej_list
 
@@ -201,22 +202,24 @@ class Calibrator:
         tax_names = [i for i in map(lambda x : x.upper(), report.index.get_level_values(1).tolist())]
         # may need to change type of column headers because csv doesn't like tuples
         # report has a multiindex (rank, tax_name)
-        report.to_csv(self.reports_dir + '/{metric}_calibration.csv')
+        report_cp = report.copy()
+        report_cp.columns = pd.MultiIndex.from_tuples(report_cp.columns, names=['w_start', 'w_end'])
+        report_cp.to_csv(self.reports_dir + '/{metric}_calibration.csv') # remember to load using index=[0,1] and header=[0,1]
         
         # build params dictionary
         windows = {}
         merged_params = np.concatenate(params, 0)
         for w_idx, (win, param_row) in enumerate(zip(report.columns.tolist(), merged_params.T)):
-            win_keys = {i for i in set(param_row) if isinstance(i, tuple)}
-            win_keys.add(np.nan)
-            win_dict = dict.fromkeys(win_keys, [])
-            for tax_idx, param_combo in zip(tax_names, param_row):
-                win_dict[param_combo].append(tax_idx)
+            combos = [combo for combo in map(lambda x : x if isinstance(x, tuple) else 0, param_row)]
+            win_dict = {wk:[] for wk in set(combos)}
+            for tax_name, param_combo in zip(tax_names, combos):
+                win_dict[param_combo].append(tax_name)
             windows[win] = win_dict
-        with open(self.reports_dir + '/{metric}_params.json', 'w') as handle:
+
+        with open('tests/calib_abril_2023/params.pickle', 'wb') as handle:
             # windows dictionary has structure:
                 # windows = {(w0_start, w0_end) : {(n0, k0, m0) : [TAX_NAME0, ..., TAX_NAMEn]}} # TAX_NAMEs are not separated by rank. This json dictionary will be used to locate the best param combination for specified taxa in the classification step
-            json.dump(windows, handle)
+            pickle.dump(windows, handle)
     
     def grid_search(self,
                     max_n,
@@ -241,8 +244,8 @@ class Calibrator:
         logger.info('Calibration report:')
         logger.info('=' * 10 + '\nCalibration parameters:')
         logger.info('Database: {self.db}')
-        logger.info(f'N sites: {" ".join(n_range)}')
-        logger.info(f'K neighbours: {" ".join(k_range)}')
+        logger.info(f'N sites: {n_range}')
+        logger.info(f'K neighbours: {k_range}')
         logger.info(f'Max unknowns per sequence: {row_thresh * 100}%')
         logger.info(f'Max unknowns per site: {col_thresh * 100}%')
         logger.info(f'Min non-redundant sequences: {min_seqs}')
@@ -260,7 +263,7 @@ class Calibrator:
         self.report_windows(win_indexes, win_list, rej_indexes, rej_list)
         
         t1 = time.time()
-        print(f'Collapsed windows in {t1 - t0:.3f} seconds')
+        print(f'Collapsed {len(win_list)} of {len(self.windows)} windows in {t1 - t0:.3f} seconds')
         # abort calibration if no collapsed windows are generated
         if len(win_list) == 0:
             logger.info('No windows passed the collapsing filters. Ending calibration')
@@ -271,7 +274,7 @@ class Calibrator:
         window_sites = select_sites(win_list, self.tax_ext, rank, min_n, max_n, step_n)
         self.report_sites(window_sites, win_list, win_indexes, n_range)
         t2 = time.time()
-        print(f'Sitee selection finished  in {t2 - t1:.3f} seconds')
+        print(f'Site selection finished  in {t2 - t1:.3f} seconds')
         
         # calculate distances
         print('Calculating paired distances...')
@@ -309,7 +312,7 @@ class Calibrator:
         self.report_metrics(f1_report, f1_params, 'f1')
         t7 = time.time()
         print(f'Done in {t7 - t6:.3f} seconds')
-        
+        return (acc_report, acc_params), (prc_report, prc_params), (rec_report, rec_params), (f1_report, f1_params)
         # # plot results
         print('Plotting results...')
         cal_plot.plot_results(acc_report, acc_params, metric, self.plot_prefix, self.ranks) # TODO: define plot_prefix

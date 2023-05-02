@@ -160,10 +160,22 @@ def select_params_per_window(params, report, **kwargs):
         tax_params[win] = win_tax_params
 
     return params_per_win, tax_params
+
+# parameter selection
+def get_param_tab(keys, ranks):
+    tuples = [k for k in keys if isinstance(k, tuple)]
+    param_tab = pd.DataFrame(tuples, columns='n k m'.split())
+    param_tab = pd.compat([param_tab, pd.DataFrame(data=False, index=param_tab.index, columns=ranks, dtype=bool)], axis=1)
+    param_tab = param_tab.set_index(['n', 'k', 'm'])
+    param_tab = param_tab.sort_index(level=[0,1])
+    return param_tab
+
 #%% classes
 class Classifier:
-    def __init__(self):
-        pass
+    def __init__(self, out_dir):
+        self.set_outdir(out_dir)
+        self.db = None
+        self.last_calibration = None
     
     def set_database(self, database):
         self.db = database
@@ -201,20 +213,32 @@ class Classifier:
         
         logger.info(f'Set database: {database}')
     
+    def read_meta(self):
+        self.set_database(self.meta['db'])
+        self.last_calibration = self.meta['last_calibration']
+    
     def set_outdir(self, out_dir):
         self.out_dir = out_dir
         self.calibration_dir = out_dir + '/calibration'
         self.classif_dir = out_dir + '/classification'
         self.warn_dir = out_dir + '/warnings'
         
-        try:
+        if os.path.isdir(out_dir):
+            # out dir already exists
+            try:
+                with open(out_dir + 'meta.json', 'r') as handle:
+                    self.meta = json.load(handle)
+                    self.read_meta()
+            except FileNotFoundError:
+                raise Exception('Specified output directory exists but cannot be verified as a Graboid classification directory. Recommend overwrtiting it or using a different name')
+                # TODO: maybe include the option of verifying if it is a classif dir with a damaged/mising meta file
+        else:
             os.mkdir(out_dir)
-        except FileExistsError:
-            raise Exception(f'Specified output directory "{out_dir}" already exists. Pick a different name or set argmuent "clear" as True')
-        # make a directory to store classification reports
-        os.makedirs(self.calibration_dir)
-        os.makedirs(self.classif_dir)
-        os.makedirs(self.warn_dir)
+            # make a directory to store classification reports
+            os.makedirs(self.calibration_dir)
+            os.makedirs(self.classif_dir)
+            os.makedirs(self.warn_dir)
+            self.meta = {}
         
     # load and map query file
     def set_query(self, query_file, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1):
@@ -283,10 +307,13 @@ class Classifier:
                                min_k,
                                criterion,
                                threads)
+        self.last_calibration = calibrator.out_dir
+        
     # select parameters
     def select_params(self, metric, cal_dir=None, **kwargs):
         # specify taxa
         tax_idxs = self.guide.index.to_numpy()
+        use_all = False
         if 'rank' in kwargs.keys():
             rank = kwargs['rank'].lower()
             if not rank in self.ranks:
@@ -301,25 +328,30 @@ class Classifier:
             if len(tax_intersect) == 0:
                 raise Exception('None of the given taxa: {' '.join(taxa)} found in the database')
             tax_idxs = rev_guide.loc[tax_intersect.TaxID].to_numpy()
-        
+        else:
+            # no rank or taxa list was provided, use all parameter combination winners
+            use_all = True
         # locate calibration directory
         if cal_dir is None:
-            cal_dirs = os.listdir(self.calibration_dir)
-            cal_dirs.sort()
-            if len(cal_dirs) == 0:
-                raise Exception(f'No calibration reports found at location')
-            cal_dir = cal_dirs[-1]
+            cal_dir = self.last_calibration
+        elif not cal_dir in os.listdir(self.calibration_dir):
+            raise Exception(f'Specified calibration directory not found in {self.calibration_dir}')
         
-        # open metric report
-        # TODO: correct file names
-        report_file = cal_dir + f'/calibration_{metric}.report'
-        params_file = cal_dir + f'/calibration_{metric}.params'
+        # open calibration and params reports
+        cal_report = pd.read_csv(cal_dir + f'/calibration_{metric}.csv', index_col=[0,1], header=[0,1]).fillna(-1)
+        cal_report.columns = pd.MultiIndex.from_arrays([cal_report.columns.get_level_values(0).astype(int), cal_report.columns.get_level_values(1).astype(int)]) # calibration report headers are read as string tuples, must convert them back to strings of ints
+        with open(cal_dir + f'/params_{metric}.pickle', 'rb') as handle:
+            params_dict = pickle.load(handle)
         
-        report = pd.read_csv(report_file, index_col=[0,1], header=[0,1])
-        # Load parameters using pickles
-        with open(params_file, 'rb') as handle:
-            params = pickle.load(handle)
+        # verify that current database is the same as the calibration report's
+        if self.db != params_dict['db']:
+            self.set_database(params_dict['db'])
+        
+        win_params = {col:[] for col in cal_report.columns}
         # select parameters combinations for each window
+        for win, win_col in cal_report.T.iterrows():
+            accepted = win_col.loc[win_col > 0].index
+            rejected = win_col.loc[win_col <= 0].index.get_level_values(1)
         return
     
     # classify
@@ -328,3 +360,7 @@ class Classifier:
     # report
 
 #%%
+# speed up distance calculation
+# for each site in both the query and reference map, build dictionaries with key:values site_value:seq_indexes
+# get distances between query_dict keys and ref_dict keys (at most #values ** 2)
+# build distances array

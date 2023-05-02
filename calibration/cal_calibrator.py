@@ -105,6 +105,7 @@ class Calibrator:
         self.save = True
         # make a directory to store classification reports
         os.makedirs(self.reports_dir)
+        os.makedirs(self.plots_dir)
         os.makedirs(self.classif_dir)
         os.makedirs(self.warn_dir)
         
@@ -205,21 +206,26 @@ class Calibrator:
         # report has a multiindex (rank, tax_name)
         report_cp = report.copy()
         report_cp.columns = pd.MultiIndex.from_tuples(report_cp.columns, names=['w_start', 'w_end'])
-        report_cp.to_csv(self.reports_dir + '/{metric}_calibration.csv') # remember to load using index=[0,1] and header=[0,1]
+        report_cp.to_csv(self.reports_dir + f'/{metric}_calibration.csv') # remember to load using index=[0,1] and header=[0,1]
         
         # build params dictionary
         windows = {}
         merged_params = np.concatenate(params, 0)
         for w_idx, (win, param_row) in enumerate(zip(report.columns.tolist(), merged_params.T)):
             combos = [combo for combo in map(lambda x : x if isinstance(x, tuple) else 0, param_row)]
-            win_dict = {wk:[] for wk in set(combos)}
-            for tax_name, param_combo in zip(tax_names, combos):
-                win_dict[param_combo].append(tax_name)
+            win_dict = {wk:{rk:[] for rk in self.ranks} for wk in set(combos)}
+            # for tax_name, param_combo in zip(tax_names, combos):
+            #     win_dict[param_combo].append(tax_name)
+            for tax_data, param_combo in zip(report.index.values, combos):
+                # tax data is a tuple with the current taxa's rank and name
+                win_dict[param_combo][tax_data[0]] = tax_data[1].upper()
             windows[win] = win_dict
 
-        with open('tests/calib_abril_2023/params.pickle', 'wb') as handle:
+        with open(self.reports_dir + f'/{metric}_params.pickle', 'wb') as handle:
             # windows dictionary has structure:
-                # windows = {(w0_start, w0_end) : {(n0, k0, m0) : [TAX_NAME0, ..., TAX_NAMEn]}} # TAX_NAMEs are not separated by rank. This json dictionary will be used to locate the best param combination for specified taxa in the classification step
+                # windows = {(w0_start, w0_end) :
+                                # {(n0, k0, m0) :
+                                    # {rk0:[TAX_NAME0, ..., TAX_NAMEn]}}} # This json dictionary will be used to locate the best param combination for specified taxa in the classification step
             pickle.dump(windows, handle)
     
     def grid_search(self,
@@ -244,7 +250,7 @@ class Calibrator:
         # log calibration parameters
         logger.info('Calibration report:')
         logger.info('=' * 10 + '\nCalibration parameters:')
-        logger.info('Database: {self.db}')
+        logger.info(f'Database: {self.db}')
         logger.info(f'N sites: {n_range}')
         logger.info(f'K neighbours: {k_range}')
         logger.info(f'Max unknowns per sequence: {row_thresh * 100}%')
@@ -317,11 +323,12 @@ class Calibrator:
         print('Plotting results...')
         if self.save:
             lin_codes = self.guide.set_index('SciName')['LinCode'] # use this to add lineage codes to calibration heatmaps
-            cal_plot.plot_results(acc_report, acc_params, 'acc', self.plots_dir, self.ranks, lin_codes, collapse_hm)
-            cal_plot.plot_results(prc_report, prc_params, 'prc', self.plots_dir, self.ranks, lin_codes, collapse_hm)
-            cal_plot.plot_results(rec_report, rec_params, 'rec', self.plots_dir, self.ranks, lin_codes, collapse_hm)
-            cal_plot.plot_results(f1_report, f1_params, 'f1', self.plots_dir, self.ranks, lin_codes, collapse_hm)
+            with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+                for mt_report, mt_params, mt in zip((acc_report, prc_report, rec_report, f1_report),
+                                                    (acc_params, prc_params, rec_params, f1_params),
+                                                    ('acc', 'prc', 'rec', 'f1')):
+                    executor.submit(cal_plot.plot_results, mt_report, mt_params, mt, self.plots_dir, self.ranks, lin_codes, collapse_hm)
             t8 = time.time()
             print(f'Done in {t8 - t7:.3f} seconds')
-        print(f'Finished in {t7 - t0:.3f} seconds')
+        print(f'Finished in {t8 - t0:.3f} seconds')
         return

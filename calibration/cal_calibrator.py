@@ -317,10 +317,10 @@ class Calibrator:
         print('Plotting results...')
         if self.save:
             lin_codes = self.guide.set_index('SciName')['LinCode'] # use this to add lineage codes to calibration heatmaps
-            cal_plot.plot_results(acc_report, acc_params, 'acc', self.plots_dir, self.ranks, collapse_hm)
-            cal_plot.plot_results(prc_report, prc_params, 'prc', self.plots_dir, self.ranks, collapse_hm)
-            cal_plot.plot_results(rec_report, rec_params, 'rec', self.plots_dir, self.ranks, collapse_hm)
-            cal_plot.plot_results(f1_report, f1_params, 'f1', self.plots_dir, self.ranks, collapse_hm)
+            cal_plot.plot_results(acc_report, acc_params, 'acc', self.plots_dir, self.ranks, lin_codes, collapse_hm)
+            cal_plot.plot_results(prc_report, prc_params, 'prc', self.plots_dir, self.ranks, lin_codes, collapse_hm)
+            cal_plot.plot_results(rec_report, rec_params, 'rec', self.plots_dir, self.ranks, lin_codes, collapse_hm)
+            cal_plot.plot_results(f1_report, f1_params, 'f1', self.plots_dir, self.ranks, lin_codes, collapse_hm)
             t8 = time.time()
             print(f'Done in {t8 - t7:.3f} seconds')
         print(f'Finished in {t7 - t0:.3f} seconds')

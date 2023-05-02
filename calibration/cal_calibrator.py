@@ -316,6 +316,7 @@ class Calibrator:
         # # plot results
         print('Plotting results...')
         if self.save:
+            lin_codes = self.guide.set_index('SciName')['LinCode'] # use this to add lineage codes to calibration heatmaps
             cal_plot.plot_results(acc_report, acc_params, 'acc', self.plots_dir, self.ranks, collapse_hm)
             cal_plot.plot_results(prc_report, prc_params, 'prc', self.plots_dir, self.ranks, collapse_hm)
             cal_plot.plot_results(rec_report, rec_params, 'rec', self.plots_dir, self.ranks, collapse_hm)

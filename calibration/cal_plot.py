@@ -97,11 +97,16 @@ def collapse_report(report):
     collapsed = report.loc[filtered_taxa]
     return collapsed, rejected_taxa
 
-def plot_results(report, params, metric, prefix, ranks, collapse=True):
+def plot_results(report, params, metric, prefix, ranks, lin_codes, collapse=True):
     # collapse eliminates taxa with no values over 0 to reduce heatmap size, if set to True, a file of rejected taxa is generated
     collapse_dict = {rk:[] for rk in ranks}
     for rk_idx, rk in enumerate(ranks):
-        rk_report = report.loc[rk]
+        rk_report = report.loc[rk].copy()
+        # add lineage codes to the rk report
+        rk_taxa = rk_report.index
+        rk_lincodes = (lin_codes.loc[rk_taxa] + ' ' + rk_taxa).values
+        rk_report.index = rk_lincodes
+        #
         sort_taxa = np.argsort(rk_report.index)
         rk_report = rk_report.sort_index()
         rk_params = params[rk_idx][sort_taxa]

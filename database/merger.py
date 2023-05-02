@@ -104,7 +104,80 @@ def tax_summary(guide_tab, tax_tab, ranks):
     summary_tab = summary_tab.rename(columns = {'SciName':'Taxon', 'parentTaxID':'Parent'})
     summary_tab.Records = summary_tab.Records.astype(int)
     return summary_tab.set_index('Taxon')
+
+# Add lineage codes to the tax guide (used to sort taxa by lineage)
+def make_codes(codes, name_array):
+    # takes a list of started codes for a group of taxa, along with a name array (2d np.array containing the taxa names as a matrix)
+    # finds the shortest abreviated code for each taxon
+    made_codes = codes.copy()
+    code_idxs = np.arange(len(made_codes))
     
+    prev_uniq = '' # used when a sequence ends before being separated
+    for idx, col in enumerate(name_array.T):
+        # if a given position is invariable among the taxa, it is ommited
+        uniq_chars = np.unique(col)
+        if len(uniq_chars) == 1 and uniq_chars[0] != '0':
+            prev_uniq = uniq_chars[0]
+            # all rows have the same VALID value
+            continue
+        if '0' in uniq_chars:
+            # a name ended before diverging from the rest (shouldn't happen), update all codes with the previous character and continue
+            made_codes = [mc + prev_uniq for mc in made_codes]
+        for u_char in uniq_chars[uniq_chars != '0']:
+            # group names among those sharing the same character at a variable position
+            char_loc = col == u_char
+            char_idxs = code_idxs[char_loc]
+            char_codes = [made_codes[i] + u_char for i in char_idxs]
+            if char_loc.sum() > 1:
+                # multiple taxa share the value, update their codes and recursively keep building until they are separated
+                for ch_idx, new_code in zip(char_idxs, make_codes(char_codes, name_array[char_idxs][:, idx:])):
+                    made_codes[ch_idx] = new_code
+            else:
+                # a single character has this value, no need to continue recursion, update its code and move to the next names
+                made_codes[char_idxs[0]] += u_char
+        return made_codes
+
+def build_codes(name_array):
+    # build the abreviated taxonomic codes for the taxa given in name_array
+    codes = name_array[:,0].tolist() # always include the first character of the names in the code (codes must be a list, not a numpy array)
+    code_idxs = np.arange(len(codes)) # use this to keep track of code locations in the codes list
+    uniq_chars = np.unique(codes)
+    
+    for u_char in uniq_chars:
+        # split the taxa by their initial letters
+        char_loc = name_array[:, 0] == u_char
+        char_idxs = code_idxs[char_loc] # positions of names beginning with u_char
+        char_sub_array = name_array[char_loc][:,1:]
+        char_codes = [codes[ch_idx] for ch_idx in char_idxs] # get the codes beginning with u_char
+        if char_loc.sum() > 1:
+            # only extend when multiple taxa start with the same letter
+            for ch_idx, new_code in zip(char_idxs, make_codes(char_codes, char_sub_array)):
+                codes[ch_idx] = new_code
+    return codes
+
+def guide_postproc(guide, ranks=['phylum', 'class', 'order', 'family', 'genus', 'species']):
+    # update the taxonomy guide with the lineage codes
+    guide['LinCode'] = ''
+    # set base rank code(s)
+    base_rk = ranks[0]
+    base_subtab = guide.loc[guide.Rank == base_rk, 'SciName'].sort_values()
+    base_names = base_subtab.tolist()
+    longest = max([len(name) for name in base_names])
+    base_name_array = np.array([list(name.ljust(longest, '0')) for name in base_names])
+    guide.loc[base_subtab.index, 'LinCode'] = build_codes(base_name_array)
+    # set the codes for the sub taxa
+    for rk in ranks[1:]:
+        # locate rows for the current taxon (tarting from the second rank because base is already set)
+        rk_subtab = guide.loc[guide.Rank == rk].sort_values('SciName')
+        # group taxa in rank by parent taxon
+        for parent, pr_subtab in rk_subtab.groupby('parentTaxID'):
+            parent_code = guide.loc[parent, 'LinCode'] # codes for each taxon at this rank should be preceded by their parent's code
+            names = pr_subtab['SciName'].tolist()
+            longest = max([len(name) for name in names])
+            name_array = np.array([list(name.ljust(longest, '0')) for name in names]) # turn names list into a 2d numpy array
+            # build codes and update guide
+            codes = [f'{parent_code}.{code}' for code in build_codes(name_array)]
+            guide.loc[pr_subtab.index, 'LinCode'] = codes
 #%% classes
 class Merger():
     def __init__(self, out_dir, ranks=None):
@@ -172,7 +245,7 @@ class Merger():
         self.generate_outfiles()
         self.merge_seqs()
         self.mtax = MergerTax(taxfiles, guidefiles)
-        self.mtax.merge(self.taxguide_out, self.tax_out)
+        self.mtax.merge(self.taxguide_out, self.tax_out, self.ranks) # self.ranks is used by guide_postproc
         self.ext_guide = expand_guide(self.mtax.merged_guide, self.ranks)
         self.ext_guide.to_csv(self.expguide_out)
         tax_summary(self.mtax.merged_guide, self.mtax.merged_tax, self.ranks).to_csv(self.taxsumm_out)
@@ -235,9 +308,10 @@ class MergerTax():
     def merge_tax_tabs(self):
         self.merged_tax = pd.concat(list(self.tax_tabs.values()))
     
-    def merge(self, guide_out, tax_out):
+    def merge(self, guide_out, tax_out, ranks):
         self.merge_guides()
         self.merge_tax_tabs()
+        guide_postproc(self.merged_guide, ranks) # update lineage codes
         self.merged_guide.to_csv(guide_out)
         self.merged_tax.to_csv(tax_out)
         logger.info(f'Stored merged taxonomic codes to {guide_out}')

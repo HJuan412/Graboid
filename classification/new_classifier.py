@@ -41,7 +41,7 @@ def map_query(out_dir, warn_dir, fasta_file, db_dir, evalue=0.005, dropoff=0.05,
     map_file = os.path.abspath(map_director.mat_file)
     acc_file = os.path.abspath(map_director.acc_file)
     blast_report = os.path.abspath(map_director.blast_report)
-    acc_list = map_director.acclist
+    acc_list = map_director.accs
     bounds = map_director.bounds
     matrix = map_director.matrix
     coverage = map_director.coverage
@@ -173,9 +173,18 @@ def get_param_tab(keys, ranks):
 #%% classes
 class Classifier:
     def __init__(self, out_dir):
-        self.set_outdir(out_dir)
         self.db = None
         self.last_calibration = None
+        self.set_outdir(out_dir)
+        self.update_meta()
+    
+    def update_meta(self):
+        with open(self.out_dir + '/meta.json', 'w') as handle:
+            json.dump({'db':self.db, 'last_calibration':self.last_calibration}, handle)
+    
+    def read_meta(self):
+        self.set_database(self.meta['db'])
+        self.last_calibration = self.meta['last_calibration']
     
     def set_database(self, database):
         self.db = database
@@ -190,7 +199,7 @@ class Classifier:
         # get database reference sequence
         self.db_reffile = db_meta['reference']
         self.db_refpath = db_meta['ref_file']
-        self.db_refdir = re.sub('/' + self.db_reffile, '', self.db_refpath)
+        self.db_refdir = '/'.join(self.db_refpath.split('/')[:-1]) # TODO: include the refdir location in the database meta file
         # load taxonomy guides
         self.guide = pd.read_csv(db_meta['guide_file'], index_col=0)
         self.tax_ext = pd.read_csv(db_meta['expguide_file'], index_col=0)
@@ -201,32 +210,30 @@ class Classifier:
         self.ref_matrix = map_npz['matrix']
         self.ref_mesas = map_npz['mesas']
         self.ref_coverage = map_npz['coverage']
-        self.max_pos = self.matrix.shape[1]
+        self.max_pos = self.ref_matrix.shape[1]
         with open(db_meta['acc_file'], 'r') as handle:
             self.ref_accs = handle.read().splitlines()
         
         # build extended taxonomy
-        tax_tab = pd.read_csv(db_meta['tax_file'], index_col=0).loc[self.accs]
+        tax_tab = pd.read_csv(db_meta['tax_file'], index_col=0).loc[self.ref_accs]
         # the tax_tab attribute is the extended taxonomy for each record
         self.tax_tab = self.tax_ext.loc[tax_tab.TaxID.values]
         self.tax_tab.index = tax_tab.index
         
         logger.info(f'Set database: {database}')
-    
-    def read_meta(self):
-        self.set_database(self.meta['db'])
-        self.last_calibration = self.meta['last_calibration']
+        self.update_meta()
     
     def set_outdir(self, out_dir):
         self.out_dir = out_dir
         self.calibration_dir = out_dir + '/calibration'
         self.classif_dir = out_dir + '/classification'
+        self.tmp_dir = out_dir + '/tmp'
         self.warn_dir = out_dir + '/warnings'
         
         if os.path.isdir(out_dir):
             # out dir already exists
             try:
-                with open(out_dir + 'meta.json', 'r') as handle:
+                with open(out_dir + '/meta.json', 'r') as handle:
                     self.meta = json.load(handle)
                     self.read_meta()
             except FileNotFoundError:
@@ -237,6 +244,7 @@ class Classifier:
             # make a directory to store classification reports
             os.makedirs(self.calibration_dir)
             os.makedirs(self.classif_dir)
+            os.makedirs(self.tmp_dir)
             os.makedirs(self.warn_dir)
             self.meta = {}
         
@@ -245,7 +253,15 @@ class Classifier:
         if not hasattr(self, 'db'):
             raise Exception('No database set. Aborting')
         # map query to the same reference sequence of the database
-        map_file, acc_file, blast_report, acc_list, bounds, matrix, coverage, mesas = map_query(self.tmp_dir,self.warn_dir,query_file,self.db_refdir,evalue,dropoff,min_height,min_width,threads)
+        map_file, acc_file, blast_report, acc_list, bounds, matrix, coverage, mesas = map_query(self.tmp_dir,
+                                                                                                self.warn_dir,
+                                                                                                query_file,
+                                                                                                self.db_refdir,
+                                                                                                evalue,
+                                                                                                dropoff,
+                                                                                                min_height,
+                                                                                                min_width,
+                                                                                                threads)
         self.query_map_file = map_file
         self.query_acc_file = acc_file
         self.query_blast_report = blast_report
@@ -256,8 +272,8 @@ class Classifier:
         self.query_mesas = mesas
     
     # locate overlapping regions between reference and query maps
-    def get_overlaps(self, min_width):
-        self.overlapps = get_mesas_overlap(self.ref_mesas, self.qry_mesas)
+    def get_overlaps(self, min_width=10):
+        self.overlapps = get_mesas_overlap(self.ref_mesas, self.query_mesas, min_width)
     
     # custom calibrate
     def custom_calibrate(self,

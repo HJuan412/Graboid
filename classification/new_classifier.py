@@ -318,11 +318,11 @@ class Classifier:
                                col_thresh,
                                min_seqs,
                                rank,
-                               metric,
                                min_n,
                                min_k,
                                criterion,
-                               threads)
+                               collapse_hm=True,
+                               threads=threads)
         self.last_calibration = calibrator.out_dir
         
     # select parameters

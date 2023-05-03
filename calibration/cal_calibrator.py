@@ -168,7 +168,7 @@ class Calibrator:
         self.windows = raw_coords
         self.w_type = 'custom'
         logger.info(f'Set {raw_coords.shape[0]} custom windows at positions:')
-        for coor_idx, coords in raw_coords:
+        for coor_idx, coords in enumerate(raw_coords):
             logger.info(f'\tWindow {coor_idx}: [{coords[0]} - {coords[1]}] (length {coords[1] - coords[0]})')
     
     # report functions

@@ -173,18 +173,33 @@ def get_param_tab(keys, ranks):
 #%% classes
 class Classifier:
     def __init__(self, out_dir):
-        self.db = None
+        self.__db = None
         self.last_calibration = None
         self.set_outdir(out_dir)
         self.update_meta()
     
+    @property
+    def db(self):
+        return self.__db
+    @db.setter
+    def db(self, db):
+        self.__db = db
+        self.update_meta()
+    @property
+    def last_calibration(self):
+        return self.__last_calibration
+    @last_calibration.setter
+    def last_calibration(self, last_calibration):
+        self.__last_calibration = last_calibration
+        self.update_meta()
+        
     def update_meta(self):
         with open(self.out_dir + '/meta.json', 'w') as handle:
             json.dump({'db':self.db, 'last_calibration':self.last_calibration}, handle)
     
     def read_meta(self):
         self.set_database(self.meta['db'])
-        self.last_calibration = self.meta['last_calibration']
+        self.__last_calibration = self.meta['last_calibration']
     
     def set_database(self, database):
         self.db = database
@@ -221,7 +236,6 @@ class Classifier:
         self.tax_tab.index = tax_tab.index
         
         logger.info(f'Set database: {database}')
-        self.update_meta()
     
     def set_outdir(self, out_dir):
         self.out_dir = out_dir
@@ -286,12 +300,19 @@ class Classifier:
                          col_thresh,
                          min_seqs,
                          rank,
-                         metric,
                          min_n,
                          min_k,
                          criterion,
                          threads=1,
                          **kwargs):
+        """Perform custom calibration for the reference database, parameters
+        are the same as those used to direct the grid search.
+        If the user provides w_starts and w_ends coordinates as kwargs, use
+        those. Otherwise, use the selected overlaps.
+        Calibration results are stored to a subfolder inside the calibration
+        directory in the working dir, by default named using datetime, unless
+        the user provides cal_dir kwarg as an alternative name.
+        Updates last_calibration parameter with the output directory"""
         # set calibrator
         calibrator = ccb.Calibrator()
         calibrator.set_database(self.db)
@@ -324,7 +345,7 @@ class Classifier:
                                collapse_hm=True,
                                threads=threads)
         self.last_calibration = calibrator.out_dir
-        
+    
     # select parameters
     def select_params(self, metric, cal_dir=None, **kwargs):
         # specify taxa
@@ -370,7 +391,7 @@ class Classifier:
             rejected = win_col.loc[win_col <= 0].index.get_level_values(1)
         return
     
-    # classify
+    
     # classify using different parameter combinations, register which parameter 
     
     # report

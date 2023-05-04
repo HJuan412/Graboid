@@ -148,7 +148,7 @@ class Calibrator:
         n_windows = int(np.ceil(last_position / step))
         w_start = np.linspace(0, last_position, n_windows, dtype=int)
         self.windows = np.array([w_start, w_start + size]).T
-        self.w_type = 'sliding'
+        self.custom = False
         logger.info(f'Set {n_windows} windows of size {size} at intervals of {w_start[1] - w_start[0]}')
     
     def set_custom_windows(self, starts, ends):
@@ -166,7 +166,7 @@ class Calibrator:
         if out_of_bounds.sum() > 0:
             raise Exception(f'At least one pair of coordinates is out of bounds [0 {self.max_pos}]: {[list(i) for i in raw_coords[out_of_bounds]]}')
         self.windows = raw_coords
-        self.w_type = 'custom'
+        self.custom = True
         logger.info(f'Set {raw_coords.shape[0]} custom windows at positions:')
         for coor_idx, coords in enumerate(raw_coords):
             logger.info(f'\tWindow {coor_idx}: [{coords[0]} - {coords[1]}] (length {coords[1] - coords[0]})')
@@ -327,7 +327,7 @@ class Calibrator:
                 for mt_report, mt_params, mt in zip((acc_report, prc_report, rec_report, f1_report),
                                                     (acc_params, prc_params, rec_params, f1_params),
                                                     ('acc', 'prc', 'rec', 'f1')):
-                    executor.submit(cal_plot.plot_results, mt_report, mt_params, mt, self.plots_dir, self.ranks, lin_codes, collapse_hm)
+                    executor.submit(cal_plot.plot_results, mt_report, mt_params, mt, self.plots_dir, self.ranks, lin_codes, collapse_hm, self.custom)
             t8 = time.time()
             print(f'Done in {t8 - t7:.3f} seconds')
         print(f'Finished in {t8 - t0:.3f} seconds')

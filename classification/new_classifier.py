@@ -17,7 +17,6 @@ import numpy as np
 import os
 import pandas as pd
 import pickle
-import re
 # Graboid libraries
 from calibration import cal_calibrator as ccb
 from classification import cost_matrix
@@ -130,6 +129,7 @@ def select_window_params(window_dict, rep_column):
     #                 params_per_win[win].add(combo)
     return
 
+## parameter selection
 def select_params_per_window(params, report, **kwargs):
     report_taxa = report.index.get_level_values(1)
     tax_idx = [tx.upper() for tx in report.index.get_level_values(1)]
@@ -164,7 +164,6 @@ def select_params_per_window(params, report, **kwargs):
 
     return params_per_win, tax_params
 
-# parameter selection
 def get_param_tab(keys, ranks):
     tuples = [k for k in keys if isinstance(k, tuple)]
     param_tab = pd.DataFrame(tuples, columns='n k m'.split())

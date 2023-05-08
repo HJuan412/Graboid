@@ -183,6 +183,7 @@ def collapse(classifier, w_start, w_end, n, rank='genus', row_thresh=0.1, col_th
                            row_thresh=row_thresh,
                            col_thresh=col_thresh,
                            min_seqs=min_seqs)
+    print('Collapsed reference window...')
     # build the collapsed reference window's taxonomy
     win_tax = classifier.tax_ext.loc[ref_window.taxonomy][[rank]] # trick: if the taxonomy table passed to get_sorted_sites has a single rank column, entropy difference is calculated for said column
     # sort informative sites
@@ -193,6 +194,7 @@ def collapse(classifier, w_start, w_end, n, rank='genus', row_thresh=0.1, col_th
     qry_matrix = classifier.query_matrix[:, qry_cols]
     qry_branches = sq.collapse_window(qry_matrix)
     qry_window = qry_matrix[[br[0] for br in qry_branches]]
+    print('Collapsed query window...')
     return ref_window, qry_window, qry_branches, win_tax, sites
 
 # distance calculation
@@ -330,7 +332,10 @@ def build_prereport(classifications, branch_counts):
         rk_tabs[rk] = rk_tab.set_index('seq')
     return rk_tabs
 
-def build_report(pre_report, guide):
+def build_report(pre_report, guide, q_seqs, seqs_per_branch):
+    # guide is the classifier's (not extended) taxonomy guide
+    # q_seqs is the number of query sequences
+    # seqs_per_branch is the array containing the number of sequences collapsed into each q_seq
     # extract the winning classification for each sequence in the prereport
     guide = guide.copy()
     guide.loc[-1, 'SciName'] = 'Undefined'
@@ -338,22 +343,29 @@ def build_report(pre_report, guide):
     abv_reports = []
     for rk, rk_prereport in pre_report.items():
         # for each rank prereport, dessignate each sequence's classifciation as that with the SINGLE greatest support (if there is multiple top taxa, sequence is left ambiguous)
+        # conclusion holds the winning classification for each sequence
+        conclusion = np.full(q_seqs, -1, dtype=np.int32)
+        
         # get index values and starting location of each index group
         seq_indexes, seq_loc, seq_counts = np.unique(rk_prereport.index.values, return_index=True, return_counts=True)
         single = seq_counts == 1 # get sequences with a single classification
-        supp_array = rk_prereport.norm_support.values
         tax_array = rk_prereport.tax.values
-        n_seqs = rk_prereport.n_seqs.values[seq_loc]
-        # conclusion holds the winning classification for each sequence
-        conclusion = np.full(len(seq_indexes), -1, dtype=np.int32)
-        # sequences with a single classification are assigned directly
-        conclusion[single] = tax_array[seq_loc[single]]
+        supp_array = rk_prereport.norm_support.values
+        
+        # get sequences with a single classification, those are assigned directly
+        single = seq_counts == 1
+        single_idxs = seq_indexes[single]
+        single_locs = seq_loc[single]
+        conclusion[single_idxs] = tax_array[single_locs]
+        
         # get winning classifications for each sequence with support for multiple taxa
         for idx, loc in zip(seq_indexes[~single], seq_loc[~single]):
             if supp_array[loc] > supp_array[loc+1]:
                 conclusion[idx] = tax_array[loc]
+        
         # get the winning taxa's support
-        clear_support = supp_array[seq_loc]
+        clear_support = np.zeros(q_seqs)
+        clear_support[seq_indexes] = supp_array[seq_loc]
         clear_support[conclusion < 0] = np.nan
         abv_reports.append(np.array([conclusion, clear_support]))
     
@@ -365,7 +377,7 @@ def build_report(pre_report, guide):
         tax_codes = report.loc[:, (rk, 'Taxon')].values
         report.loc[:, (rk, 'Taxon')] = guide.loc[tax_codes, 'SciName'].values
     # add sequence counts
-    report[('n_seqs', 'n_seqs')] = n_seqs
+    report[('n_seqs', 'n_seqs')] = seqs_per_branch
     return report
 
 def characterize_sample(report):
@@ -404,11 +416,6 @@ class Classifier:
         self.query_map_file = None
         self.query_acc_file = None
         self.set_outdir(out_dir, overwrite)
-        self.meta = {'db':self.__db,
-                     'query_file':self.query_file,
-                     'query_map_file':self.query_map_file,
-                     'query_acc_file':self.query_acc_file,
-                     'last_calibration':self.__last_calibration}
         self.update_meta()
     
     @property
@@ -429,6 +436,11 @@ class Classifier:
     def update_meta(self):
         with open(self.out_dir + '/meta.json', 'w') as handle:
             # json.dump({'db':self.db, 'last_calibration':self.last_calibration}, handle)
+            self.meta = {'db':self.__db,
+                         'query_file':self.query_file,
+                         'query_map_file':self.query_map_file,
+                         'query_acc_file':self.query_acc_file,
+                         'last_calibration':self.__last_calibration}
             json.dump(self.meta, handle)
     
     def read_meta(self):
@@ -502,6 +514,7 @@ class Classifier:
             # make a directory to store classification reports
             os.makedirs(self.calibration_dir)
             os.makedirs(self.classif_dir)
+            os.makedirs(self.query_dir)
             os.makedirs(self.tmp_dir)
             os.makedirs(self.warn_dir)
             self.meta = {}
@@ -532,6 +545,7 @@ class Classifier:
         self.query_matrix = matrix
         self.query_coverage = coverage
         self.query_mesas = mesas
+        self.update_meta()
     
     def load_query(self):
         if self.query_file is None:
@@ -671,7 +685,7 @@ class Classifier:
                    'wknn':wknn,
                    'dwknn':dwknn,
                    'rara':wknn_rara}
-        if not method in method.keys():
+        if not method in methods.keys():
             raise Exception(f'Invalid method: {method}. Must be one of: "unweighted", "wknn", "dwknn"')
         # collapse reference and query matrices for the given window coordinates w_start & w_end, selecting the n most informative sites for the given rank
         ref_window, qry_window, qry_branches, win_tax, sites = collapse(self,
@@ -682,7 +696,7 @@ class Classifier:
                                                                         row_thresh = row_thresh,
                                                                         col_thresh = col_thresh,
                                                                         min_seqs = min_seqs)
-        
+        q_seqs = qry_window.shape[0]
         seqs_per_branch = np.array([len(br) for br in qry_branches])
         ref_mat = ref_window.window[:, sites]
         window_tax = self.tax_ext.loc[win_tax.index]
@@ -706,7 +720,7 @@ class Classifier:
         
         #build reports
         pre_report = build_prereport(classifications, seqs_per_branch)
-        report = build_report(pre_report, self.guide)
+        report = build_report(pre_report, self.guide, q_seqs, seqs_per_branch)
         characterization = characterize_sample(report)
         designation = designate_branch_seqs(qry_branches, self.query_accs)
         

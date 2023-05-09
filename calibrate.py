@@ -14,11 +14,95 @@ import shutil
 
 from DATA import DATA
 from calibration import calibrator as cb
-
+from calibration import cal_calibrator as ccb
+from classification import cost_matrix
 #% set logger
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 #%
-def main(database, row_thresh=0.2, col_thresh=0.2, min_seqs=10, rank='genus', dist_mat='id', w_size=200, w_step=15, max_k=15, step_k=2, max_n=30, step_n=5, min_k=1, min_n=5, threads=1, clear=True, keep_classif=False, log_report=False):
+# GRID SEARCH arguments
+# max_n,
+# step_n,
+# max_k,
+# step_k,
+# cost_mat,
+# row_thresh=0.1,
+# col_thresh=0.1,
+# min_seqs=50,
+# rank='genus',
+# metric='f1',
+# min_n=5,
+# min_k=3,
+# criterion='orbit',
+# threads=1
+
+def main0(out_dir,
+          database,
+          max_n,
+          step_n,
+          max_k,
+          step_k,
+          mat_code,
+          row_thresh,
+          col_thresh,
+          min_seqs,
+          rank,
+          metric,
+          min_n,
+          min_k,
+          threads,
+          clear,
+          criterion,
+          **kwargs):
+    # initialize calibrator and set database
+    calibrator = ccb.Calibrator()
+    try:
+        calibrator.set_database(database)
+    except:
+        raise
+    
+    # set windows
+    try:
+        if 'w_size' in kwargs.keys() and 'w_step' in kwargs.keys():
+            calibrator.set_sliding_windows(kwargs['w_size'], kwargs['w_step'])
+        elif 'w_starts' in kwargs.keys() and 'w_ends' in kwargs.keys():
+            calibrator.set_custom_windows(kwargs['w_starts'], kwargs['w_ends'])
+        else:
+            print('Missing arguments to set calibration windows. Use either a sliding window size and step or matching sets of custom start and end positions')
+    except:
+        raise
+    
+    # set output directory
+    if clear:
+        shutil.rmtree(out_dir)
+    try:
+        calibrator.set_outdir(out_dir)
+    except:
+        raise
+    
+    # generate cost matrix
+    try:
+        cost_mat = cost_matrix.get_matrix(mat_code)
+    except:
+        raise
+    
+    # grid calibrate
+    calibrator.grid_search(max_n,
+                           step_n,
+                           max_k,
+                           step_k,
+                           cost_mat,
+                           row_thresh,
+                           col_thresh,
+                           min_seqs,
+                           rank,
+                           metric,
+                           min_n,
+                           min_k,
+                           criterion,
+                           threads)
+            
+    return
+def main(database, row_thresh=0.1, col_thresh=0.1, min_seqs=10, rank='genus', dist_mat='id', w_size=200, w_step=15, max_k=15, step_k=2, max_n=30, step_n=5, min_k=1, min_n=5, threads=1, clear=True, keep_classif=False, log_report=False):
     # check that database exists
     if not database in DATA.DBASES:
         print(f'Database {database} not found. Existing databases:')

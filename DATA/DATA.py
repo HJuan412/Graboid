@@ -38,7 +38,7 @@ def get_database(database):
         print('Current databases include:')
         for db, desc in DBASE_LIST.items():
             print(f'\tDatabase: {db} \t:\t{desc}')
-        raise Exception('Database not found')
+        raise Exception('Database {database} not found among: {" ".join(DBASE_LIST.keys())}')
     return DATAPATH + '/' + database
 
 def add_calibration(database, fasta, report, meta):

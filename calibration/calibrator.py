@@ -27,6 +27,13 @@ from classification import cost_matrix
 from DATA import DATA
 from preprocess import feature_selection as fsele
 from preprocess import windows as wn
+
+from calibration import cal_dists
+from calibration import cal_neighsort
+from calibration import cal_classify
+from calibration import cal_metrics
+from calibration import cal_report
+from calibration import cal_plot
 #%% set
 logger = logging.getLogger('Graboid.calibrator')
 logger.setLevel(logging.DEBUG)
@@ -942,10 +949,10 @@ class Calibrator:
         t7 = time.time()
         print(f'Done in {t7 - t6:.3f} seconds')
         
-        # plot results
+        # # plot results
         print('Plotting results...')
         
-        for rk_idx, rk in enumerate(self.tax_ext.columns[:-4]):
+        for rk_idx, rk in enumerate(self.tax_ext.columns):
             rk_report = pre_report.loc[rk]
             sort_taxa = np.argsort(rk_report.index)
             rk_report = rk_report.sort_index()
@@ -955,11 +962,144 @@ class Calibrator:
             title = f'{metric} scores for rank {rk}nN = [{min_n}:{max_n}:{step_n}]\nK = [{min_k}:{max_k}:{step_k}]\nu = unweighted, w = wKNN, d = dwKNN'
             fig = plot_results(rk_report, rk_annot, title, metric)
             fig.savefig(self.out_dir + f'/{rk}.png', format='png', bbox_inches='tight')
+            plt.close()
         t8 = time.time()
         print(f'Done in {t8 - t7:.3f} seconds')
         print(f'Finished in {t7 - t0:.3f} seconds')
         return pre_report, params
+    
+    def grid_search1(self,
+                     max_n,
+                     step_n,
+                     max_k,
+                     step_k,
+                     cost_mat,
+                     row_thresh=0.2,
+                     col_thresh=0.2,
+                     min_seqs=50,
+                     rank='genus',
+                     metric='f1',
+                     min_n=5,
+                     min_k=3,
+                     criterion='orbit',
+                     threads=1):
+        print('Beginning calibration...')
+        t0 = time.time()
+        
+        # collapse windows
+        print('Collapsing windows...')
+        collapsed_windows = {}
+        with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+            future_windows = {executor.submit(wn.Window, self.matrix, self.tax_tab, win[0], win[1], row_thresh, col_thresh, min_seqs):idx for idx, win in enumerate(self.windows)}
+            for future in concurrent.futures.as_completed(future_windows):
+                ft_idx = future_windows[future]
+                try:
+                    collapsed_windows[ft_idx] = future.result()
+                    logger.info(f'Window {ft_idx} {self.windows[ft_idx]}: collapsed into matrix of shape {future.result().window.shape}')
+                except Exception as excp:
+                    logger.info(f'Window {ft_idx} {self.windows[ft_idx]}: ' + str(excp))
+                    continue
+        t1 = time.time()
+        print(f'Collapsed windows in {t1 - t0:.3f} seconds')
+        
+        # translate the collapsed_windows dict into an ordered list
+        win_indexes = np.sort(list(collapsed_windows.keys()))
+        win_list = [collapsed_windows[idx] for idx in win_indexes]
+        
+        # select sites
+        print('Selecting informative sites...')
+        window_sites = []
+        for win in win_list:
+            win_tax = self.tax_ext.loc[win.taxonomy][[rank]] # trick: if the taxonomy table passed to get_sorted_sites has a single rank column, entropy difference is calculated for said column
+            sorted_sites = fsele.get_sorted_sites(win.window, win_tax) # remember that you can use return_general, return_entropy and return_difference to get more information
+            window_sites.append(fsele.get_nsites(sorted_sites[0], min_n, max_n, step_n))
+        t2 = time.time()
+        print(f'Done in {t2 - t1:.3f} seconds')
+        
+        # calculate distances
+        print('Calculating paired distances...')
+        with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+            all_win_dists = [dst for dst in executor.map(cal_dists.get_all_distances, [win.window for win in win_list], window_sites, [cost_mat]*len(win_list))]
+        t3 = time.time()
+        print(f'Done in {t3 - t2:.3f} seconds')
+
+
+        # sort neighbours
+        print('Sorting neighbours...')
+        # sort the generated distance arrays
+        with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+            # for each window, we are getting the ascending ORDER for the distance calculated at each level
+            sorted_dists = [dists for dists in executor.map(np.argsort, [win_d[0] for win_d in all_win_dists], [1]*len(win_list))] # win_d[0] contains the distances array, win_d[1] contains the paired indexes (used later)
+
+        sorted_win_neighbours = []
+        # sorted_win_neighbours is structured as:
+            # window 0:
+                # level 0:
+                    # sorted neighbour idxs
+                    # sorted neighbour dists
+                    # both these arrays have shape n_rows * n_rows - 1, as each row has n_rows - 1 neighbours                    
+        for idx, (win_dists, sorted_win_dists) in enumerate(zip(all_win_dists, sorted_dists)):
+            sorted_idxs = [win_dists[1][:, lvl] for lvl in sorted_win_dists]
+            sorted_distances = [dsts[lvl] for dsts, lvl in zip(win_dists[0], sorted_win_dists)]
             
+            with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+                sorted_win_neighbours.append([ordered for ordered in executor.map(cal_neighsort.get_sorted_neighs, sorted_idxs, sorted_distances)])
+        t4 = time.time()
+        print(f'Done in {t4 - t3:.3f} seconds')
+        
+        # classify
+        print('Classifying...')
+        win_classifs = []
+        for idx, (sorted_neighs, window) in enumerate(zip(sorted_win_neighbours, win_list)):
+            t_classif0 = time.time()
+            window_tax = self.tax_ext.loc[window.taxonomy].to_numpy()
+            win_classifs.append(cal_classify.generate_classifications(sorted_neighs, max_k, step_k, min_k, window_tax, threads = threads, criterion = criterion))
+            t_classif1 = time.time()
+            logger.debug(f'Classified {idx + 1} of {len(win_list)} in {t_classif1 - t_classif0:.3f} seconds')
+        t5 = time.time()
+        print(f'Done in {t5 - t4:.3f} seconds')
+        
+        # get metrics
+        print('Calculating metrics...')
+        window_taxes = [self.tax_ext.loc[win.taxonomy].to_numpy() for win in win_list]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=3) as executor:
+            future_metrics = [future for future in executor.map(cal_metrics.get_metricas, win_classifs, window_taxes)]
+        t6 = time.time()
+        print(f'Done in {t6 - t5:.3f} seconds')
+        
+        # report
+        print('Building report...')
+        met_codes = {'acc':0, 'prc':1, 'rec':2, 'f1':3}
+        pre_report, params = cal_report.build_prereport(future_metrics, met_codes[metric], self.tax_ext)
+        # process report
+        pre_report.columns = [f'W{w_idx} [{win.start} - {win.end}]' for w_idx, win in zip(win_indexes, win_list)]
+        index_datum = self.guide.loc[pre_report.index.get_level_values(1)]
+        pre_report.index = pd.MultiIndex.from_arrays([index_datum.Rank, index_datum.SciName])
+        
+        n_range = np.arange(min_n, max_n, step_n)
+        k_range = np.arange(min_k, max_k, step_k)
+        params = cal_report.translate_params(params, n_range, k_range)
+        t7 = time.time()
+        print(f'Done in {t7 - t6:.3f} seconds')
+        
+        # # plot results
+        print('Plotting results...')
+        
+        for rk_idx, rk in enumerate(self.tax_ext.columns):
+            rk_report = pre_report.loc[rk]
+            sort_taxa = np.argsort(rk_report.index)
+            rk_report = rk_report.sort_index()
+            rk_params = params[rk_idx][sort_taxa]
+            rk_annot = cal_plot.build_annot(rk_params)
+            
+            title = f'{metric} scores for rank {rk}nN = [{min_n}:{max_n}:{step_n}]\nK = [{min_k}:{max_k}:{step_k}]\nu = unweighted, w = wKNN, d = dwKNN'
+            fig = cal_plot.plot_results(rk_report, rk_annot, title, metric)
+            fig.savefig(self.out_dir + f'/{rk}.png', format='png', bbox_inches='tight')
+            plt.close()
+        t8 = time.time()
+        print(f'Done in {t8 - t7:.3f} seconds')
+        print(f'Finished in {t7 - t0:.3f} seconds')
+        return pre_report, params
     def set_windows(self, size=np.inf, step=np.inf, starts=0, ends=np.inf):
         # this function establishes the windows to be used in the grid search
         # size and step establish the length and displacement rate of the sliding window

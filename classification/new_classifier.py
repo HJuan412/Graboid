@@ -29,6 +29,7 @@ from preprocess import windows as wn
 #%% set logger
 logger = logging.getLogger('Graboid.Classification')
 logger.setLevel(logging.DEBUG)
+
 #%% functions
 def map_query(out_dir, warn_dir, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1):
     map_director = mp.Director(out_dir, warn_dir, logger)
@@ -235,23 +236,21 @@ def get_distances(qry_window, ref_window, cost_mat):
     # an array with the number of neighbours contained in each orbital
 def get_k_nearest_orbit(compressed, k):
     k_nearest = []
-    for seq in compressed:
-        k_dists = seq[0][:k]
-        k_indexes = seq[1][:k+1]
-        k_positions = np.array([k_indexes[:-1], k_indexes[1:]]).T
-        k_counts = seq[2][:k]
+    for dists, idxs, counts in compressed:
+        k_dists = dists[:k]
+        k_positions = np.array([idxs[:k], idxs[1:k+1]]).T
+        k_counts = counts[:k]
         k_nearest.append((k_dists, k_positions, k_counts))
     return k_nearest
 
 def get_k_nearest_neigh(compressed, k):
     k_nearest = []
-    for seq in compressed:
-        summed = np.cumsum(seq[2])
-        break_orb = np.argmax(summed >= k) + 1
-        k_dists = seq[0][:break_orb]
-        k_indexes = seq[1][:break_orb+1]
-        k_positions = np.array([k_indexes[:-1], k_indexes[1:]]).T
-        k_counts = seq[2][:break_orb]
+    for dists, idxs, counts in compressed:
+        summed = np.cumsum(counts)
+        break_orb = np.argmax(summed >= k) + 1 # get orbital containing the k-th nearest neighbour
+        k_dists = dists[:break_orb]
+        k_positions = np.array([idxs[:break_orb], idxs[1:break_orb+1]]).T
+        k_counts = counts[:break_orb]
         k_nearest.append((k_dists, k_positions, k_counts))
     return k_nearest
 

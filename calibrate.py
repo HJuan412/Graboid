@@ -18,22 +18,6 @@ from calibration import cal_calibrator as ccb
 from classification import cost_matrix
 #% set logger
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-#%
-# GRID SEARCH arguments
-# max_n,
-# step_n,
-# max_k,
-# step_k,
-# cost_mat,
-# row_thresh=0.1,
-# col_thresh=0.1,
-# min_seqs=50,
-# rank='genus',
-# metric='f1',
-# min_n=5,
-# min_k=3,
-# criterion='orbit',
-# threads=1
 
 def main0(out_dir,
           database,
@@ -46,12 +30,12 @@ def main0(out_dir,
           col_thresh,
           min_seqs,
           rank,
-          metric,
           min_n,
           min_k,
           threads,
           clear,
           criterion,
+          collapse_hm=True,
           **kwargs):
     # initialize calibrator and set database
     calibrator = ccb.Calibrator()
@@ -86,21 +70,20 @@ def main0(out_dir,
         raise
     
     # grid calibrate
-    calibrator.grid_search(max_n,
-                           step_n,
-                           max_k,
-                           step_k,
-                           cost_mat,
-                           row_thresh,
-                           col_thresh,
-                           min_seqs,
-                           rank,
-                           metric,
-                           min_n,
-                           min_k,
-                           criterion,
-                           threads)
-            
+    calibrator.grid_search(max_n = max_n,
+                           step_n = step_n,
+                           max_k = max_k,
+                           step_k = step_k,
+                           cost_mat = cost_mat,
+                           row_thresh = row_thresh,
+                           col_thresh = col_thresh,
+                           min_seqs = min_seqs,
+                           rank = rank,
+                           min_n = min_n,
+                           min_k = min_k,
+                           criterion = criterion,
+                           collapse_hm = collapse_hm,
+                           threads = threads)
     return
 def main(database, row_thresh=0.1, col_thresh=0.1, min_seqs=10, rank='genus', dist_mat='id', w_size=200, w_step=15, max_k=15, step_k=2, max_n=30, step_n=5, min_k=1, min_n=5, threads=1, clear=True, keep_classif=False, log_report=False):
     # check that database exists

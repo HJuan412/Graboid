@@ -11,6 +11,7 @@ Classify test instances during calibration
 #%% libraries
 import concurrent.futures
 import numpy as np
+import time
 
 # Graboid libraries
 from classification import cls_classify
@@ -235,6 +236,44 @@ def classify_windows(win_list, sorted_win_neighbours, tax_ext, min_k, max_k, ste
     return win_classifs
 
 
+def get_tax_supports_V0(idx, taxa, distances, u_support, w_support, d_support):
+    """Variant of the cls_classify classification function, calculates support using all methods(unweighted, wknn, dwknn)
+    For each sequence, calcualte support for each sequence"""
+    # idx is the index of the sequence being classified
+    # taxa is a numpy array with the extended taxonomy of the sequence neighbours
+    # distances contains the distances of the selected orbits to the current sequence
+    # support arrays contain the supports calculated with each method
+    
+    # returns two arrays
+    # first one has three columns: sequence_index, rank_index and taxon_id
+    # second one has five columns: total_neighbours, mean_distance, std_distance, total_support, norm_support
+    supp_array = np.tile([u_support, w_support, d_support], taxa.shape[1]).T
+    dist_array = np.tile(distances, taxa.shape[1])
+    taxa[np.isnan(taxa)] = -1 # use this to account for undetermined taxa
+    
+    tax_array = taxa.T.flatten()
+    rk_array = np.concatenate([[i]*taxa.shape[0] for i in range(taxa.shape[1])])
+    valid_tax = tax_array > 0
+    tax_array = tax_array[valid_tax]
+    rk_array = rk_array[valid_tax]
+    supp_array = supp_array[valid_tax]
+    dist_array = dist_array[valid_tax]
+    
+    uniq_tax = np.unique(tax_array)
+    n_tax = len(uniq_tax)
+    rk_tax_data = np.zeros((n_tax, 6), dtype=np.float16) # columns : total_neighs, mean_distance, std_distance, total unweighted support, total wknn support, total dwknn support
+    for tax_idx, u_tax in enumerate(uniq_tax):
+        tax_loc = tax_array == u_tax
+        rk_tax_data[tax_idx, 0] = tax_loc.sum() # total neighbours
+        rk_tax_data[tax_idx, 1] = dist_array[tax_loc].mean() # mean distance
+        rk_tax_data[tax_idx, 2] = dist_array[tax_loc].std() # std distance
+        # update supports
+        rk_tax_data[tax_idx, 3:] = supp_array[tax_loc].sum(0)
+        
+    # build seq idx, rank, tax matrix
+    rk_tax_array = np.array([np.full(n_tax, idx), rk_array, uniq_tax]).T
+    return rk_tax_array, rk_tax_data
+
 def get_tax_supports_V(idx, taxa, distances, u_support, w_support, d_support):
     """Variant of the cls_classify classification function, calculates support using all methods(unweighted, wknn, dwknn)
     For each sequence, calcualte support for each sequence"""
@@ -274,7 +313,7 @@ def get_tax_supports_V(idx, taxa, distances, u_support, w_support, d_support):
     rk_tax_data = np.concatenate(rk_tax_data)
     return rk_tax_array, rk_tax_data
 
-def classify_V(neighbours, neigh_idxs, tax_tab):
+def classify_V(neighbours, neigh_idxs, tax_tab, supp_func=0):
     """Variant of the cls_classify classification function, calculates support using all methods(unweighted, wknn, dwknn)
     Calculates mean distances, support and normalized support for each candidate taxon for each sequence"""
     # neighbours contains the three 2d-arrays: k_dists, k_positions, k_counts
@@ -286,10 +325,17 @@ def classify_V(neighbours, neigh_idxs, tax_tab):
     # the second array has columns: total_neighbours, mean_distances, std_distances, total_support and norm_support
     # second array uses dtype np.float16 to save memory space
     
+    # set get_tax_supports function
+    get_tax_supports = get_tax_supports_V
+    if supp_func == 0:
+        get_tax_supports = get_tax_supports_V0
     # calcuate supports
+    t0 = time.time()
     unweighted_supports = cls_classify.unweighted(neighbours[0])
     wknn_supports = cls_classify.wknn(neighbours[0])
     dwknn_supports = cls_classify.dwknn(neighbours[0])
+    t1 = time.time()
+    print(f'Supports calculated in {t1 - t0:.3f}')
     # extend supports and distances for orbit in each sequence
     unweighted_arrays = []
     wknn_arrays = []
@@ -304,12 +350,15 @@ def classify_V(neighbours, neigh_idxs, tax_tab):
         dist_arrays.append(np.concatenate([[dst]*cnt for dst, cnt in zip(dists, counts)]))
     # get the neighbour indexes for each sequence
     neigh_arrays = [neigh_idxs[sq_idx, :max_loc] for sq_idx, max_loc in enumerate(np.max(neighbours[1], 1))]
-    
+    t2 = time.time()
     # get supports for each sequence
     id_arrays = []
     data_arrays = []
     for seq_idx, (neighs, u_supps, w_supps, d_supps, dists) in enumerate(zip(neigh_arrays, unweighted_arrays, wknn_arrays, dwknn_arrays, dist_arrays)):
-        seq_supports = get_tax_supports_V(seq_idx, tax_tab[neighs], dists, u_supps, w_supps, d_supps)
+        seq_supports = get_tax_supports(seq_idx, tax_tab[neighs], dists, u_supps, w_supps, d_supps)
         id_arrays.append(seq_supports[0])
         data_arrays.append(seq_supports[1])
+    t3 = time.time()
+    print(f'Supports for candidates calculated in {t3 - t2:.3f}')
+    print('done!')
     return np.concatenate(id_arrays), np.concatenate(data_arrays)

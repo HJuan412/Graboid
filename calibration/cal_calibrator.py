@@ -128,29 +128,29 @@ def compress(sorted_distances):
         compressed.append(win_compressed)
     return compressed
 
-def build_packages(compressed, n_range, k_range, criterion):
+def build_packages(compressed, k_range, criterion):
     """For each parameter combination (window, n, k) get the k nearest elements for the corresponding compressed orbitals"""
     # returns a dictionary of keys (window index, n, k) with values (distances of the first k orbitals, start index of the first k orbitals, element counts of the first k orbitals)
     classif_packages = {} # classif_packages contains all parameter combinations to be sent into the classifier
     # get the data for each parameter combination
     for win_idx, win_compressed in enumerate(compressed):
-        for n_level, window_n in zip(n_range, win_compressed):
-            for k_level in k_range:
+        for n_idx, window_n in enumerate(win_compressed):
+            for k_idx, k in enumerate(k_range):
                 # TODO: maybe get only the highest K and modify the classification function to avoid unnecesary calculations
                 if criterion == 'orbit':
-                    classif_packages[(win_idx, n_level, k_level)] = cls_neighbours.get_knn_orbit_V(n_level, k_level)
+                    classif_packages[(win_idx, n_idx, k_idx)] = cls_neighbours.get_knn_orbit_V(window_n, k)
                 else:
-                    classif_packages[(win_idx, n_level, k_level)] = cls_neighbours.get_knn_neigh_V(n_level, k_level)
+                    classif_packages[(win_idx, n_idx, k_idx)] = cls_neighbours.get_knn_neigh_V(window_n, k)
     return classif_packages
 
 # classifications
-def get_supports(calibrator, classif_packages, sorted_indexes, win_list, weight_func, threads=1):
+def get_supports(calibrator, classif_packages, sorted_indexes, win_list, threads=1):
     """Calculate supports for each parameter combination"""
     # returns a dictionary with keys (window index, n, k) and the corresponding support arrays (one with sequence index, rank index, taxon id, the other with total neighbours, mean distance, std distance, total support and normalized support)
     # TODO: need to optimize this, may need to define a special classification function for calibration
     supports = {}
     with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
-        futures = {executor.submit(cls_classify.classify_V, pckg, sorted_indexes[w_idx][n_idx], calibrator.tax_ext.loc[win_list[w_idx].taxonomy].to_numpy(), weight_func, threads):(w_idx, n_idx, k_idx) for (w_idx, n_idx, k_idx), pckg in classif_packages.items()}
+        futures = {executor.submit(cal_classify.classify_V, pckg, sorted_indexes[w_idx][n_idx], calibrator.tax_ext.loc[win_list[w_idx].taxonomy].to_numpy()):(w_idx, n_idx, k_idx) for (w_idx, n_idx, k_idx), pckg in classif_packages.items()}
                 # classifications = ncl.classify(k_nearest, sorted_indexes[win_idx][n_idx], calibrator.tax_ext, ncl.unweighted)
         for future in concurrent.futures.as_completed(futures):
             params = futures[future]
@@ -385,39 +385,39 @@ class Calibrator:
         # classify
         print('Classifying...')
         # get supports
-        supports = get_supports(self, classif_packages, sorted_indexes, win_list, weight_func)
+        supports = get_supports(self, classif_packages, sorted_indexes, win_list)
         # TODO: get winning classification for each param combination
         t5 = time.time()
         print(f'Finished classifications in {t5 - t4:.3f} seconds')
         
         # get metrics
         print('Calculating metrics...')
-        metrics = cal_metrics.get_metrics(win_list, win_classifs, self.tax_ext, threads)
+        # metrics = cal_metrics.get_metrics(win_list, win_classifs, self.tax_ext, threads)
         t6 = time.time()
         print(f'Done in {t6 - t5:.3f} seconds')
         
         # report
         print('Building report...')
-        acc_report, acc_params = cal_report.build_report(win_list, metrics, 'acc', self.tax_ext, self.guide, n_range, k_range)
-        prc_report, prc_params = cal_report.build_report(win_list, metrics, 'prc', self.tax_ext, self.guide, n_range, k_range)
-        rec_report, rec_params = cal_report.build_report(win_list, metrics, 'rec', self.tax_ext, self.guide, n_range, k_range)
-        f1_report, f1_params = cal_report.build_report(win_list, metrics, 'f1', self.tax_ext, self.guide, n_range, k_range)
-        self.report_metrics(acc_report, acc_params, 'acc')
-        self.report_metrics(prc_report, prc_params, 'prc')
-        self.report_metrics(rec_report, rec_params, 'rec')
-        self.report_metrics(f1_report, f1_params, 'f1')
+        # acc_report, acc_params = cal_report.build_report(win_list, metrics, 'acc', self.tax_ext, self.guide, n_range, k_range)
+        # prc_report, prc_params = cal_report.build_report(win_list, metrics, 'prc', self.tax_ext, self.guide, n_range, k_range)
+        # rec_report, rec_params = cal_report.build_report(win_list, metrics, 'rec', self.tax_ext, self.guide, n_range, k_range)
+        # f1_report, f1_params = cal_report.build_report(win_list, metrics, 'f1', self.tax_ext, self.guide, n_range, k_range)
+        # self.report_metrics(acc_report, acc_params, 'acc')
+        # self.report_metrics(prc_report, prc_params, 'prc')
+        # self.report_metrics(rec_report, rec_params, 'rec')
+        # self.report_metrics(f1_report, f1_params, 'f1')
         t7 = time.time()
         print(f'Done in {t7 - t6:.3f} seconds')
         
         # # plot results
         print('Plotting results...')
         if self.save:
-            lin_codes = self.guide.set_index('SciName')['LinCode'] # use this to add lineage codes to calibration heatmaps
-            with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
-                for mt_report, mt_params, mt in zip((acc_report, prc_report, rec_report, f1_report),
-                                                    (acc_params, prc_params, rec_params, f1_params),
-                                                    ('acc', 'prc', 'rec', 'f1')):
-                    executor.submit(cal_plot.plot_results, mt_report, mt_params, mt, self.plots_dir, self.ranks, lin_codes, collapse_hm, self.custom)
+            # lin_codes = self.guide.set_index('SciName')['LinCode'] # use this to add lineage codes to calibration heatmaps
+            # with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+            #     for mt_report, mt_params, mt in zip((acc_report, prc_report, rec_report, f1_report),
+            #                                         (acc_params, prc_params, rec_params, f1_params),
+            #                                         ('acc', 'prc', 'rec', 'f1')):
+            #         executor.submit(cal_plot.plot_results, mt_report, mt_params, mt, self.plots_dir, self.ranks, lin_codes, collapse_hm, self.custom)
             t8 = time.time()
             print(f'Done in {t8 - t7:.3f} seconds')
         print(f'Finished in {t8 - t0:.3f} seconds')

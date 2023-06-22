@@ -20,11 +20,14 @@ import shutil
 # Graboid libraries
 from calibration import cal_calibrator as ccb
 from classification import cost_matrix
+from classification import cls_classify
+from classification import cls_distance
+from classification import cls_neighbours
+from classification import cls_preprocess
+from classification import cls_report
+
 from DATA import DATA
 from mapping import director as mp
-from preprocess import feature_selection as fsele
-from preprocess import sequence_collapse as sq
-from preprocess import windows as wn
 
 #%% set logger
 logger = logging.getLogger('Graboid.Classification')
@@ -68,57 +71,6 @@ def get_mesas_overlap(ref_mesas, qry_mesas, min_width=10):
         
         mesas_overlap.append(q_overlap[q_overlap[:,2] >= min_width]) # append only overlaps over the specified minimum width
     return np.concatenate(mesas_overlap, 0)
-
-def plot_ref_v_qry(ref_coverage, ref_mesas, qry_coverage, qry_mesas, overlapps, figsize=(12,7)):
-    x = np.arange(len(ref_coverage)) # set x axis
-    # plot ref
-    fig, ax_ref = plt.subplots(figsize = figsize)
-    ax_ref.plot(x, ref_coverage, label='Reference coverage')
-    for r_mesa in ref_mesas.astype(int):
-        mesa_array = np.full(len(ref_coverage), np.nan)
-        # columns in the mesa arrays are [mesa start, mesa end, mesa width, mesa average height]
-        mesa_array[r_mesa[0]:r_mesa[1]] = r_mesa[3]
-        ax_ref.plot(x, mesa_array, c='r')
-    
-    # plot qry
-    ax_qry = ax_ref.twinx()
-    ax_qry.plot(x, qry_coverage, c='tab:orange')
-    for q_mesa in qry_mesas.astype(int):
-        mesa_array = np.full(len(ref_coverage), np.nan)
-        # columns in the mesa arrays are [mesa start, mesa end, mesa width, mesa average height]
-        mesa_array[q_mesa[0]:q_mesa[1]] = q_mesa[3]
-        ax_qry.plot(x, mesa_array, c='g')
-    
-    # # plot overlaps
-    # # vertical lines indicating overlapps between query and reference mesas
-    for ol in overlapps:
-        ol_height = max(ol[4], (ol[3] / ref_coverage.max()) * qry_coverage.max())
-        
-        ax_qry.plot(ol[[0,0]], [0, ol_height], linestyle=':', linewidth=1.5, c='k')
-        ax_qry.plot(ol[[1,1]], [0, ol_height], linestyle=':', linewidth=1.5, c='k')
-    # ol_x = overlapps[:, [0,0,1,1]].flatten() # each overlap takes two times the start coordinate and two times the end coordinate in the x axis (this is so they can be plotted as vertical lines)
-    # ol_rheight = (overlapps[:, 3] / ref_coverage.max()) * qry_coverage.max() # transform the reference mesa height to the scale in the query axis
-    # ol_y = np.array([overlapps[:,4], ol_rheight, overlapps[:,4], ol_rheight]).T.flatten() # get the ref and qry height of each overlape TWICE and interloped so we can plot th evertical lines at both ends of the overlap
-    # ax_qry.plot(ol_x, ol_y, c='k')
-    
-    ax_ref.plot([0], [0], c='r', label='Reference mesas')
-    ax_ref.plot([0], [0], c='tab:orange', label='Query coverage')
-    ax_ref.plot([0], [0], c='g', label='Query mesas')
-    ax_ref.plot([0], [0], linestyle=':', c='k', label='Overlapps')
-    ax_ref.legend()
-    # TODO: fix issues with mesa calculations
-    # only filter out overlap coordinates when they appear too closely together (<= 20 sites) in the x axis
-    ol_coords = np.unique(overlapps[:,:2])
-    ol_coor_diffs = np.diff(ol_coords)
-    selected_ol_coords = ol_coords[np.insert(ol_coor_diffs > 20, 0, True)]
-    ax_qry.set_xticks(selected_ol_coords)
-    ax_ref.set_xticklabels(selected_ol_coords.astype(int), rotation=70)
-    
-    ax_ref.set_xlabel('Coordinates')
-    ax_ref.set_ylabel('Reference coverage')
-    ax_qry.set_ylabel('Query coverage')
-    
-    # TODO: save plot
 
 def select_window_params(window_dict, rep_column):
     # select parameters of taxa with values in rep_column above 0 (null or 0 value are worthless)
@@ -173,247 +125,15 @@ def get_param_tab(keys, ranks):
     param_tab = param_tab.sort_index(level=[0,1])
     return param_tab
 
-## classification fucntions
-def collapse(classifier, w_start, w_end, n, rank='genus', row_thresh=0.1, col_thresh=0.1, min_seqs=50):
-    """Collapse reference and query windows"""
-    # collapse reference window, use the classifier's extended taxonomy table
-    ref_window = wn.Window(classifier.ref_matrix,
-                           classifier.tax_tab,
-                           w_start,
-                           w_end,
-                           row_thresh=row_thresh,
-                           col_thresh=col_thresh,
-                           min_seqs=min_seqs)
-    print('Collapsed reference window...')
-    # build the collapsed reference window's taxonomy
-    win_tax = classifier.tax_ext.loc[ref_window.taxonomy][[rank]] # trick: if the taxonomy table passed to get_sorted_sites has a single rank column, entropy difference is calculated for said column
-    # sort informative sites
-    sorted_sites = fsele.get_sorted_sites(ref_window.window, win_tax) # remember that you can use return_general, return_entropy and return_difference to get more information
-    sites = np.concatenate(fsele.get_nsites(sorted_sites[0], n = n))
-    # collapse query window, use only the selected columns to speed up collapsing time
-    qry_cols = np.arange(w_start, w_end)[sites] # get selected column indexes
-    qry_matrix = classifier.query_matrix[:, qry_cols]
-    qry_branches = sq.collapse_window(qry_matrix)
-    qry_window = qry_matrix[[br[0] for br in qry_branches]]
-    print('Collapsed query window...')
-    return ref_window, qry_window, qry_branches, win_tax, sites
-
-# distance calculation
-def combine(window):
-    """Creates a dictionary for each site (column) in the window, grouping all
-    the sequences (rows) sharing the same base. Reduces the amount of operations
-    needed for distance calculation"""
-    combined = []
-    for col in window.T:
-        col_vals = np.unique(col)
-        col_combined = {val:np.argwhere(col==val).flatten() for val in col_vals}
-        combined.append(col_combined)
-    return combined
-
-def get_distances(qry_window, ref_window, cost_mat):
-    """Generates a distance matrix of shape (# qry seqs, # ref seqs)"""
-    # combine query and reference sequences to (greatly) speed up calculation
-    qry_combined = combine(qry_window)
-    ref_combined = combine(ref_window)
-    
-    dist_array = np.zeros((qry_window.shape[0], ref_window.shape[0]))
-    
-    # calculate the distances for each site
-    for site_q, site_r in zip(qry_combined, ref_combined):
-        # sequences sharing values at each site are grouped, at most 5*5 operations are needed per site
-        for val_q, idxs_q in site_q.items():
-            for val_r, idxs_r in site_r.items():
-                dist = cost_mat[val_q, val_r]
-                # update distances
-                for q in idxs_q: dist_array[q, idxs_r] += dist
-    return dist_array
-
-# get nearest neighbours
-# k_nearest is a list containing information about a (collapsed) query sequence's neighbours
-# each element is a 3 element tuple containing:
-    # an array with the distances to the k nearest orbitals (or up to the orbital containing the kth neighbour)
-    # a 2d array containing the start and end positions of each included orbital, shape is (# orbitals, 2)
-    # an array with the number of neighbours contained in each orbital
-def get_k_nearest_orbit(compressed, k):
-    k_nearest = []
-    for dists, idxs, counts in compressed:
-        k_dists = dists[:k]
-        k_positions = np.array([idxs[:k], idxs[1:k+1]]).T
-        k_counts = counts[:k]
-        k_nearest.append((k_dists, k_positions, k_counts))
-    return k_nearest
-
-def get_k_nearest_neigh(compressed, k):
-    k_nearest = []
-    for dists, idxs, counts in compressed:
-        summed = np.cumsum(counts)
-        break_orb = np.argmax(summed >= k) + 1 # get orbital containing the k-th nearest neighbour
-        k_dists = dists[:break_orb]
-        k_positions = np.array([idxs[:break_orb], idxs[1:break_orb+1]]).T
-        k_counts = counts[:break_orb]
-        k_nearest.append((k_dists, k_positions, k_counts))
-    return k_nearest
-
-# classify functions
-def unweighted(dists):
-    return np.ones(len(dists))
-
-def wknn(dists):
-    d1 = dists[0]
-    dk = dists[-1]
-    if d1 == dk:
-        return np.array([1])
-    return (dk - dists) / (dk - d1)
-
-def wknn_rara(dists):
-    # min distance is always the origin, max distance is the furthest neighbour + 1, questionable utility 
-    d1 = 0
-    dk = dists[-1] + 1
-    if d1 == dk:
-        return np.array([1])
-    return (dk - dists) / (dk - d1)
-
-def dwknn(dists):
-    d1 = dists[0]
-    dk = dists[-1]
-    penal = (dk + d1) / (dk + dists)
-    return wknn(dists) * penal
-
-def get_tax_supports(taxa, supports):
-    """Retrieves an array of taxa with their corresponding supports.
-    Calculate total support for each taxon, filter out taxa with no support.
-    Sort taxa by decreasing order of support"""
-    uniq_taxa = np.unique(taxa)
-    supports = np.array([supports[taxa == u_tax].sum() for u_tax in uniq_taxa])
-    uniq_taxa = uniq_taxa[supports > 0]
-    supports = supports[supports > 0]
-    order = np.argsort(supports)[::-1]
-    # normalize supports
-    norm_supports = np.exp(supports)[order]
-    norm_supports = norm_supports / norm_supports.sum()
-    return uniq_taxa[order], supports[order], norm_supports
-
-def classify(neighbours, neigh_idxs, tax_tab, weight_func):
-    """Take the output list of one of the get_k_nearest... functions, the array
-    of sorted neighbour distances indexes, the extended taxonomy table for the
-    reference window, and one of the weighting functions."""
-    # each rank's classifications are stored in a different list
-    # each list contains a tuple containing an array of taxIDs and another with their corresponding total supports
-    # classifications are sorted by decresing order of support
-    rank_classifs = {rk:[] for rk in tax_tab.columns}
-    for seq, ngh_idxs in zip(neighbours, neigh_idxs):
-        supports = weight_func(seq[0]) # calculate support for each orbital
-        support_array = np.concatenate([[supp]*count for supp, count in zip(supports, seq[2])]) # extend supports to fit the number of neighbours per orbital
-        # retrieve the neighbouring taxa
-        all_neighs = ngh_idxs[seq[1][0,0]: seq[1][-1,-1]]
-        neigh_taxa = tax_tab.iloc[all_neighs]
-        # get total tax supports for each rank
-        for rk, col in neigh_taxa.T.iterrows():
-            valid_taxa = ~np.isnan(col.values)
-            rank_classifs[rk].append(get_tax_supports(col.values[valid_taxa], support_array[valid_taxa]))
-    return rank_classifs
-
-# reporter functions
-def build_prereport(classifications, branch_counts):
-    # for each rank, generates a dataframe with columns taxa, supports, normalized supports and sequences in branch, with indexes corresponding to the classified query sequence (indexes repeat themselves)
-    rk_tabs = {}
-    for rk, seqs in classifications.items():
-        rk_array = []
-        for idx, seq in enumerate(seqs):
-            seq_array = np.array((np.full(seq[0].shape, idx), seq[0], seq[1], seq[2], np.full(seq[0].shape, branch_counts[idx]))).T
-            rk_array.append(seq_array)
-        rk_array = np.concatenate(rk_array)
-        rk_tab = pd.DataFrame({'seq':rk_array[:,0].astype(np.int32),
-                               'tax':rk_array[:,1].astype(np.int32),
-                               'support':rk_array[:,2].astype(np.float64),
-                               'norm_support':rk_array[:,3].astype(np.float64),
-                               'n_seqs':rk_array[:,4].astype(np.int32)})
-        rk_tabs[rk] = rk_tab.set_index('seq')
-    return rk_tabs
-
-def build_report(pre_report, guide, q_seqs, seqs_per_branch):
-    # guide is the classifier's (not extended) taxonomy guide
-    # q_seqs is the number of query sequences
-    # seqs_per_branch is the array containing the number of sequences collapsed into each q_seq
-    # extract the winning classification for each sequence in the prereport
-    guide = guide.copy()
-    guide.loc[-1, 'SciName'] = 'Undefined'
-    
-    abv_reports = []
-    for rk, rk_prereport in pre_report.items():
-        # for each rank prereport, dessignate each sequence's classifciation as that with the SINGLE greatest support (if there is multiple top taxa, sequence is left ambiguous)
-        # conclusion holds the winning classification for each sequence
-        conclusion = np.full(q_seqs, -1, dtype=np.int32)
-        
-        # get index values and starting location of each index group
-        seq_indexes, seq_loc, seq_counts = np.unique(rk_prereport.index.values, return_index=True, return_counts=True)
-        single = seq_counts == 1 # get sequences with a single classification
-        tax_array = rk_prereport.tax.values
-        supp_array = rk_prereport.norm_support.values
-        
-        # get sequences with a single classification, those are assigned directly
-        single = seq_counts == 1
-        single_idxs = seq_indexes[single]
-        single_locs = seq_loc[single]
-        conclusion[single_idxs] = tax_array[single_locs]
-        
-        # get winning classifications for each sequence with support for multiple taxa
-        for idx, loc in zip(seq_indexes[~single], seq_loc[~single]):
-            if supp_array[loc] > supp_array[loc+1]:
-                conclusion[idx] = tax_array[loc]
-        
-        # get the winning taxa's support
-        clear_support = np.zeros(q_seqs)
-        clear_support[seq_indexes] = supp_array[seq_loc]
-        clear_support[conclusion < 0] = np.nan
-        abv_reports.append(np.array([conclusion, clear_support]))
-    
-    # merge all abreviation reports
-    abv_reports = np.concatenate(abv_reports, axis=0)
-    header = pd.MultiIndex.from_product((pre_report.keys(), ['Taxon', 'support']))
-    report = pd.DataFrame(abv_reports.T, columns=header)
-    for rk in np.unique(report.columns.get_level_values(0)):
-        tax_codes = report.loc[:, (rk, 'Taxon')].values
-        report.loc[:, (rk, 'Taxon')] = guide.loc[tax_codes, 'SciName'].values
-    # add sequence counts
-    report[('n_seqs', 'n_seqs')] = seqs_per_branch
-    return report
-
-def characterize_sample(report):
-    # report taxa present in sample, specifying rank, name, number of sequences and of branches, mean support and std support
-    counts = []
-    for rk in report.columns.get_level_values(0).unique()[:-1]:
-        rk_report = report[[rk, 'n_seqs']].droplevel(0,1)
-        rk_counts = []
-        for tax, tax_report in rk_report.groupby('Taxon'):
-            # get number of sequences, branches, mean support and std support for the current taxon
-            total_seqs = tax_report.n_seqs.sum()
-            n_branches = len(tax_report)
-            mean_support = (tax_report.support * tax_report.n_seqs).sum() / total_seqs # account for the number of sequences in these calculations
-            std_support = ((tax_report.support - mean_support)**2 * tax_report.n_seqs).sum() / total_seqs
-            rk_counts.append((tax, total_seqs, n_branches, mean_support, std_support))
-        rk_counts = pd.DataFrame(rk_counts, columns=['taxon', 'n_seqs', 'n_branches', 'mean_support', 'std_support'])
-        rk_counts['rank'] = rk
-        counts.append(rk_counts.set_index(['rank', 'taxon']))
-    
-    counts = pd.concat(counts)
-    return counts
-
-def designate_branch_seqs(branches, accs):
-    br_array = np.concatenate([[br_idx]*len(br) for br_idx, br in enumerate(branches)])
-    acc_idxs = np.concatenate(branches)
-    acc_array = np.array(accs)[acc_idxs]
-    designation = pd.DataFrame({'branch':br_array, 'accession':acc_array})
-    return designation
-
 #%% classes
 class Classifier:
-    def __init__(self, out_dir, overwrite=False):
+    def __init__(self, out_dir, mat_code='s1v2', overwrite=False):
         self.db = None
         self.last_calibration = None
         self.query_file = None
         self.query_map_file = None
         self.query_acc_file = None
+        self.set_cost_matrix(mat_code)
         self.set_outdir(out_dir, overwrite)
         self.update_meta()
     
@@ -423,12 +143,17 @@ class Classifier:
                 'query_file':self.query_file,
                 'query_map_file':self.query_map_file,
                 'query_acc_file':self.query_acc_file,
-                'last_calibration':self.last_calibration}
+                'last_calibration':self.last_calibration,
+                'cost_matrix':self.mat_code}
         
     def update_meta(self):
         with open(self.out_dir + '/meta.json', 'w') as handle:
             json.dump(self.meta, handle)
     
+    def set_cost_matrix(self, mat_code):
+        self.mat_code = mat_code
+        self.cost_matrix = cost_matrix.get_matrix(mat_code)
+        
     def set_database(self, database):
         # verify that given database is valid and there isn't another database already set
         if not self.db is None and self.db != database:
@@ -556,7 +281,6 @@ class Classifier:
                          step_n,
                          max_k,
                          step_k,
-                         mat_code,
                          row_thresh,
                          col_thresh,
                          min_seqs,
@@ -584,18 +308,18 @@ class Classifier:
             calibrator.set_custom_windows(self.overlapps[:,0], self.overlapps[:,1])
         else:
             raise Exception('Missing parameters to set calibration windows. Run the get_overlapps method to get overlapping sections of query and reference data or provide matching sets of custom start and end positions')
+        # set calibration directory
         try:
-            calibrator.set_outdir(self.calibration_dir + '/' + kwargs['cal_dir'])
+            cal_dir = kwargs['cal_dir']
         except KeyError:
             cal_dir = datetime.now().strftime("%Y%m%d_%H%M%S")
-            calibrator.set_outdir(self.calibration_dir + '/' + cal_dir)
+        calibrator.set_outdir(self.calibration_dir + '/' + cal_dir)
         
-        cost_mat = cost_matrix.get_matrix(mat_code)
         calibrator.grid_search(max_n,
                                step_n,
                                max_k,
                                step_k,
-                               cost_mat,
+                               self.cost_matrix,
                                row_thresh,
                                col_thresh,
                                min_seqs,
@@ -664,35 +388,37 @@ class Classifier:
                  row_thresh,
                  col_thresh,
                  min_seqs,
-                 mat_code,
                  criterion='orbit',
                  method='wknn',
                  save=True,
                  save_dir=''):
         method = method.lower()
-        methods = {'unweighted':unweighted,
-                   'wknn':wknn,
-                   'dwknn':dwknn,
-                   'rara':wknn_rara}
-        if not method in methods.keys():
+        methods = {'unweighted':cls_classify.unweighted,
+                   'wknn':cls_classify.wknn,
+                   'dwknn':cls_classify.dwknn,
+                   'rara':cls_classify.wknn_rara}
+        
+        # verify that method is valid
+        try:
+            classif_method = methods[method.lower()]
+        except KeyError:
             raise Exception(f'Invalid method: {method}. Must be one of: "unweighted", "wknn", "dwknn"')
         # collapse reference and query matrices for the given window coordinates w_start & w_end, selecting the n most informative sites for the given rank
-        ref_window, qry_window, qry_branches, win_tax, sites = collapse(self,
-                                                                        w_start = w_start,
-                                                                        w_end = w_end,
-                                                                        n = n,
-                                                                        rank = rank,
-                                                                        row_thresh = row_thresh,
-                                                                        col_thresh = col_thresh,
-                                                                        min_seqs = min_seqs)
+        ref_window, qry_window, qry_branches, win_tax, sites = cls_preprocess.collapse(self,
+                                                                                       w_start = w_start,
+                                                                                       w_end = w_end,
+                                                                                       n = n,
+                                                                                       rank = rank,
+                                                                                       row_thresh = row_thresh,
+                                                                                       col_thresh = col_thresh,
+                                                                                       min_seqs = min_seqs)
         q_seqs = qry_window.shape[0]
         seqs_per_branch = np.array([len(br) for br in qry_branches])
         ref_mat = ref_window.window[:, sites]
         window_tax = self.tax_ext.loc[win_tax.index]
         
         # calculate distances
-        cost_mat = cost_matrix.get_matrix(mat_code)
-        distances = get_distances(qry_window, ref_mat, cost_mat)
+        distances = cls_distance.get_distances(qry_window, ref_mat, self.cost_matrix)
         
         # sort distances and get k nearest neighbours
         sorted_idxs = np.argsort(distances, axis=1)
@@ -700,18 +426,20 @@ class Classifier:
         compressed = [np.unique(dist, return_index=True, return_counts = True) for dist in sorted_dists] # for each qry_sequence, get distance groups, as well as the index where each group begins and the count for each group
         # get k nearest orbital or orbital containing the kth neighbour
         if criterion == 'orbit':
-            k_nearest = get_k_nearest_orbit(compressed, k)
+            k_dists, k_positions, k_counts = cls_neighbours.get_k_nearest_orbit_V(compressed, k)
         else:
-            k_nearest = get_k_nearest_neigh(compressed, k)
+            k_dists, k_positions, k_counts = cls_neighbours.get_k_nearest_neigh_V(compressed, k)
         
         # assign classifications
-        classifications = classify(k_nearest, sorted_idxs, window_tax, methods[method])
+        # clasif_id is a 2d array containing columns: query_idx, rank_idx, tax_id
+        # classif_data is a 2d array containing columns: total_neighbours, mean_distances, std_distances, total_support and softmax_support
+        classif_id, classif_data = cls_classify.classify_V(k_dists, k_positions, k_counts, sorted_idxs, window_tax, classif_method)
         
         #build reports
-        pre_report = build_prereport(classifications, seqs_per_branch)
-        report = build_report(pre_report, self.guide, q_seqs, seqs_per_branch)
-        characterization = characterize_sample(report)
-        designation = designate_branch_seqs(qry_branches, self.query_accs)
+        pre_report = cls_report.build_prereport_V(classif_id, classif_data, seqs_per_branch)
+        report = cls_report.build_report(pre_report, self.guide, q_seqs, seqs_per_branch)
+        characterization = cls_report.characterize_sample(report)
+        designation = cls_report.designate_branch_seqs(qry_branches, self.query_accs)
         
         # replace tax codes in pre report for their real names
         for rep in pre_report.values():

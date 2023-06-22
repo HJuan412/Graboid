@@ -10,8 +10,6 @@ Distance calculation functions
 #%% libraries
 import numpy as np
 
-# graboid libraries
-from classification import cost_matrix
 #%% fucntions
 def combine(window):
     """Creates a dictionary for each site (column) in the window, grouping all
@@ -24,10 +22,9 @@ def combine(window):
         combined.append(col_combined)
     return combined
 
-def get_distances(qry_window, ref_window, transition=1, transversion=2):
+def get_distances(qry_window, ref_window, cost_mat):
     """Generates a distance matrix of shape (# qry seqs, # ref seqs)"""
     # combine query and reference sequences to (greatly) speed up calculation
-    cost_mat = cost_matrix.cost_matrix(transition, transversion)
     qry_combined = combine(qry_window)
     ref_combined = combine(ref_window)
     

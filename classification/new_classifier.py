@@ -437,7 +437,7 @@ class Classifier:
         
         #build reports
         pre_report = cls_report.build_prereport_V(classif_id, classif_data, seqs_per_branch)
-        report = cls_report.build_report(pre_report, self.guide, q_seqs, seqs_per_branch)
+        report = cls_report.build_report(pre_report, self.guide, q_seqs, seqs_per_branch) # TODO: remember to remove LinCode columns
         characterization = cls_report.characterize_sample(report)
         designation = cls_report.designate_branch_seqs(qry_branches, self.query_accs)
         

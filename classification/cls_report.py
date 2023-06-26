@@ -48,17 +48,23 @@ def build_prereport(classifications, branch_counts):
         rk_tabs[rk] = rk_tab.set_index('seq')
     return rk_tabs
 
-def build_report(pre_report, guide, q_seqs, seqs_per_branch):
+def taxids_2_names(report, guide):
     # guide is the classifier's (not extended) taxonomy guide
-    # q_seqs is the number of query sequences
-    # seqs_per_branch is the array containing the number of sequences collapsed into each q_seq
-    # extract the winning classification for each sequence in the prereport
+    # replace tax_ids with tax names
     guide = guide.copy()
     guide.loc[-1, 'SciName'] = 'Undefined'
     
+    for rk in report.columns.get_level_values(0):
+        tax_codes = report.loc[:, (rk, 'Taxon')].values
+        report.loc[:, (rk, 'Taxon')] = guide.loc[tax_codes, 'SciName'].values
+        
+def build_report(pre_report, q_seqs, seqs_per_branch):
+    # q_seqs is the number of query sequences
+    # seqs_per_branch is the array containing the number of sequences collapsed into each q_seq
+    # extract the winning classification for each sequence in the prereport
     abv_reports = []
     for rk, rk_prereport in pre_report.items():
-        # for each rank prereport, dessignate each sequence's classifciation as that with the SINGLE greatest support (if there is multiple top taxa, sequence is left ambiguous)
+        # for each rank prereport, designate each sequence's classifciation as that with the SINGLE greatest support (if there is multiple top taxa, sequence is left ambiguous)
         # conclusion holds the winning classification (NOT SUPPORT) for each sequence
         conclusion = np.full(q_seqs, -1, dtype=np.int32)
         
@@ -86,11 +92,6 @@ def build_report(pre_report, guide, q_seqs, seqs_per_branch):
     abv_reports = np.concatenate(abv_reports, axis=0)
     header = pd.MultiIndex.from_product((pre_report.keys(), ['Taxon', 'support']))
     report = pd.DataFrame(abv_reports.T, columns=header) # columns: (rk, (taxon, support))
-    
-    # replace tax_ids with tax names
-    for rk in pre_report.keys():
-        tax_codes = report.loc[:, (rk, 'Taxon')].values
-        report.loc[:, (rk, 'Taxon')] = guide.loc[tax_codes, 'SciName'].values
     
     # add sequence counts
     report[('n_seqs', 'n_seqs')] = seqs_per_branch

@@ -18,144 +18,21 @@ import sys
 import time
 # Graboid libraries
 sys.path.append("..") # use this to allow importing from a sibling package
-from calibration import cal_dists
-from calibration import cal_neighsort
+# from calibration import cal_dists # TODO: delete cal_distances
 from calibration import cal_classify
+from calibration import cal_dists
 from calibration import cal_metrics
+from calibration import cal_neighsort
 from calibration import cal_report
 from calibration import cal_plot
-
-from classification import cls_classify
-from classification import cls_distance
-from classification import cls_neighbours
+from calibration import cal_preprocess
 
 from DATA import DATA
-
-from preprocess import feature_selection as fsele
-from preprocess import windows as wn
 
 #%% set logger
 logger = logging.getLogger('Graboid.calibrator')
 logger.setLevel(logging.DEBUG)
 
-#%% functions
-# preprocess 
-def collapse_windows(windows, matrix, tax_tab, row_thresh=0.1, col_thresh=0.1, min_seqs=50, threads=1):
-    # collapse the selected windows in the given matrix, apply corresponding filters
-    # return:
-        # win_indexes : sorted array of collapsed windows indexes
-        # win_list : list of Window instances, sorted
-        # rej_indexes : sorted array of rejected windows indexes
-        # rej_list : list of rejection messages, sorted
-    collapsed_windows = {}
-    rejected_windows = {}
-    with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
-        future_windows = {executor.submit(wn.Window, matrix, tax_tab, win[0], win[1], row_thresh, col_thresh, min_seqs):idx for idx, win in enumerate(windows)}
-        for future in concurrent.futures.as_completed(future_windows):
-            ft_idx = future_windows[future]
-            try:
-                collapsed_windows[ft_idx] = future.result()
-                print(f'Collapsed window {ft_idx}')
-            except Exception as excp:
-                rejected_windows[ft_idx] = str(excp)
-                print(f'Rejected window {ft_idx}')
-                continue
-    
-    # translate the collapsed_windows and rejected_windows dicts into ordered lists
-    win_indexes = np.sort(list(collapsed_windows.keys()))
-    win_list = [collapsed_windows[idx] for idx in win_indexes]
-    
-    rej_indexes = np.sort(list(rejected_windows.keys()))
-    rej_list = [rejected_windows[idx] for idx in rej_indexes]
-    
-    return win_indexes, win_list, rej_indexes, rej_list
-
-def select_sites(win_list, tax_ext, rank, min_n, max_n, step_n):
-    # get the arrays of selected sites for each collapsed window
-    window_sites = []
-    for win in win_list:
-        win_tax = tax_ext.loc[win.taxonomy][[rank]] # trick: if the taxonomy table passed to get_sorted_sites has a single rank column, entropy difference is calculated for said column
-        sorted_sites = fsele.get_sorted_sites(win.window, win_tax) # remember that you can use return_general, return_entropy and return_difference to get more information
-        window_sites.append(fsele.get_nsites(sorted_sites[0], min_n, max_n, step_n))
-    return window_sites
-
-# distance calculation
-def get_distances(win_list, window_sites, transition=1, transversion=2):
-    """Calcuate paired distances for every collapsed window, for every level of n"""
-    # win_list is the list of accepted collapsed windows
-    # window_sites is the list of selected sites for each level of n for each window (window_sites[window][n_level])
-    # returns win_distances a list containing one 3d array per window. Each array has shape (# levels of n, # seqs in window, # seqs in window), diagonal elements are -1
-    
-    win_distances = []
-    for win, sites in zip(win_list, window_sites):
-        distance_arrays = []
-        # get distances for each value of n, use cumsum to include the distance of all previous levels of n
-        for n_sites in sites:
-            win_cols = win.window[:, n_sites]
-            distance_arrays.append(cls_distance.get_distances(win_cols, win_cols, transition, transversion))
-        distance_arrays = np.cumsum(distance_arrays, 0) # some elements in the diagonal have distance over 0 because of unknown sites
-        distance_arrays[:, np.arange(distance_arrays.shape[1]), np.arange(distance_arrays.shape[2])] = -1 # diagonal elements to -1 ensures distance vs self is always first place when sorting
-        win_distances.append(distance_arrays)
-    return win_distances
-
-# neighbour sorting and clustering
-def get_sorted(all_distances):
-    """Sort all paired distance arrays"""
-    # sort all distance arrays, remove first column of each (distance to self, set as -1 so it is always the first)
-    # get sorted indexes of distance arrays for later use (also remove first column of each)
-    sorted_distances = []
-    sorted_indexes = []
-    for win_array in all_distances:
-        sorted_distances.append(np.sort(win_array, 2)[:,:, 1:])
-        sorted_indexes.append(np.argsort(win_array, 2)[:,:, 1:])
-    return sorted_distances, sorted_indexes
-
-def compress(sorted_distances):
-    """Compress each distance array into distance orbitals"""
-    # sorted_distance is a list of sorted distance arrays for each window for each n level
-    # return a list, containing a tuple of 3 arrays per window:
-        # first array contains orbital distances
-        # second array contains orbital start indexes
-        # third array contains orbital counts (second array may be redundant)
-    
-    # compress neighbours into orbits
-    compressed = []
-    # compressed is a list containing, for each window, a list of the compressed distance orbitals for each n level
-    for sorted_win_distances in sorted_distances:
-        win_compressed = []
-        for n_level in sorted_win_distances:
-            win_compressed.append([np.unique(dist, return_index=True, return_counts = True) for dist in n_level]) # for each qry_sequence, get distance groups, as well as the index where each group begins and the count for each group
-        compressed.append(win_compressed)
-    return compressed
-
-def build_packages(compressed, k_range, criterion):
-    """For each parameter combination (window, n, k) get the k nearest elements for the corresponding compressed orbitals"""
-    # returns a dictionary of keys (window index, n, k) with values (distances of the first k orbitals, start index of the first k orbitals, element counts of the first k orbitals)
-    classif_packages = {} # classif_packages contains all parameter combinations to be sent into the classifier
-    # get the data for each parameter combination
-    for win_idx, win_compressed in enumerate(compressed):
-        for n_idx, window_n in enumerate(win_compressed):
-            for k_idx, k in enumerate(k_range):
-                # TODO: maybe get only the highest K and modify the classification function to avoid unnecesary calculations
-                if criterion == 'orbit':
-                    classif_packages[(win_idx, n_idx, k_idx)] = cls_neighbours.get_knn_orbit_V(window_n, k)
-                else:
-                    classif_packages[(win_idx, n_idx, k_idx)] = cls_neighbours.get_knn_neigh_V(window_n, k)
-    return classif_packages
-
-# classifications
-def get_supports(calibrator, classif_packages, sorted_indexes, win_list, threads=1):
-    """Calculate supports for each parameter combination"""
-    # returns a dictionary with keys (window index, n, k) and the corresponding support arrays (one with sequence index, rank index, taxon id, the other with total neighbours, mean distance, std distance, total support and normalized support)
-    # TODO: need to optimize this, may need to define a special classification function for calibration
-    supports = {}
-    with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
-        futures = {executor.submit(cal_classify.classify_V, pckg, sorted_indexes[w_idx][n_idx], calibrator.tax_ext.loc[win_list[w_idx].taxonomy].to_numpy()):(w_idx, n_idx, k_idx) for (w_idx, n_idx, k_idx), pckg in classif_packages.items()}
-                # classifications = ncl.classify(k_nearest, sorted_indexes[win_idx][n_idx], calibrator.tax_ext, ncl.unweighted)
-        for future in concurrent.futures.as_completed(futures):
-            params = futures[future]
-            supports[params] = future.result()
-    return supports
 #%% classes
 class Calibrator:
     def __init__(self, out_dir=None):
@@ -349,7 +226,7 @@ class Calibrator:
         
         # collapse windows
         print('Collapsing windows...')
-        win_indexes, win_list, rej_indexes, rej_list = collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
+        win_indexes, win_list, rej_indexes, rej_list = cal_preprocess.collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
         self.report_windows(win_indexes, win_list, rej_indexes, rej_list)
         
         t1 = time.time()
@@ -361,32 +238,41 @@ class Calibrator:
         
         # select sites
         print('Selecting informative sites...')
-        window_sites = select_sites(win_list, self.tax_ext, rank, min_n, max_n, step_n)
-        self.report_sites(window_sites, win_list, win_indexes, n_range)
+        windows_sites = cal_preprocess.select_sites(win_list, self.tax_ext, rank, min_n, max_n, step_n)
+        self.report_sites(windows_sites, win_list, win_indexes, n_range)
         t2 = time.time()
         print(f'Site selection finished  in {t2 - t1:.3f} seconds')
         
         # calculate distances
         print('Calculating paired distances...')
-        all_distances = get_distances(win_list, window_sites)
+        all_distances = []
+        # TODO: parallel process
+        for window, win_sites in zip(win_list, windows_sites):
+            all_distances.append(cal_dists.get_distances(window, win_sites, cost_mat))
         t3 = time.time()
         print(f'Distance calculation finished in {t3 - t2:.3f} seconds')
 
         # sort neighbours
         print('Sorting neighbours...')
-        sorted_distances, sorted_indexes = get_sorted(all_distances)
-        # compress distances into orbitals
-        compressed = compress(sorted_distances) # each element of list contains arrays with orbital_distamces, first_index_per_orbital, elements_per_orbital
-        # build classification packages
-        classif_packages = build_packages(compressed, n_range, k_range, criterion)
+        window_packages = []
+        for distances in all_distances:
+            # sort distances and compress them into orbitals
+            sorted_distances, sorted_indexes, compressed = cal_neighsort.sort_compress(distances)
+            # build classification packages
+            window_packages.append(cal_neighsort.build_packages(compressed, sorted_indexes, n_range, k_range, criterion))
         t4 = time.time()
         print(f'Sorted neighbours in {t4 - t3:.3f} seconds')
         
         # classify
         print('Classifying...')
         # get supports
-        supports = get_supports(self, classif_packages, sorted_indexes, win_list)
-        # TODO: get winning classification for each param combination
+        for win_package in window_packages:
+            # get packages for a single window
+            for pckg_params, package in win_package.items():
+                # get individual packages
+                id_array, data_array = cal_classify.classify_V(package, self.tax_tab)
+                predicted_u, real_u_support, predicted_w, real_w_support, predicted_d, real_d_support = cal_classify.get_supports(id_array, data_array, self.tax_tab) # TODO: verify that this work, self.tax_tab may need adjustments
+                # TODO: save to tmp files
         t5 = time.time()
         print(f'Finished classifications in {t5 - t4:.3f} seconds')
         

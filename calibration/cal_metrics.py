@@ -111,3 +111,43 @@ def get_metrics(win_list, win_classifs, tax_ext, threads=1):
     with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
         metrics = [future for future in executor.map(get_window_metrics, win_classifs, window_taxes)]
     return metrics
+
+def get_metrics_per_func(pred, real):
+    rk_idxs = np.arange(real.shape[1])
+    
+    metrics = []
+    for rk in rk_idxs:
+        rk_real = real.T[rk]
+        rk_pred = pred.T[rk]
+        
+        uniq_tax = np.unique(rk_real)
+        
+        rk_metrics = np.zeros((len(uniq_tax), 6))
+        rk_metrics[:, 0] = rk
+        rk_metrics[:, 1] = uniq_tax
+        
+        for tax_idx, tax in enumerate(uniq_tax):
+            real_loc = rk_real == tax
+            pred_loc = rk_pred == tax
+            
+            tp = (real_loc & pred_loc).sum()
+            tn = (~real_loc & ~pred_loc).sum()
+            fp = pred_loc[~real_loc].sum()
+            fn = ~pred_loc[real_loc].sum()
+            
+            accuracy = tp / (tp + tn + fp + fn)
+            if tp == 0:
+                precision = 0
+                recall = 0
+                f1_score = 0
+            else:
+                precision = tp / (tp + fp)
+                recall = tp / (tp + fn)
+                f1_score = (2 * precision * recall) / (-1 if precision + recall == 0 else precision + recall)
+            rk_metrics[tax_idx,2:] = [accuracy, precision, recall, f1_score]
+        metrics.append(rk_metrics)
+    return np.concatenate(metrics)
+
+def get_metrics0(predicted_u, predicted_w, predicted_d, tax_tab):
+    
+    return

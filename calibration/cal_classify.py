@@ -9,282 +9,21 @@ Classify test instances during calibration
 """
 
 #%% libraries
-import concurrent.futures
 import numpy as np
-import time
-
 # Graboid libraries
 from classification import cls_classify
 #%% functions
-def compress_dists(distance_array):
-    # for every (sorted) distance array, return unique values with counts (counts are used to group neighbours)
-    return [np.stack(np.unique(dists, return_counts=True)) for dists in distance_array]
-
-def wknn(distance_array):
-    d1 = distance_array[:, [0]]
-    dk = distance_array[:, [-1]]
-    return (dk - distance_array) / (dk - d1)
-
-def dwknn(distance_array, weighted):
-    d1 = distance_array[:, [0]]
-    dk = distance_array[:, [-1]]
-    penal = (dk + d1) / (dk + distance_array)
-    return weighted * penal
-
-class Neighbours:
-    # this class is used to contain and handle the data after distance collapsing
-    def __init__(self, sorted_neighs, max_k):
-        self.max_k = max_k
-        # group neighbours by distance to query
-        compressed = compress_dists(sorted_neighs[1])
-        distances = []
-        positions = []
-        indexes = []
-        for neighs, comp in zip(sorted_neighs[0], compressed):
-            neigh_dists = np.full(max_k, max(comp[0]))
-            neigh_poss = np.full(max_k, 0, dtype=np.int16)
-            _k = min(len(comp[0]), max_k)
-            neigh_dists[:_k] = comp[0, :_k]
-            neigh_poss[:_k] = comp[1, :_k]
-            distances.append(neigh_dists)
-            positions.append(neigh_poss)
-            indexes.append(neighs[:neigh_poss.sum()].astype(int))
-        self.distances = np.array(distances) # contains collapsed distances up to the max_k position
-        self.positions = np.array(positions) # contains count of unique distance values (used to select indexes at a given orbit)
-        self.indexes = indexes # contains #sequences arrays (of varying lengths) with the indexes of the neighbours that populate the orbits up to the k_max position
-    
-    def get_weights(self, k_range):
-        self.k_range = k_range
-        # weight and double weight distances for multiple values of k
-        weighted = []
-        double_weighted = []
-        
-        for k in k_range:
-            k_weighted = wknn(self.distances[:,:k])
-            weighted.append(k_weighted)
-            double_weighted.append(dwknn(self.distances[:,:k], k_weighted))
-        # both weighted and double weighted are lists containing len(k_range) arrays of weights of increasing size (from min(k_range) to max(k_range) by step_k)
-        
-        # both weighted and double_weighted are lists of len(k_range) elements corresponding to the weighted distances for the different values of K
-        self.weighted = weighted
-        self.double_weighted = weighted
-
-# both classify functions return a list of #sequences elements containing #ranks tuples with an unweighted, weighted and double_weighted classification
-# tax_tab should be the window's extended taxonomy passed as a numpy array
-def orbit_classify(positions, indexes, weights, double_weights, tax_tab):
-    # get all neighbours in the first k orbits
-    k = weights.shape[1] # infer k from the number of calculated weights
-    k_pos = positions[:,:k] # get position locators
-    # get the weights for each orbit
-    orbit_arrays = [] # use this as base to get the corresponding weight/double_weight for each neighbour, depending on the orbit it occupies
-    for poss in k_pos:
-        orbit_arrays.append(np.concatenate([[idx]*pos for idx, pos in enumerate(poss)]).astype(int))
-    weighted_arrays = [wghts[orbt] for wghts, orbt in zip(weights, orbit_arrays)]
-    double_weighted_arrays = [dwghts[orbt] for dwghts, orbt in zip(double_weights, orbit_arrays)]
-    # retrieve indexes of neighbours located within the k-th orbit
-    k_indexes = [idxs[:len(orbt)] for idxs, orbt in zip(indexes, orbit_arrays)]
-    
-    classifs = []
-    # generate a classification for each sequence
-    for idxs, w_arr, dw_arr in zip(k_indexes, weighted_arrays, double_weighted_arrays):
-        sub_tax = tax_tab[idxs] # retrieve neighbour indexes
-        rk_classifs = []
-        # classify for each rank
-        for rk in sub_tax.T:
-            # count unique taxa in rank, filter out unknown taxa
-            taxa, counts = np.unique(rk, return_counts=True)
-            counts = counts[~np.isnan(taxa)]
-            taxa = taxa[~np.isnan(taxa)]
-            if len(taxa) == 0:
-                # no valid taxa in rank, assign as unknown and continue
-                rk_classifs.append(np.array([-1,-1,-1]))
-                continue
-            # get the locations of each member for each taxa (use it to retrieve a taxon's weights)
-            tax_locs = [rk == tax for tax in taxa]
-            
-            # for all classifs: if the _classif array has multiple elements, there is a conflict, replace it for [-1] to indicat an unknown
-            
-            # unweighted classify, majority_vote
-            u_classif = taxa[counts == max(counts)]
-            if len(u_classif) > 1:
-                u_classif = [-1]
-            
-            # for weighted and double_weighted classification:
-                # get the cummulative weights for all taxa
-                # select taxon with the highest weight
-            
-            # weighted classify
-            tax_supp_weighted = np.array([w_arr[tax].sum() for tax in tax_locs])
-            w_classif = taxa[tax_supp_weighted == max(tax_supp_weighted)]
-            if len(w_classif) > 1:
-                w_classif = [-1]
-            
-            # double weighted classify
-            tax_supp_double_weighted = [dw_arr[tax].sum() for tax in tax_locs]
-            d_classif = taxa[tax_supp_double_weighted == max(tax_supp_double_weighted)]
-            if len(d_classif) > 1:
-                d_classif = [-1]
-            
-            rk_classifs.append(np.array([u_classif[0], w_classif[0], d_classif[0]]))
-        classifs.append(np.array(rk_classifs))
-    return np.array(classifs, dtype=int)
-
-def neigh_classify(positions, indexes, weights, double_weights, tax_tab):
-    k = weights.shape[1] # infer k from the number of calculated weights
-    # for each sequence, get the orbit containing the k-th neighbour
-    selected_orbits = np.argmax(np.cumsum(positions, axis=1) >= k, axis=1) + 1
-    selected_positions = [pos[:orbt] for pos, orbt in zip(positions, selected_orbits)]
-    orbit_arrays = [] # use this as base to get the corresponding weight/double_weight for each neighbour, depending on the orbit it occupies
-    for poss in selected_positions:
-        orbit_arrays.append(np.concatenate([[idx]*pos for idx, pos in enumerate(poss)]))
-    weighted_arrays = [wghts[orbt] for wghts, orbt in zip(weights, orbit_arrays)]
-    double_weighted_arrays = [dwghts[orbt] for dwghts, orbt in zip(double_weights, orbit_arrays)]
-    # retrieve indexes of neighbours located within the k-th orbit
-    k_indexes = [idxs[:len(orbt)] for idxs, orbt in zip(indexes, orbit_arrays)]
-    
-    classifs = []
-    # generate a classification for each sequence
-    for idxs, w_arr, dw_arr in zip(k_indexes, weighted_arrays, double_weighted_arrays):
-        sub_tax = tax_tab[idxs] # retrieve neighbour indexes
-        rk_classifs = []
-        # classify for each rank
-        for rk in sub_tax.T:
-            # count unique taxa in rank, filter out unknown taxa
-            taxa, counts = np.unique(rk, return_counts=True)
-            counts = counts[~np.isnan(taxa)]
-            taxa = taxa[~np.isnan(taxa)]
-            if len(taxa) == 0:
-                # no valid taxa in rank, assign as unknown and continue
-                rk_classifs.append(np.array([-1,-1,-1]))
-                continue
-            # get the locations of each member for each taxa (use it to retrieve a taxon's weights)
-            tax_locs = [rk == tax for tax in taxa]
-            
-            # for all classifs: if the _classif array has multiple elements, there is a conflict, replace it for [-1] to indicat an unknown
-            
-            # unweighted classify, majority_vote
-            u_classif = taxa[counts == max(counts)]
-            if len(u_classif) > 1:
-                u_classif = [-1]
-            
-            # for weighted and double_weighted classification:
-                # get the cummulative weights for all taxa
-                # select taxon with the highest weight
-            
-            # weighted classify
-            tax_supp_weighted = np.array([w_arr[tax].sum() for tax in tax_locs])
-            w_classif = taxa[tax_supp_weighted == max(tax_supp_weighted)]
-            if len(w_classif) > 1:
-                w_classif = [-1]
-            
-            # double weighted classify
-            tax_supp_double_weighted = [dw_arr[tax].sum() for tax in tax_locs]
-            d_classif = taxa[tax_supp_double_weighted == max(tax_supp_double_weighted)]
-            if len(d_classif) > 1:
-                d_classif = [-1]
-            
-            rk_classifs.append(np.array([u_classif[0], w_classif[0], d_classif[0]]))
-        classifs.append(np.array(rk_classifs))
-    return np.array(classifs, dtype=int)
-
-def generate_classifications(sorted_neighbours, k_max, k_step, k_min, tax_tab, threads, criterion='orbit'):
-    # criterion: orbit or neighbours
-    # if orbit: get first k orbits, select all sequences from said orbits
-    # if neighbours: set cutoff at the orbit that includes the first k neighs
-    
-    k_range = np.arange(k_min, k_max, k_step)
-    # get max neighbours per level
-    lvl_neighbours = [Neighbours(sorted_neigh, k_max) for sorted_neigh in sorted_neighbours]
-    for lvl in lvl_neighbours:
-        lvl.get_weights(k_range)
-    
-    grid_indexes = [(n_idx, k_idx) for n_idx in np.arange(len(lvl_neighbours)) for k_idx in np.arange(len(k_range))]
-    classifs = {nk:None for nk in grid_indexes}
-    if criterion == 'orbit':
-        classif_func = orbit_classify
-    elif criterion == 'neigh':
-        classif_func = neigh_classify
-    else:
-        raise Exception(f'Invalid criterion value: {criterion}, must be "orbit" or "neigh"')
-    with concurrent.futures.ProcessPoolExecutor(max_workers = threads) as executor:
-        future_classifs = {executor.submit(classif_func,
-                                           lvl_neighbours[n_idx].positions,
-                                           lvl_neighbours[n_idx].indexes,
-                                           lvl_neighbours[n_idx].weighted[k_idx],
-                                           lvl_neighbours[n_idx].double_weighted[k_idx],
-                                           tax_tab): (n_idx, k_idx) for n_idx, k_idx in grid_indexes}
-        for future in concurrent.futures.as_completed(future_classifs):
-            cell = future_classifs[future]
-            classifs[cell] = future.result()
-            # print(f'Done with cell {cell}')
-    
-    # return dictionary of the form (n_index, k_index):classifications
-    return classifs
-
-def classify_windows(win_list, sorted_win_neighbours, tax_ext, min_k, max_k, step_k, criterion='orbit', threads=1, win_idxs=None):
-    win_classifs = []
-    
-    # win_idxs is used to signal when calculations are finished for a given window
-    if win_idxs is None:
-        win_idxs = np.arange(len(win_list))
-    
-    for idx, (sorted_neighs, window) in enumerate(zip(sorted_win_neighbours, win_list)):
-        window_tax = tax_ext.loc[window.taxonomy].to_numpy()
-        win_classifs.append(generate_classifications(sorted_neighs, max_k, step_k, min_k, window_tax, threads = threads, criterion = criterion))
-        print(f'Classified window {win_idxs[idx]}')
-    
-    return win_classifs
-
-
-def get_tax_supports_V0(idx, taxa, distances, u_support, w_support, d_support):
+def get_tax_supports_V(idx, taxa, u_supports, w_supports, d_supports, distances):
     """Variant of the cls_classify classification function, calculates support using all methods(unweighted, wknn, dwknn)
-    For each sequence, calcualte support for each sequence"""
+    For each sequence, calcualte support for each taxon"""
     # idx is the index of the sequence being classified
     # taxa is a numpy array with the extended taxonomy of the sequence neighbours
-    # distances contains the distances of the selected orbits to the current sequence
-    # support arrays contain the supports calculated with each method
+    # supports is an array with the support of each neighbour
+    # distances is an array with the distance of each neighbour to the sequence
     
     # returns two arrays
-    # first one has three columns: sequence_index, rank_index and taxon_id
-    # second one has five columns: total_neighbours, mean_distance, std_distance, total_support, norm_support
-    supp_array = np.tile([u_support, w_support, d_support], taxa.shape[1]).T
-    dist_array = np.tile(distances, taxa.shape[1])
-    taxa[np.isnan(taxa)] = -1 # use this to account for undetermined taxa
-    
-    tax_array = taxa.T.flatten()
-    rk_array = np.concatenate([[i]*taxa.shape[0] for i in range(taxa.shape[1])])
-    valid_tax = tax_array > 0
-    tax_array = tax_array[valid_tax]
-    rk_array = rk_array[valid_tax]
-    supp_array = supp_array[valid_tax]
-    dist_array = dist_array[valid_tax]
-    
-    uniq_tax = np.unique(tax_array)
-    n_tax = len(uniq_tax)
-    rk_tax_data = np.zeros((n_tax, 6), dtype=np.float16) # columns : total_neighs, mean_distance, std_distance, total unweighted support, total wknn support, total dwknn support
-    for tax_idx, u_tax in enumerate(uniq_tax):
-        tax_loc = tax_array == u_tax
-        rk_tax_data[tax_idx, 0] = tax_loc.sum() # total neighbours
-        rk_tax_data[tax_idx, 1] = dist_array[tax_loc].mean() # mean distance
-        rk_tax_data[tax_idx, 2] = dist_array[tax_loc].std() # std distance
-        # update supports
-        rk_tax_data[tax_idx, 3:] = supp_array[tax_loc].sum(0)
-        
-    # build seq idx, rank, tax matrix
-    rk_tax_array = np.array([np.full(n_tax, idx), rk_array, uniq_tax]).T
-    return rk_tax_array, rk_tax_data
-
-def get_tax_supports_V(idx, taxa, distances, u_support, w_support, d_support):
-    """Variant of the cls_classify classification function, calculates support using all methods(unweighted, wknn, dwknn)
-    For each sequence, calcualte support for each sequence"""
-    # idx is the index of the sequence being classified
-    # taxa is a numpy array with the extended taxonomy of the sequence neighbours
-    # distances contains the distances of the selected orbits to the current sequence
-    # support arrays contain the supports calculated with each method
-    
-    # returns two arrays
-    # first one has three columns: sequence_index, rank_index and taxon_id
-    # second one has five columns: total_neighbours, mean_distance, std_distance, total_support, norm_support
+    # rk_tax_array has three columns: sequence_index, rank_index and taxon_id
+    # rk_tax_data has 9 columns: total_neighbours, mean_distance, std_distance, unweighted_support, softmax_u_support, wknn_support, softmax_w_support, dwknn_support, softmax_d_support
     
     rk_tax_array = []
     rk_tax_data = []
@@ -292,20 +31,29 @@ def get_tax_supports_V(idx, taxa, distances, u_support, w_support, d_support):
     
     for rk_idx, rk in enumerate(taxa.T):
         uniq_tax = np.unique(rk)
-        uniq_tax = uniq_tax[uniq_tax > 0] # remove undetermined taxa
         n_tax = len(uniq_tax)
-        rk_data = np.zeros((n_tax, 6), dtype=np.float16) # columns : total_neighs, mean_distance, std_distance, total_support, norm_support, 
+        rk_data = np.zeros((n_tax, 9), dtype=np.float16) # columns : total_neighs, mean_distance, std_distance, total_unweighted_support, softmax_u_support, total_wknn_support, softmax_wknn_support, total_dwknn_support, softmax_d_support
         for tax_idx, u_tax in enumerate(uniq_tax):
             tax_loc = rk == u_tax
             rk_data[tax_idx, 0] = tax_loc.sum() # total neighbours
             rk_data[tax_idx, 1] = distances[tax_loc].mean() # mean distance
             rk_data[tax_idx, 2] = distances[tax_loc].std() # std distance
-            rk_data[tax_idx, 3] = u_support[tax_loc].sum() # total unweighted support
-            rk_data[tax_idx, 4] = w_support[tax_loc].sum() # total wknn support
-            rk_data[tax_idx, 5] = d_support[tax_loc].sum() # total dwknn support
+            rk_data[tax_idx, 3] = u_supports[tax_loc].sum() # total unweighted support
+            rk_data[tax_idx, 5] = w_supports[tax_loc].sum() # total wknn support
+            rk_data[tax_idx, 7] = d_supports[tax_loc].sum() # total dwknn support
+        
+        # softmax normalize support
+        rk_data[:, 4] = cls_classify.softmax(rk_data[:, 3])
+        rk_data[:, 6] = cls_classify.softmax(rk_data[:, 5])
+        rk_data[:, 8] = cls_classify.softmax(rk_data[:, 7])
+        
+        # remove no support taxa
+        supported = rk_data[:, 3] > 0
+        rk_data = rk_data[supported]
+        rk_tax = uniq_tax[supported]
         
         # add squence and rank idxs
-        rk_tax = np.array([np.full(len(rk_data), idx), np.full(len(rk_data), rk_idx), uniq_tax]).T
+        rk_tax = np.array([np.full(len(rk_tax), idx), np.full(len(rk_tax), rk_idx), rk_tax]).T
         rk_tax_array.append(rk_tax)
         rk_tax_data.append(rk_data)
         
@@ -313,52 +61,106 @@ def get_tax_supports_V(idx, taxa, distances, u_support, w_support, d_support):
     rk_tax_data = np.concatenate(rk_tax_data)
     return rk_tax_array, rk_tax_data
 
-def classify_V(neighbours, neigh_idxs, tax_tab, supp_func=0):
-    """Variant of the cls_classify classification function, calculates support using all methods(unweighted, wknn, dwknn)
+def classify_V(package, tax_tab):
+    """Variant of the cls_classify classify_V function, calculates support using all methods(unweighted, wknn, dwknn).
     Calculates mean distances, support and normalized support for each candidate taxon for each sequence"""
-    # neighbours contains the three 2d-arrays: k_dists, k_positions, k_counts
-    # neigh_idxs contains the sorted indexes of the neighbouring sequences
     # tax_tab is an extended taxonomy numpy array for the reference sequences
     # weight_func is one of unweighted, wknn, or dwknn
     
-    # returns two arrays: the first one has columns: sequence_index, rank_index and taxon_id
-    # the second array has columns: total_neighbours, mean_distances, std_distances, total_support and norm_support
+    # returns two arrays: the first one has columns: (query?)sequence_index, rank_index and taxon_id
+    # the second array has columns: total_neighbours, mean_distance, std_distance, unweighted_support, softmax_u_support, wknn_support, softmax_w_support, dwknn_support, softmax_d_support
     # second array uses dtype np.float16 to save memory space
     
-    # set get_tax_supports function
-    get_tax_supports = get_tax_supports_V
-    if supp_func == 0:
-        get_tax_supports = get_tax_supports_V0
+    # unpack classification package
+    distances = package[0][0]
+    positions = package[0][1]
+    counts = package[0][2]
+    neigh_idxs = package[1]
+    # dists contains the orbital distances of each query seq
+    # positions contains the start and end positions of each orbital for each query seq
+    # counts contains the number of sequences in each orbital for each query seq
+    # neigh_idxs contains the sorted indexes of the neighbouring sequences for each query seq
+    
     # calcuate supports
-    t0 = time.time()
-    unweighted_supports = cls_classify.unweighted(neighbours[0])
-    wknn_supports = cls_classify.wknn(neighbours[0])
-    dwknn_supports = cls_classify.dwknn(neighbours[0])
-    t1 = time.time()
-    print(f'Supports calculated in {t1 - t0:.3f}')
+    u_supports = cls_classify.unweighted(distances)
+    w_supports = cls_classify.wknn(distances)
+    d_supports = cls_classify.dwknn(distances)
+    
     # extend supports and distances for orbit in each sequence
-    unweighted_arrays = []
-    wknn_arrays = []
-    dwknn_arrays = []
+    u_support_arrays = []
+    w_support_arrays = []
+    d_support_arrays = []
     dist_arrays = []
     
-    for u_supp, w_supp, d_supp, dists, counts in zip(unweighted_supports, wknn_supports, dwknn_supports, neighbours[0], neighbours[2]):
+    def expand(supp_array, counts):
+        return np.concatenate([[supp]*cnt for supp, cnt in zip(supp_array, counts)])
+        
+    for u_supps, w_supps, d_supps, dists, cnts in zip(u_supports, w_supports, d_supports, distances, counts):
         # extend supports to fit the number of neighbours per orbital
-        unweighted_arrays.append(np.concatenate([[spp]*cnt for spp, cnt in zip(u_supp, counts)]))
-        wknn_arrays.append(np.concatenate([[spp]*cnt for spp, cnt in zip(w_supp, counts)]))
-        dwknn_arrays.append(np.concatenate([[spp]*cnt for spp, cnt in zip(d_supp, counts)]))
+        u_support_arrays.append(expand(u_supps, cnts))
+        w_support_arrays.append(expand(w_supps, cnts))
+        d_support_arrays.append(expand(d_supps, cnts))
         dist_arrays.append(np.concatenate([[dst]*cnt for dst, cnt in zip(dists, counts)]))
     # get the neighbour indexes for each sequence
-    neigh_arrays = [neigh_idxs[sq_idx, :max_loc] for sq_idx, max_loc in enumerate(np.max(neighbours[1], 1))]
-    t2 = time.time()
+    neigh_arrays = [neigh_idxs[sq_idx, :max_loc] for sq_idx, max_loc in enumerate(np.max(positions, 1))]
+    
     # get supports for each sequence
     id_arrays = []
     data_arrays = []
-    for seq_idx, (neighs, u_supps, w_supps, d_supps, dists) in enumerate(zip(neigh_arrays, unweighted_arrays, wknn_arrays, dwknn_arrays, dist_arrays)):
-        seq_supports = get_tax_supports(seq_idx, tax_tab[neighs], dists, u_supps, w_supps, d_supps)
+    for seq_idx, (neighs, u_supps, w_supps, d_supps, dists) in enumerate(zip(neigh_arrays, u_support_arrays, w_support_arrays, d_support_arrays, dist_arrays)):
+        seq_supports = get_tax_supports_V(seq_idx, tax_tab[neighs], u_supps, w_supps, d_supps, dists)
         id_arrays.append(seq_supports[0])
         data_arrays.append(seq_supports[1])
-    t3 = time.time()
-    print(f'Supports for candidates calculated in {t3 - t2:.3f}')
-    print('done!')
     return np.concatenate(id_arrays), np.concatenate(data_arrays)
+
+def get_supports(id_array, data_array, tax_tab):
+    """Get best support and support for the real taxon for every classified sequence for every rank"""
+    # id_array contains columns seq_idx, rk_id, tax_id
+    # data_array contains columns total_neighbours, mean_distance, std_distance, unweighted_support, softmax_u_support, wknn_support, softmax_w_support, dwknn_support, softmax_d_support
+    # tax_tab is an array containing the complete taxon ids for the query sequences
+    # for each support function, return two arrays of shape (seq_idx, #ranks)
+        # first array contains the predicted tax_id for each sequence per rank
+        # second array contains the supports for the real taxon for each rank in each sequence
+        
+    uniq_seqs = np.unique(id_array[:,0])
+    uniq_rks = np.unique(id_array[:,1])
+    
+    predicted_u = np.zeros((len(uniq_seqs), len(uniq_rks)))
+    real_u_support = np.zeros((len(uniq_seqs), len(uniq_rks)))
+    
+    predicted_w = np.zeros((len(uniq_seqs), len(uniq_rks)))
+    real_w_support = np.zeros((len(uniq_seqs), len(uniq_rks)))
+    
+    predicted_d = np.zeros((len(uniq_seqs), len(uniq_rks)))
+    real_d_support = np.zeros((len(uniq_seqs), len(uniq_rks)))
+    
+    for seq_idx, seq in enumerate(uniq_seqs):
+        seq_loc = id_array[:,0] == seq
+        seq_classif = id_array[seq_loc]
+        seq_data = data_array[seq_loc]
+        seq_real_taxa = tax_tab[seq_idx] # TODO: check this works
+        
+        for rk_idx, rk in uniq_rks:
+            rk_loc = seq_classif[:, 1] == rk
+            rk_data = seq_data[rk_loc]
+            rk_taxa = seq_classif[rk_loc, 2]
+            rk_real_tax = seq_real_taxa[rk_idx]
+            
+            # get predicted taxon
+            predicted_u[seq_idx, rk_idx] = rk_taxa[np.argmax(rk_data[:,4])]
+            predicted_w[seq_idx, rk_idx] = rk_taxa[np.argmax(rk_data[:,6])]
+            predicted_d[seq_idx, rk_idx] = rk_taxa[np.argmax(rk_data[:,8])]
+            
+            # get supports for real taxa
+            real_loc = rk_taxa == rk_real_tax
+            if real_loc.sum() == 0:
+                # real taxon has no support
+                real_u_support[seq_idx, rk_idx] = 0
+                real_w_support[seq_idx, rk_idx] = 0
+                real_d_support[seq_idx, rk_idx] = 0
+                continue
+            
+            real_u_support[seq_idx, rk_idx] = rk_taxa[real_loc, 4]
+            real_w_support[seq_idx, rk_idx] = rk_taxa[real_loc, 6]
+            real_d_support[seq_idx, rk_idx] = rk_taxa[real_loc, 8]
+    return predicted_u, real_u_support, predicted_w, real_w_support, predicted_d, real_d_support

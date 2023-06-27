@@ -135,7 +135,7 @@ def get_tax_supports_V(idx, taxa, supports, distances):
     rk_tax_data = np.concatenate(rk_tax_data)
     return rk_tax_array, rk_tax_data
 
-def classify_V(dists, positions, counts, neigh_idxs, tax_tab, weight_func):
+def classify_V(distances, positions, counts, neigh_idxs, tax_tab, weight_func):
     """Calculates mean distances, support and normalized support for each candidate taxon for each sequence"""
     # dists contains the orbital distances of each query seq
     # positions contains the start and end positions of each orbital for each query seq
@@ -149,13 +149,13 @@ def classify_V(dists, positions, counts, neigh_idxs, tax_tab, weight_func):
     # second array uses dtype np.float16 to save memory space
     
     # calcuate supports
-    supports = weight_func(dists)
+    supports = weight_func(distances)
     # extend supports and distances for orbit in each sequence
     support_arrays = []
     dist_arrays = []
-    for supp, dists, counts in zip(supports, dists, counts):
-        support_arrays.append(np.concatenate([[spp]*cnt for spp, cnt in zip(supp, counts)])) # extend supports to fit the number of neighbours per orbital
-        dist_arrays.append(np.concatenate([[dst]*cnt for dst, cnt in zip(dists, counts)]))
+    for supp, dists, cnts in zip(supports, distances, counts):
+        support_arrays.append(np.concatenate([[spp]*cnt for spp, cnt in zip(supp, cnts)])) # extend supports to fit the number of neighbours per orbital
+        dist_arrays.append(np.concatenate([[dst]*cnt for dst, cnt in zip(dists, cnts)]))
     # get the neighbour indexes for each sequence
     neigh_arrays = [neigh_idxs[sq_idx, :max_loc] for sq_idx, max_loc in enumerate(np.max(positions, 1))]
     

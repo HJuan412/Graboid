@@ -148,6 +148,21 @@ def get_metrics_per_func(pred, real):
         metrics.append(rk_metrics)
     return np.concatenate(metrics)
 
-def get_metrics0(predicted_u, predicted_w, predicted_d, tax_tab):
+def get_cross_entropy(supports):
+    clipped_supports = np.clip(supports, np.exp(-5), 1)
+    cross_entropy = np.log(clipped_supports).sum(axis=0)
+    return cross_entropy
+
+def get_metrics0(results_file, real_tax):
+    results = np.load(results_file)
     
-    return
+    # acc, prec, rec, f1
+    metrics = np.array([get_metrics_per_func(results['predicted_u'], real_tax),
+                        get_metrics_per_func(results['predicted_w'], real_tax),
+                        get_metrics_per_func(results['predicted_d'], real_tax)])
+    
+    # Cross Entropy Loss
+    cross_entropy = np.array([get_cross_entropy(results['real_u_support']),
+                              get_cross_entropy(results['real_w_support']),
+                              get_cross_entropy(results['real_d_support'])])
+    return metrics, cross_entropy

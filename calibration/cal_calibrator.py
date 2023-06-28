@@ -13,6 +13,7 @@ import logging
 import numpy as np
 import os
 import pandas as pd
+import re
 import pickle
 import sys
 import time
@@ -266,19 +267,28 @@ class Calibrator:
         # classify
         print('Classifying...')
         # get supports
-        for win_package in window_packages:
+        for win_idx, win_package in enumerate(window_packages):
             # get packages for a single window
-            for pckg_params, package in win_package.items():
+            for (n, k), package in win_package.items():
                 # get individual packages
                 id_array, data_array = cal_classify.classify_V(package, self.tax_tab)
                 predicted_u, real_u_support, predicted_w, real_w_support, predicted_d, real_d_support = cal_classify.get_supports(id_array, data_array, self.tax_tab) # TODO: verify that this work, self.tax_tab may need adjustments
-                # TODO: save to tmp files
+                # save classification results
+                np.savez(self.classif_dir + f'/{win_idx}_{n}_{k}.npz',
+                         predicted_u = predicted_u,
+                         predicted_w = predicted_w,
+                         predicted_d = predicted_d,
+                         real_u_support = real_u_support,
+                         real_w_support = real_w_support,
+                         real_d_support = real_d_support)
         t5 = time.time()
         print(f'Finished classifications in {t5 - t4:.3f} seconds')
         
         # get metrics
         print('Calculating metrics...')
-        # metrics = cal_metrics.get_metrics(win_list, win_classifs, self.tax_ext, threads)
+        for res_file in os.listdir(self.clasi_dir):
+            metrics, cross_entropy = cal_metrics.get_metrics0(self.clasif_dir + '/' +res_file, self.tax_tab)
+            np.savez(self.reports_dir + '/' + re.sub('.npz', '_metrics.npz'), metrics = metrics, cross_entropy = cross_entropy)
         t6 = time.time()
         print(f'Done in {t6 - t5:.3f} seconds')
         

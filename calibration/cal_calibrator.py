@@ -269,11 +269,12 @@ class Calibrator:
         print('Classifying...')
         # get supports
         for win_idx, win_package in enumerate(window_packages):
+            win_tax = self.tax_ext.loc[window.taxonomy].to_numpy() # get the taxonomic classifications for the window as an array of shape: # seqs in window, # ranks
             # get packages for a single window
             for (n, k), package in win_package.items():
                 # get individual packages
-                id_array, data_array = cal_classify.classify_V(package, self.tax_tab)
-                predicted_u, real_u_support, predicted_w, real_w_support, predicted_d, real_d_support = cal_classify.get_supports(id_array, data_array, self.tax_tab) # TODO: verify that this work, self.tax_tab may need adjustments
+                id_array, data_array = cal_classify.classify_V(package, win_tax, threads)
+                predicted_u, real_u_support, predicted_w, real_w_support, predicted_d, real_d_support = cal_classify.get_supports(id_array, data_array, win_tax)
                 # save classification results
                 np.savez(self.classif_dir + f'/{win_idx}_{n}_{k}.npz',
                          predicted_u = predicted_u,
@@ -288,9 +289,12 @@ class Calibrator:
         
         # get metrics
         print('Calculating metrics...')
+        win_dict = {w_idx:win for w_idx,win in zip(win_indexes, win_list)} # use this to locate the right window from the file's parameters
         for res_file in os.listdir(self.clasi_dir):
             results = np.load(self.clasif_dir + '/' +res_file)
-            metrics, cross_entropy = cal_metrics.get_metrics0(results, self.tax_tab)
+            window = win_dict[results['params'][0]]
+            real_tax = self.tax_ext.loc[window.taxonomy].to_numpy()
+            metrics, cross_entropy = cal_metrics.get_metrics0(results, real_tax)
             np.savez(self.reports_dir + '/' + re.sub('.npz', '_metrics.npz'), metrics = metrics, cross_entropy = cross_entropy, params = results['params'])
         t6 = time.time()
         print(f'Done in {t6 - t5:.3f} seconds')

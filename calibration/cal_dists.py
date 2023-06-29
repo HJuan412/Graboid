@@ -23,7 +23,7 @@ def get_distances(window, window_sites, cost_mat):
     win_distances = []
     # get distances for each value of n, use cumsum to include the distance of all previous levels of n
     for n_sites in window_sites:
-        win_cols = window[:, n_sites]
+        win_cols = window.window[:, n_sites]
         win_distances.append(cls_distance.get_distances(win_cols, win_cols, cost_mat))
     win_distances = np.cumsum(win_distances, 0) # some elements in the diagonal have distance over 0 because of unknown sites
     win_distances[:, np.arange(win_distances.shape[1]), np.arange(win_distances.shape[2])] = -1 # diagonal elements to -1 ensures distance vs self is always first place when sorting

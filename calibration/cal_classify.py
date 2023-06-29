@@ -9,7 +9,9 @@ Classify test instances during calibration
 """
 
 #%% libraries
+import concurrent.futures
 import numpy as np
+from time import time
 # Graboid libraries
 from classification import cls_classify
 #%% functions
@@ -32,7 +34,7 @@ def get_tax_supports_V(idx, taxa, u_supports, w_supports, d_supports, distances)
     for rk_idx, rk in enumerate(taxa.T):
         uniq_tax = np.unique(rk)
         n_tax = len(uniq_tax)
-        rk_data = np.zeros((n_tax, 9), dtype=np.float16) # columns : total_neighs, mean_distance, std_distance, total_unweighted_support, softmax_u_support, total_wknn_support, softmax_wknn_support, total_dwknn_support, softmax_d_support
+        rk_data = np.zeros((n_tax, 9), dtype=np.float32) # columns : total_neighs, mean_distance, std_distance, total_unweighted_support, softmax_u_support, total_wknn_support, softmax_wknn_support, total_dwknn_support, softmax_d_support
         for tax_idx, u_tax in enumerate(uniq_tax):
             tax_loc = rk == u_tax
             rk_data[tax_idx, 0] = tax_loc.sum() # total neighbours
@@ -61,7 +63,7 @@ def get_tax_supports_V(idx, taxa, u_supports, w_supports, d_supports, distances)
     rk_tax_data = np.concatenate(rk_tax_data)
     return rk_tax_array, rk_tax_data
 
-def classify_V(package, tax_tab):
+def classify_V(package, tax_tab, threads=1):
     """Variant of the cls_classify classify_V function, calculates support using all methods(unweighted, wknn, dwknn).
     Calculates mean distances, support and normalized support for each candidate taxon for each sequence"""
     # tax_tab is an extended taxonomy numpy array for the reference sequences
@@ -72,6 +74,7 @@ def classify_V(package, tax_tab):
     # second array uses dtype np.float16 to save memory space
     
     # unpack classification package
+    t0 = time() # TODO: time
     distances = package[0][0]
     positions = package[0][1]
     counts = package[0][2]
@@ -100,17 +103,26 @@ def classify_V(package, tax_tab):
         u_support_arrays.append(expand(u_supps, cnts))
         w_support_arrays.append(expand(w_supps, cnts))
         d_support_arrays.append(expand(d_supps, cnts))
-        dist_arrays.append(np.concatenate([[dst]*cnt for dst, cnt in zip(dists, counts)]))
+        dist_arrays.append(expand(dists, cnts))
+        # dist_arrays.append(np.concatenate([[dst]*cnt for dst, cnt in zip(dists, counts)]))
     # get the neighbour indexes for each sequence
     neigh_arrays = [neigh_idxs[sq_idx, :max_loc] for sq_idx, max_loc in enumerate(np.max(positions, 1))]
     
     # get supports for each sequence
     id_arrays = []
     data_arrays = []
-    for seq_idx, (neighs, u_supps, w_supps, d_supps, dists) in enumerate(zip(neigh_arrays, u_support_arrays, w_support_arrays, d_support_arrays, dist_arrays)):
-        seq_supports = get_tax_supports_V(seq_idx, tax_tab[neighs], u_supps, w_supps, d_supps, dists)
-        id_arrays.append(seq_supports[0])
-        data_arrays.append(seq_supports[1])
+    t1 = time() # TODO: time
+    with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+        futures = [executor.submit(get_tax_supports_V, seq_idx, tax_tab[neighs], u_supps, w_supps, d_supps, dists) for seq_idx, (neighs, u_supps, w_supps, d_supps, dists) in enumerate(zip(neigh_arrays, u_support_arrays, w_support_arrays, d_support_arrays, dist_arrays))]
+        for future in concurrent.futures.as_completed(futures):
+            id_arrays.append(future.result()[0])
+            data_arrays.append(future.result()[1])
+    # for seq_idx, (neighs, u_supps, w_supps, d_supps, dists) in enumerate(zip(neigh_arrays, u_support_arrays, w_support_arrays, d_support_arrays, dist_arrays)):
+    #     seq_supports = get_tax_supports_V(seq_idx, tax_tab[neighs], u_supps, w_supps, d_supps, dists)
+    #     id_arrays.append(seq_supports[0])
+    #     data_arrays.append(seq_supports[1])
+    t2 = time() # TODO: time
+    print(f'Main {t2 - t0:.3f}. Support {t2 - t1:.3f}')
     return np.concatenate(id_arrays), np.concatenate(data_arrays)
 
 def get_supports(id_array, data_array, tax_tab):
@@ -125,42 +137,41 @@ def get_supports(id_array, data_array, tax_tab):
     uniq_seqs = np.unique(id_array[:,0])
     uniq_rks = np.unique(id_array[:,1])
     
-    predicted_u = np.zeros((len(uniq_seqs), len(uniq_rks)))
-    real_u_support = np.zeros((len(uniq_seqs), len(uniq_rks)))
+    predicted_u = np.zeros((len(uniq_seqs), len(uniq_rks)), dtype=int)
+    real_u_support = np.zeros((len(uniq_seqs), len(uniq_rks)), dtype=np.float32)
     
-    predicted_w = np.zeros((len(uniq_seqs), len(uniq_rks)))
-    real_w_support = np.zeros((len(uniq_seqs), len(uniq_rks)))
+    predicted_w = np.zeros((len(uniq_seqs), len(uniq_rks)), dtype=int)
+    real_w_support = np.zeros((len(uniq_seqs), len(uniq_rks)), dtype=np.float32)
     
-    predicted_d = np.zeros((len(uniq_seqs), len(uniq_rks)))
-    real_d_support = np.zeros((len(uniq_seqs), len(uniq_rks)))
+    predicted_d = np.zeros((len(uniq_seqs), len(uniq_rks)), dtype=int)
+    real_d_support = np.zeros((len(uniq_seqs), len(uniq_rks)), dtype=np.float32)
     
     for seq_idx, seq in enumerate(uniq_seqs):
         seq_loc = id_array[:,0] == seq
         seq_classif = id_array[seq_loc]
         seq_data = data_array[seq_loc]
-        seq_real_taxa = tax_tab[seq_idx] # TODO: check this works
+        seq_real_taxa = tax_tab[seq_idx]
         
-        for rk_idx, rk in uniq_rks:
+        # get predicted taxon
+        for rk_idx, rk in enumerate(uniq_rks):
             rk_loc = seq_classif[:, 1] == rk
             rk_data = seq_data[rk_loc]
             rk_taxa = seq_classif[rk_loc, 2]
-            rk_real_tax = seq_real_taxa[rk_idx]
             
-            # get predicted taxon
             predicted_u[seq_idx, rk_idx] = rk_taxa[np.argmax(rk_data[:,4])]
             predicted_w[seq_idx, rk_idx] = rk_taxa[np.argmax(rk_data[:,6])]
             predicted_d[seq_idx, rk_idx] = rk_taxa[np.argmax(rk_data[:,8])]
             
             # get supports for real taxa
-            real_loc = rk_taxa == rk_real_tax
+        for rk_idx, rk_tax in enumerate(seq_real_taxa):
+            real_loc = seq_classif[:,-1] == rk_tax
             if real_loc.sum() == 0:
                 # real taxon has no support
                 real_u_support[seq_idx, rk_idx] = 0
                 real_w_support[seq_idx, rk_idx] = 0
                 real_d_support[seq_idx, rk_idx] = 0
                 continue
-            
-            real_u_support[seq_idx, rk_idx] = rk_taxa[real_loc, 4]
-            real_w_support[seq_idx, rk_idx] = rk_taxa[real_loc, 6]
-            real_d_support[seq_idx, rk_idx] = rk_taxa[real_loc, 8]
+            real_u_support[seq_idx, rk_idx] = seq_data[real_loc, 4]
+            real_w_support[seq_idx, rk_idx] = seq_data[real_loc, 6]
+            real_d_support[seq_idx, rk_idx] = seq_data[real_loc, 8]
     return predicted_u, real_u_support, predicted_w, real_w_support, predicted_d, real_d_support

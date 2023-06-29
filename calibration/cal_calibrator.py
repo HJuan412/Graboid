@@ -8,6 +8,7 @@ Created on Tue Nov 30 11:06:10 2021
 
 #%% libraries
 import concurrent.futures
+import glob
 import json
 import logging
 import numpy as np
@@ -280,20 +281,26 @@ class Calibrator:
                          predicted_d = predicted_d,
                          real_u_support = real_u_support,
                          real_w_support = real_w_support,
-                         real_d_support = real_d_support)
+                         real_d_support = real_d_support,
+                         params = np.array([win_idx, n, k]))
         t5 = time.time()
         print(f'Finished classifications in {t5 - t4:.3f} seconds')
         
         # get metrics
         print('Calculating metrics...')
         for res_file in os.listdir(self.clasi_dir):
-            metrics, cross_entropy = cal_metrics.get_metrics0(self.clasif_dir + '/' +res_file, self.tax_tab)
-            np.savez(self.reports_dir + '/' + re.sub('.npz', '_metrics.npz'), metrics = metrics, cross_entropy = cross_entropy)
+            results = np.load(self.clasif_dir + '/' +res_file)
+            metrics, cross_entropy = cal_metrics.get_metrics0(results, self.tax_tab)
+            np.savez(self.reports_dir + '/' + re.sub('.npz', '_metrics.npz'), metrics = metrics, cross_entropy = cross_entropy, params = results['params'])
         t6 = time.time()
         print(f'Done in {t6 - t5:.3f} seconds')
         
         # report
         print('Building report...')
+        for win_idx in win_indexes:
+            # open window metrics
+            window_reports = glob.glob(self.reports_dir + f'/{win_idx}*')
+            
         # acc_report, acc_params = cal_report.build_report(win_list, metrics, 'acc', self.tax_ext, self.guide, n_range, k_range)
         # prc_report, prc_params = cal_report.build_report(win_list, metrics, 'prc', self.tax_ext, self.guide, n_range, k_range)
         # rec_report, rec_params = cal_report.build_report(win_list, metrics, 'rec', self.tax_ext, self.guide, n_range, k_range)

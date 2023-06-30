@@ -91,6 +91,7 @@ def build_report(win_list, metrics, metric, tax_ext, guide, n_range, k_range):
 
 #%% new report functions
 def compare_cross_entropy(files):
+    # returns array of shape: # files * 3 (unweighted, wknn, dwknn), 4 (window, n, k, method, ) + # ranks
     cross_entropy_report = []
     for fil in files:
         fil_dict = np.load(fil)
@@ -101,58 +102,61 @@ def compare_cross_entropy(files):
         package_report[:,:3] = fil_params
         package_report[:,3] = np.arange(1,4)
         cross_entropy_report.append(package_report)
-    return cross_entropy_report
+    return np.concatenate(cross_entropy_report)
 
 def compare_metrics(files):
+    # for each metric (accuracy, precision, recall, f1) generate a report of the parameter combinations that yield the best results for each taxon
+    # returns acc_report, prc_report, rec_report, f1_report. 2d arrays of shape: # taxa, rank, taxon, window_idx, n, k, method, score. Only the best parameter combination and the generated score are recorded per taxon
     params = []
     metrics = []
     tax_data = []
     for fil in files:
         fil_dict = np.load(fil)
         params.append(fil_dict['params']) # [window_idx, n, k]
-        metrics.append(fil_dict['metrics'][:,1:,:]) # 3d array of shape: # taxa, 6 (tax_id, acc, prc, rec, f1), 3 (unweighted, wknn, dwknn)
-        tax_data.append(fil_dict['metrics'][...,0][:,1:]) # retrieve taxonomic data (first 2 columns of first layer (any layer would do))
+        metrics.append(fil_dict['metrics'][:,1:,:]) # 3d array of shape: # taxa, 6 (rank_id, tax_id, acc, prc, rec, f1), 3 (unweighted, wknn, dwknn)
+        tax_data.append(fil_dict['metrics'][:,:2,0]) # retrieve taxonomic data (first 2 columns of first layer (any layer would do))
     
     params = np.array(params)
-    tax_data = np.concatenate(tax_data)
-    taxa, tax_loc = np.unique(tax_data, return_index = True) # get number of taxon and index location to match tax and rank
-    
+    tax_data = np.concatenate(tax_data).astype(np.int32)
+    taxa, tax_loc = np.unique(tax_data[:,1], return_index = True) # get number of taxon and index location to match tax and rank
+
     template_tab = np.zeros((len(taxa), 6, len(params))) # rows: taxa, columns: rank, taxon, acc, prec, rec, f1, layers: param (n-k) combos
-    template_tab[:, 2:] = tax_data[tax_loc]
+    template_tab[:, 0] = np.tile(tax_data[tax_loc, 0], (20, 1)).T
+    template_tab[:, 1] = np.tile(tax_data[tax_loc, 1], (20, 1)).T
     
     idx_dict = {tax:tax_idx for tax_idx,tax in enumerate(taxa)} # used to place a taxon on nk_tab and method_tab
     nk_tab = template_tab.copy() # holds the scores of the winning method for each taxon for each metric, for each param combination
-    method_tab = template_tab.copy() # holds the indexes of the winning methods for each cell in nk_tab
+    method_tab = template_tab.copy().astype(np.int32) # holds the indexes of the winning methods for each cell in nk_tab
     
     # select the winning method for each metric for each n-k combination
     for met_idx, mets in enumerate(metrics):
-        indexes = [idx_dict[mt] for mt in mets[:,:2]] # get the indexes of the sequences that appeared in this parameter combination
-        nk_tab[indexes, 2:, met_idx] = np.max(mets[:,2:], axis = 2) # update nk_tab with best scores for the current n-k combination
-        method_tab[indexes, 2:, met_idx] = np.argmax(mets[:,2:], axis = 2) # record methods that generated the best scores for each taxon for each metric
+        indexes = [idx_dict[mt] for mt in mets[:,0,0]] # get the indexes of the sequences that appeared in this parameter combination
+        nk_tab[indexes, 2:, met_idx] = np.max(mets[:,1:], axis = 2) # update nk_tab with best scores for the current n-k combination
+        method_tab[indexes, 2:, met_idx] = np.argmax(mets[:,1:], axis = 2) # record methods that generated the best scores for each taxon for each metric
     
     nk_winner = np.max(nk_tab[:,2:], axis = 2) # get the best score for each taxon for each n-k combination
     nk_idxs = np.argmax(nk_tab[:,2:], axis = 2) # get the indexes of the n-k combinations that generated the best scores for each taxon for each metric
     method_winners = method_tab[:,2:,:][np.indices(nk_idxs.shape)[0], np.indices(nk_idxs.shape)[1], nk_idxs] # retrieve the methods that generated the best scores for each taxon for each metric for each n-k combination
     
-    template_report = np.zeros(len(taxa), 2 + 4 + 1) # first 2 columns are rank & taxon, next 4 are window, n, k, method, last 1 is best score. Table includes only the best scores and the param combination that generated them
+    template_report = np.zeros((len(taxa), 2 + 4 + 1), dtype=np.float32) # first 2 columns are rank & taxon, next 4 are window, n, k, method, last 1 is best score. Table includes only the best scores and the param combination that generated them
     template_report[:, :2] = tax_data[tax_loc]
     acc_report = template_report.copy()
     prc_report = template_report.copy()
     rec_report = template_report.copy()
     f1_report = template_report.copy()
-    
+
     # record winner n-k
-    acc_report[:, [2,4]] = params[nk_idxs[0]]
-    prc_report[:, [2,4]] = params[nk_idxs[1]]
-    rec_report[:, [2,4]] = params[nk_idxs[2]]
-    f1_report[:, [2,4]] = params[nk_idxs[3]]
-    
+    acc_report[:, 2:5] = params[nk_idxs[:,0]]
+    prc_report[:, 2:5] = params[nk_idxs[:,1]]
+    rec_report[:, 2:5] = params[nk_idxs[:,2]]
+    f1_report[:, 2:5] = params[nk_idxs[:,3]]
+
     # record winner method
-    acc_report[:, 4] = method_winners[:, 0]
-    prc_report[:, 4] = method_winners[:, 1]
-    rec_report[:, 4] = method_winners[:, 2]
-    f1_report[:, 4] = method_winners[:, 3]
-    
+    acc_report[:, 5] = method_winners[:, 0]
+    prc_report[:, 5] = method_winners[:, 1]
+    rec_report[:, 5] = method_winners[:, 2]
+    f1_report[:, 5] = method_winners[:, 3]
+
     # record best metrics
     acc_report[:, -1] = nk_winner[:,0]
     prc_report[:, -1] = nk_winner[:,1]

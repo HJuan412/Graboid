@@ -35,6 +35,63 @@ from DATA import DATA
 logger = logging.getLogger('Graboid.calibrator')
 logger.setLevel(logging.DEBUG)
 
+#%% functions
+# report
+def replace_windows(report, windows, loc):
+    w_start = windows[report.window.values, 0]
+    w_end = windows[report.window.values, 1]
+    report.insert(loc, 'w_start', w_start)
+    report.insert(loc+1, 'w_end', w_end)
+
+def build_reports(win_indexes, report_dir, ranks):
+    cross_entropy_report = []
+    acc_report = []
+    prc_report = []
+    rec_report = []
+    f1_report = []
+    
+    for win_idx in win_indexes:
+        # open window metrics
+        window_reports = glob.glob(report_dir + f'/{win_idx}*')
+        
+        cross_entropy_report.append(cal_report.compare_cross_entropy(window_reports))
+        met_reports = cal_report.compare_metrics(window_reports)
+        acc_report.append(met_reports[0])
+        prc_report.append(met_reports[1])
+        rec_report.append(met_reports[2])
+        f1_report .append(met_reports[3])
+    
+    cross_entropy_report = np.concatenate(cross_entropy_report)
+    acc_report = np.concatenate(acc_report)
+    prc_report = np.concatenate(prc_report)
+    rec_report = np.concatenate(rec_report)
+    f1_report = np.concatenate(f1_report)
+    
+    cross_entropy_report = pd.DataFrame(cross_entropy_report, columns='window n k method'.split() + ranks)
+    
+    acc_report = pd.DataFrame(acc_report, columns='rank taxID window n k method score'.split()).sort_values('window').sort_values('rank').reset_index(drop=True)
+    prc_report = pd.DataFrame(prc_report, columns='rank taxID window n k method score'.split()).sort_values('window').sort_values('rank').reset_index(drop=True)
+    rec_report = pd.DataFrame(rec_report, columns='rank taxID window n k method score'.split()).sort_values('window').sort_values('rank').reset_index(drop=True)
+    f1_report = pd.DataFrame(f1_report, columns='rank taxID window n k method score'.split()).sort_values('window').sort_values('rank').reset_index(drop=True)
+    
+    return cross_entropy_report, acc_report, prc_report, rec_report, f1_report
+
+def post_process(windows, guide, ranks, met_report=None, ce_report=None):
+    # post process reports
+    # buid dataframes
+        # cross entropy columns: 4 (window, n, k, method, ) + ranks # TODO: add # taxa per rank per param combination
+        # metric reports columns: rank, taxon, window, n, k, method, score
+    if not ce_report is None:
+        ce_report[['window', 'n', 'k']] = ce_report[['window', 'n', 'k']].astype(np.int16)
+        ce_report['method'].replace({1:'u', 2:'w', 3:'d'}, inplace=True)
+        replace_windows(ce_report, windows, 1)
+        return
+    if not met_report is None:
+        met_report[['window', 'n', 'k']] = met_report[['window', 'n', 'k']].astype(np.int16)
+        met_report['method'].replace({0:'u', 1:'w', 2:'d'}, inplace=True)
+        met_report['rank'].replace({rk_idx:rk for rk_idx, rk in enumerate(ranks)}, inplace=True)
+        replace_windows(met_report, windows, 3)
+        met_report.insert(1, 'taxon', guide.loc[met_report.taxID, 'SciName'].values)
 #%% classes
 class Calibrator:
     def __init__(self, out_dir=None):
@@ -84,6 +141,7 @@ class Calibrator:
         
         # load taxonomy guides
         self.guide = pd.read_csv(db_meta['guide_file'], index_col=0)
+        self.guide.loc[-1] = 'undetermined'
         self.tax_ext = pd.read_csv(db_meta['expguide_file'], index_col=0)
         self.ranks = self.tax_ext.columns.tolist()
         
@@ -301,9 +359,12 @@ class Calibrator:
         
         # report
         print('Building report...')
-        for win_idx in win_indexes:
-            # open window metrics
-            window_reports = glob.glob(self.reports_dir + f'/{win_idx}*')
+        cross_entropy_report, acc_report, prc_report, rec_report, f1_report = build_reports(win_indexes, self.reports_dir, self.ranks)
+        post_process(self.windows, self.guide, self.ranks, ce_report=cross_entropy_report)
+        post_process(self.windows, self.guide, self.ranks, met_report=acc_report)
+        post_process(self.windows, self.guide, self.ranks, met_report=prc_report)
+        post_process(self.windows, self.guide, self.ranks, met_report=rec_report)
+        post_process(self.windows, self.guide, self.ranks, met_report=f1_report)
             
         # acc_report, acc_params = cal_report.build_report(win_list, metrics, 'acc', self.tax_ext, self.guide, n_range, k_range)
         # prc_report, prc_params = cal_report.build_report(win_list, metrics, 'prc', self.tax_ext, self.guide, n_range, k_range)

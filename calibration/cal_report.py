@@ -121,8 +121,8 @@ def compare_metrics(files):
     taxa, tax_loc = np.unique(tax_data[:,1], return_index = True) # get number of taxon and index location to match tax and rank
 
     template_tab = np.zeros((len(taxa), 6, len(params))) # rows: taxa, columns: rank, taxon, acc, prec, rec, f1, layers: param (n-k) combos
-    template_tab[:, 0] = np.tile(tax_data[tax_loc, 0], (20, 1)).T
-    template_tab[:, 1] = np.tile(tax_data[tax_loc, 1], (20, 1)).T
+    template_tab[:, 0] = np.tile(tax_data[tax_loc, 0], (len(params), 1)).T
+    template_tab[:, 1] = np.tile(tax_data[tax_loc, 1], (len(params), 1)).T
     
     idx_dict = {tax:tax_idx for tax_idx,tax in enumerate(taxa)} # used to place a taxon on nk_tab and method_tab
     nk_tab = template_tab.copy() # holds the scores of the winning method for each taxon for each metric, for each param combination

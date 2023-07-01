@@ -133,7 +133,7 @@ def get_metrics_per_func(pred, real):
             tp = (real_loc & pred_loc).sum()
             tn = (~real_loc & ~pred_loc).sum()
             fp = pred_loc[~real_loc].sum()
-            fn = ~pred_loc[real_loc].sum()
+            fn = (~pred_loc[real_loc]).sum()
             
             accuracy = tp / (tp + tn + fp + fn)
             if tp == 0:
@@ -148,20 +148,24 @@ def get_metrics_per_func(pred, real):
         metrics.append(rk_metrics)
     return np.concatenate(metrics)
 
-def get_cross_entropy(supports):
-    clipped_supports = np.clip(supports, np.exp(-5), 1)
-    cross_entropy = -np.log(clipped_supports).sum(axis=0)
+def get_cross_entropy(supports, valid):
+    clipped_supports = np.clip(supports, np.exp(-10), 1) # max loss is 10
+    log_supports = -np.log(clipped_supports)
+    cross_entropy = np.array([col[val].sum() for col, val in zip(log_supports.T, valid.T)]) / valid.sum(0)
     return cross_entropy
 
 def get_metrics0(results, real_tax):
     # metrics is a 3d array of shape: # taxa, 6 (rank_id, tax_id, acc, prc, rec, f1), 3 (unweighted, wknn, dwknn)
+    # real_tax is a 2d array with the (REAL) tax ids of the query sequences
     # cross entropy is a 2d array of shape: 3 (unweighted, wknn, dwknn), # ranks
     metrics = np.array([get_metrics_per_func(results['predicted_u'], real_tax).T,
                         get_metrics_per_func(results['predicted_w'], real_tax).T,
                         get_metrics_per_func(results['predicted_d'], real_tax).T]).T
     
+    valid = real_tax != -2 # get the locations of all known classifications
+    total_valid = valid.sum(0) # array of shape #ranks, counts known taxons per rank
     # Cross Entropy Loss
-    cross_entropy = np.array([get_cross_entropy(results['real_u_support']),
-                              get_cross_entropy(results['real_w_support']),
-                              get_cross_entropy(results['real_d_support'])])
-    return metrics, cross_entropy
+    cross_entropy = np.array([get_cross_entropy(results['real_u_support'], valid),
+                              get_cross_entropy(results['real_w_support'], valid),
+                              get_cross_entropy(results['real_d_support'], valid)])
+    return metrics, cross_entropy, total_valid

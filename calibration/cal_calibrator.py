@@ -348,12 +348,12 @@ class Calibrator:
         # get metrics
         print('Calculating metrics...')
         win_dict = {w_idx:win for w_idx,win in zip(win_indexes, win_list)} # use this to locate the right window from the file's parameters
-        for res_file in os.listdir(self.clasi_dir):
-            results = np.load(self.clasif_dir + '/' +res_file)
+        for res_file in os.listdir(self.classif_dir):
+            results = np.load(self.classif_dir + '/' +res_file)
             window = win_dict[results['params'][0]]
-            real_tax = self.tax_ext.loc[window.taxonomy].to_numpy()
-            metrics, cross_entropy = cal_metrics.get_metrics0(results, real_tax)
-            np.savez(self.reports_dir + '/' + re.sub('.npz', '_metrics.npz'), metrics = metrics, cross_entropy = cross_entropy, params = results['params'])
+            real_tax = np.nan_to_num(self.tax_ext.loc[window.taxonomy].to_numpy(), nan=-2) # undetermined taxa in real taxon are marked with -2 to distinguish them from undetermined taxa in predicted
+            metrics, cross_entropy, valid_taxa = cal_metrics.get_metrics0(results, real_tax)
+            np.savez(self.reports_dir + '/' + re.sub('.npz', '_metrics.npz'), metrics = metrics, cross_entropy = cross_entropy, valid_taxa = valid_taxa, params = results['params'])
         t6 = time.time()
         print(f'Done in {t6 - t5:.3f} seconds')
         
@@ -365,15 +365,12 @@ class Calibrator:
         post_process(self.windows, self.guide, self.ranks, met_report=prc_report)
         post_process(self.windows, self.guide, self.ranks, met_report=rec_report)
         post_process(self.windows, self.guide, self.ranks, met_report=f1_report)
-            
-        # acc_report, acc_params = cal_report.build_report(win_list, metrics, 'acc', self.tax_ext, self.guide, n_range, k_range)
-        # prc_report, prc_params = cal_report.build_report(win_list, metrics, 'prc', self.tax_ext, self.guide, n_range, k_range)
-        # rec_report, rec_params = cal_report.build_report(win_list, metrics, 'rec', self.tax_ext, self.guide, n_range, k_range)
-        # f1_report, f1_params = cal_report.build_report(win_list, metrics, 'f1', self.tax_ext, self.guide, n_range, k_range)
-        # self.report_metrics(acc_report, acc_params, 'acc')
-        # self.report_metrics(prc_report, prc_params, 'prc')
-        # self.report_metrics(rec_report, rec_params, 'rec')
-        # self.report_metrics(f1_report, f1_params, 'f1')
+        
+        cross_entropy_report.to_csv(self.reports_dir + '/cross_entropy.csv')
+        acc_report.to_csv(self.reports_dir + '/acc_report.csv')
+        prc_report.to_csv(self.reports_dir + '/prc_report.csv')
+        rec_report.to_csv(self.reports_dir + '/rec_report.csv')
+        f1_report.to_csv(self.reports_dir + '/f1_report.csv')
         t7 = time.time()
         print(f'Done in {t7 - t6:.3f} seconds')
         

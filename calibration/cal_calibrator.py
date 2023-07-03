@@ -7,7 +7,6 @@ Created on Tue Nov 30 11:06:10 2021
 """
 
 #%% libraries
-import concurrent.futures
 import glob
 import json
 import logging
@@ -18,9 +17,9 @@ import re
 import pickle
 import sys
 import time
+
 # Graboid libraries
 sys.path.append("..") # use this to allow importing from a sibling package
-# from calibration import cal_dists # TODO: delete cal_distances
 from calibration import cal_classify
 from calibration import cal_dists
 from calibration import cal_metrics
@@ -28,7 +27,6 @@ from calibration import cal_neighsort
 from calibration import cal_report
 from calibration import cal_plot
 from calibration import cal_preprocess
-
 from DATA import DATA
 
 #%% set logger
@@ -92,6 +90,24 @@ def post_process(windows, guide, ranks, met_report=None, ce_report=None):
         met_report['rank'].replace({rk_idx:rk for rk_idx, rk in enumerate(ranks)}, inplace=True)
         replace_windows(met_report, windows, 3)
         met_report.insert(1, 'taxon', guide.loc[met_report.taxID, 'SciName'].values)
+
+def grid_search_report(date, database, n_range, k_range, criterion, row_thresh, col_thresh, min_seqs, rank, threads, report_file):
+    sep = '#' * 40 + '\n'
+    with open(report_file, 'w') as handle:
+        handle.write('Grid search report\n')
+        handle.write(sep + '\n')
+        handle.write(f'Date: {date.strftime("%d/%m/%Y %H:%M:%S")}')
+        handle.write(f'Database: {database}')
+        handle.write(f'n sites: {n_range}')
+        handle.write(f'k neighbours: {k_range}')
+        handle.write(f'Classification criterion: {criterion}')
+        handle.write(f'Max unknowns per sequence: {row_thresh * 100} %')
+        handle.write(f'Max unknowns per site: {col_thresh * 100} %')
+        handle.write(f'Min non-redundant sequences: {min_seqs}')
+        handle.write(f'Rank used for site selection: {rank}')
+        handle.write(f'Threads: {threads}')
+        handle.write('\n')
+        
 #%% classes
 class Calibrator:
     def __init__(self, out_dir=None):
@@ -141,7 +157,7 @@ class Calibrator:
         
         # load taxonomy guides
         self.guide = pd.read_csv(db_meta['guide_file'], index_col=0)
-        self.guide.loc[-1] = 'undetermined'
+        self.guide.loc[-2] = 'undetermined'
         self.tax_ext = pd.read_csv(db_meta['expguide_file'], index_col=0)
         self.ranks = self.tax_ext.columns.tolist()
         
@@ -281,50 +297,62 @@ class Calibrator:
         logger.info(f'Classification criterion: {criterion}')
         logger.info(f'Threads: {threads}')
         
-        print('Beginning calibration...')
-        t0 = time.time()
+        logger.info('Beginning calibration...')
+        t_collapse_0 = time.time()
         
         # collapse windows
-        print('Collapsing windows...')
+        logger.info('Collapsing windows...')
         win_indexes, win_list, rej_indexes, rej_list = cal_preprocess.collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
         self.report_windows(win_indexes, win_list, rej_indexes, rej_list)
         
-        t1 = time.time()
-        print(f'Collapsed {len(win_list)} of {len(self.windows)} windows in {t1 - t0:.3f} seconds')
+        t_collapse_1 = time.time()
+        logger.info(f'Collapsed {len(win_list)} of {len(self.windows)} windows in {t_collapse_1 - t_collapse_0:.3f} seconds')
+        
         # abort calibration if no collapsed windows are generated
         if len(win_list) == 0:
             logger.info('No windows passed the collapsing filters. Ending calibration')
             return
         
         # select sites
-        print('Selecting informative sites...')
+        logger.info('Selecting informative sites...')
+        t_sselection_0 = time.time()
+        
         windows_sites = cal_preprocess.select_sites(win_list, self.tax_ext, rank, min_n, max_n, step_n)
         self.report_sites(windows_sites, win_list, win_indexes, n_range)
-        t2 = time.time()
-        print(f'Site selection finished  in {t2 - t1:.3f} seconds')
+        
+        t_sselection_1 = time.time()
+        logger.info(f'Site selection finished in {t_sselection_1 - t_sselection_0:.3f} seconds')
         
         # calculate distances
-        print('Calculating paired distances...')
+        logger.info('Calculating paired distances...')
+        t_distance_0 = time.time()
+        
         all_distances = []
         # TODO: parallel process
         for window, win_sites in zip(win_list, windows_sites):
             all_distances.append(cal_dists.get_distances(window, win_sites, cost_mat))
-        t3 = time.time()
-        print(f'Distance calculation finished in {t3 - t2:.3f} seconds')
+        
+        t_distance_1 = time.time()
+        logger.info(f'Distance calculation finished in {t_distance_1 - t_distance_0:.3f} seconds')
 
         # sort neighbours
-        print('Sorting neighbours...')
+        logger.info('Sorting neighbours...')
+        t_neighbours_0 = time.time()
+        
         window_packages = []
         for distances in all_distances:
             # sort distances and compress them into orbitals
             sorted_distances, sorted_indexes, compressed = cal_neighsort.sort_compress(distances)
             # build classification packages
             window_packages.append(cal_neighsort.build_packages(compressed, sorted_indexes, n_range, k_range, criterion))
-        t4 = time.time()
-        print(f'Sorted neighbours in {t4 - t3:.3f} seconds')
+        
+        t_neighbours_1 = time.time()
+        logger.info(f'Sorted neighbours in {t_neighbours_1 - t_neighbours_0:.3f} seconds')
         
         # classify
-        print('Classifying...')
+        logger.info('Classifying...')
+        t_classification_0 = time.time()
+        
         # get supports
         for win_idx, win_package in enumerate(window_packages):
             win_tax = self.tax_ext.loc[window.taxonomy].to_numpy() # get the taxonomic classifications for the window as an array of shape: # seqs in window, # ranks
@@ -342,11 +370,14 @@ class Calibrator:
                          real_w_support = real_w_support,
                          real_d_support = real_d_support,
                          params = np.array([win_idx, n, k]))
-        t5 = time.time()
-        print(f'Finished classifications in {t5 - t4:.3f} seconds')
+        
+        t_classification_1 = time.time()
+        logger.info(f'Finished classifications in {t_classification_1 - t_classification_0:.3f} seconds')
         
         # get metrics
-        print('Calculating metrics...')
+        logger.info('Calculating metrics...')
+        t_metrics_0 = time.time()
+        
         win_dict = {w_idx:win for w_idx,win in zip(win_indexes, win_list)} # use this to locate the right window from the file's parameters
         for res_file in os.listdir(self.classif_dir):
             results = np.load(self.classif_dir + '/' +res_file)
@@ -354,11 +385,14 @@ class Calibrator:
             real_tax = np.nan_to_num(self.tax_ext.loc[window.taxonomy].to_numpy(), nan=-2) # undetermined taxa in real taxon are marked with -2 to distinguish them from undetermined taxa in predicted
             metrics, cross_entropy, valid_taxa = cal_metrics.get_metrics0(results, real_tax)
             np.savez(self.reports_dir + '/' + re.sub('.npz', '_metrics.npz'), metrics = metrics, cross_entropy = cross_entropy, valid_taxa = valid_taxa, params = results['params'])
-        t6 = time.time()
-        print(f'Done in {t6 - t5:.3f} seconds')
+        
+        t_metrics_1 = time.time()
+        logger.info(f'Calculated metrics in {t_metrics_1 - t_metrics_0:.3f} seconds')
         
         # report
-        print('Building report...')
+        logger.info('Building report...')
+        t_report_0 = time.time()
+        
         cross_entropy_report, acc_report, prc_report, rec_report, f1_report = build_reports(win_indexes, self.reports_dir, self.ranks)
         post_process(self.windows, self.guide, self.ranks, ce_report=cross_entropy_report)
         post_process(self.windows, self.guide, self.ranks, met_report=acc_report)
@@ -371,11 +405,14 @@ class Calibrator:
         prc_report.to_csv(self.reports_dir + '/prc_report.csv')
         rec_report.to_csv(self.reports_dir + '/rec_report.csv')
         f1_report.to_csv(self.reports_dir + '/f1_report.csv')
-        t7 = time.time()
-        print(f'Done in {t7 - t6:.3f} seconds')
+        
+        t_report_1 = time.time()
+        logger.info(f'Finished building reports in {t_report_1 - t_report_0:.3f} seconds')
         
         # # plot results
-        print('Plotting results...')
+        logger.info('Plotting results...')
+        t_plots_0 = time.time()
+        
         if self.save:
             # lin_codes = self.guide.set_index('SciName')['LinCode'] # use this to add lineage codes to calibration heatmaps
             # with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
@@ -383,7 +420,8 @@ class Calibrator:
             #                                         (acc_params, prc_params, rec_params, f1_params),
             #                                         ('acc', 'prc', 'rec', 'f1')):
             #         executor.submit(cal_plot.plot_results, mt_report, mt_params, mt, self.plots_dir, self.ranks, lin_codes, collapse_hm, self.custom)
-            t8 = time.time()
-            print(f'Done in {t8 - t7:.3f} seconds')
-        print(f'Finished in {t8 - t0:.3f} seconds')
+            pass
+        
+        t_plots_1 = time.time()
+        logger.info(f'Finished in {t_plots_1 - t_plots_0:.3f} seconds')
         return

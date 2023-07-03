@@ -96,6 +96,8 @@ def grid_search_report(date, database, n_range, k_range, criterion, row_thresh, 
     with open(report_file, 'w') as handle:
         handle.write('Grid search report\n')
         handle.write(sep + '\n')
+        handle.write('Parameters\n')
+        handle.write(sep)
         handle.write(f'Date: {date.strftime("%d/%m/%Y %H:%M:%S")}')
         handle.write(f'Database: {database}')
         handle.write(f'n sites: {n_range}')
@@ -107,6 +109,56 @@ def grid_search_report(date, database, n_range, k_range, criterion, row_thresh, 
         handle.write(f'Rank used for site selection: {rank}')
         handle.write(f'Threads: {threads}')
         handle.write('\n')
+
+def window_report(win_indexes, win_list, rej_indexes, rej_list, report_file):
+    sep = '#' * 40 + '\n'
+    collapsed_tab = []
+    for win_idx, win in zip(win_indexes, win_list):
+        collapsed_tab.append([win_idx, win.start, win.end, len(win.cols), len(win.rows)])
+    collapsed_tab = pd.DataFrame(collapsed_tab, columns='Window Start End Length Effective_sequences'.split()).set_index('Window', drop=True)
+    
+    rejected_tab = []
+    for rej_idx, rej in zip(rej_indexes, rej_list):
+        rejected_tab.append([rej_idx, rej.start, rej.end, len(rej.cols), len(rej.rows)])
+    rejected_tab = pd.DataFrame(rejected_tab, columns='Window Start End Length Effective_sequences'.split()).set_index('Window', drop=True)
+    
+    with open(report_file, 'a') as handle:
+        handle.write('Windows\n')
+        handle.write(sep)
+        handle.write('Collapsed windows:\n')
+        collapsed_tab.to_csv(handle, sep='\t')
+        handle.write('\n')
+        handle.write('Rejected windows:\n')
+        rejected_tab.to_csv(handle, sep='\t')
+        handle.write('\n')
+
+def ext_sites_report(win_indexes, win_list, window_sites, n_range, ext_site_report):
+    site_tabs = []
+    for win_idx, win_sites in zip(win_indexes, window_sites):
+        total_sites = np.sum([len(n) for n in win_sites])
+        site_array = np.full((len(n_range), total_sites), np.nan)
+        n_idx = 0
+        for n, n_sites in enumerate(win_sites):
+            n_end = n_idx + len(n_sites)
+            total_sites[n:, n_idx:n_end] = n_sites
+            n_idx = n_end
+        site_tabs.append(pd.DataFrame(site_array, index = pd.MuliIndex.from_product(([win_idx], n_range))))
+    
+    site_report = pd.concat(site_tabs).fillna(-1).astype(np.int16)
+    site_report.to_csv(ext_site_report, sep='\t', header=None)
+    
+def sites_report(win_indexes, windows_sites, n_range, ext_site_report, report_file):
+    sep = '#' * 40 + '\n'
+    sites_tab = []
+    for win, sites in zip(win_indexes, windows_sites):
+        site_counts = np.cumsum([len(n) for n in sites]).tolist()
+        sites_tab.append([win] + site_counts)
+    sites_tab = pd.DataFrame(sites_tab, columns=['Window'] + [n for n in n_range]).set_index('Window', drop=True)
+    with open(report_file, 'a') as handle:
+        handle.write('Sites\n')
+        handle.write(sep)
+        handle.write(f'Extended site report: {ext_site_report}\n')
+        sites_tab.to_csv(handle, sep='\t')
         
 #%% classes
 class Calibrator:

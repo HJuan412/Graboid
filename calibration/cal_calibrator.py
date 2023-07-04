@@ -98,7 +98,7 @@ def report_params(date, database, n_range, k_range, criterion, row_thresh, col_t
         handle.write(sep + '\n')
         handle.write('Parameters\n')
         handle.write(sep)
-        handle.write(f'Date: {date.strftime("%d/%m/%Y %H:%M:%S")}\n')
+        handle.write(f'Date: {date}\n')
         handle.write(f'Database: {database}\n')
         handle.write(f'n sites: {n_range}\n')
         handle.write(f'k neighbours: {k_range}\n')
@@ -114,7 +114,7 @@ def report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file):
     sep = '#' * 40 + '\n'
     collapsed_tab = []
     for win_idx, win in zip(win_indexes, win_list):
-        collapsed_tab.append([win_idx, win.start, win.end, len(win.cols), len(win.rows)])
+        collapsed_tab.append([win_idx, win.start, win.end, win.window.shape[1], win.window.shape[0]])
     collapsed_tab = pd.DataFrame(collapsed_tab, columns='Window Start End Length Effective_sequences'.split()).set_index('Window', drop=True)
     
     rejected_tab = []
@@ -140,9 +140,9 @@ def report_sites_ext(win_indexes, win_list, windows_sites, n_range, ext_site_rep
         n_idx = 0
         for n, n_sites in enumerate(win_sites):
             n_end = n_idx + len(n_sites)
-            total_sites[n:, n_idx:n_end] = win.cols[n_sites]
+            site_array[n:, n_idx:n_end] = win.cols[n_sites] + win.start
             n_idx = n_end
-        site_tabs.append(pd.DataFrame(site_array, index = pd.MuliIndex.from_product(([win_idx], n_range))))
+        site_tabs.append(pd.DataFrame(site_array, index = pd.MultiIndex.from_product(([win_idx], n_range), names = ['Window', 'n'])))
     
     site_report = pd.concat(site_tabs).fillna(-1).astype(np.int16)
     site_report.to_csv(ext_site_report, sep='\t')
@@ -337,8 +337,8 @@ class Calibrator:
                     threads=1):
         
         # prepare n, k ranges
-        n_range = np.arange(min_n, max_n, step_n)
-        k_range = np.arange(min_k, max_k, step_k)
+        n_range = np.arange(min_n, max_n + 1, step_n)
+        k_range = np.arange(min_k, max_k + 1, step_k)
         # log calibration parameters
         logger.info('Calibration report:')
         logger.info('=' * 10 + '\nCalibration parameters:')
@@ -354,7 +354,7 @@ class Calibrator:
         
         # initialize grid search report report
         date = datetime.datetime.now().strftime('%d/%m/%Y %H/%M/%S')
-        report_file = self.out_dir + '/GS_report.tsv'
+        report_file = self.out_dir + '/GS_report.txt'
         ext_site_report = self.out_dir + '/sites_report.tsv'
         report_params(date, self.db, n_range, k_range, criterion, row_thresh, col_thresh, min_seqs, rank, threads, report_file)
         
@@ -382,6 +382,7 @@ class Calibrator:
         windows_sites = cal_preprocess.select_sites(win_list, self.tax_ext, rank, min_n, max_n, step_n)
         # self.report_sites(windows_sites, win_list, win_indexes, n_range) # TODO: remove this call
         report_sites_ext(win_indexes, win_list, windows_sites, n_range, ext_site_report)
+        report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_file)
         
         t_sselection_1 = time.time()
         logger.info(f'Site selection finished in {t_sselection_1 - t_sselection_0:.3f} seconds')
@@ -417,7 +418,7 @@ class Calibrator:
         t_classification_0 = time.time()
         
         # get supports
-        for win_idx, win_package in enumerate(window_packages):
+        for win_idx, win_package in zip(win_indexes, window_packages):
             win_tax = self.tax_ext.loc[window.taxonomy].to_numpy() # get the taxonomic classifications for the window as an array of shape: # seqs in window, # ranks
             # get packages for a single window
             for (n, k), package in win_package.items():
@@ -447,7 +448,7 @@ class Calibrator:
             window = win_dict[results['params'][0]]
             real_tax = np.nan_to_num(self.tax_ext.loc[window.taxonomy].to_numpy(), nan=-2) # undetermined taxa in real taxon are marked with -2 to distinguish them from undetermined taxa in predicted
             metrics, cross_entropy, valid_taxa = cal_metrics.get_metrics0(results, real_tax)
-            np.savez(self.metrics_dir + '/' + re.sub('.npz', '_metrics.npz'), metrics = metrics, cross_entropy = cross_entropy, valid_taxa = valid_taxa, params = results['params'])
+            np.savez(self.metrics_dir + '/' + re.sub('.npz', '_metrics.npz', res_file), metrics = metrics, cross_entropy = cross_entropy, valid_taxa = valid_taxa, params = results['params'])
         
         t_metrics_1 = time.time()
         logger.info(f'Calculated metrics in {t_metrics_1 - t_metrics_0:.3f} seconds')
@@ -463,11 +464,11 @@ class Calibrator:
         post_process(self.windows, self.guide, self.ranks, met_report=rec_report)
         post_process(self.windows, self.guide, self.ranks, met_report=f1_report)
         
-        cross_entropy_report.to_csv(self.out_dir + '/cross_entropy.csv')
-        acc_report.to_csv(self.out_dir + '/acc_report.csv')
-        prc_report.to_csv(self.out_dir + '/prc_report.csv')
-        rec_report.to_csv(self.out_dir + '/rec_report.csv')
-        f1_report.to_csv(self.out_dir + '/f1_report.csv')
+        cross_entropy_report.to_csv(self.out_dir + '/cross_entropy.tsv')
+        acc_report.to_csv(self.out_dir + '/acc_report.tsv')
+        prc_report.to_csv(self.out_dir + '/prc_report.tsv')
+        rec_report.to_csv(self.out_dir + '/rec_report.tsv')
+        f1_report.to_csv(self.out_dir + '/f1_report.tsv')
         
         t_report_1 = time.time()
         logger.info(f'Finished building reports in {t_report_1 - t_report_0:.3f} seconds')

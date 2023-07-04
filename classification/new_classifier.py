@@ -12,13 +12,12 @@ Classifier class, handles steps: database loading, query blasting, custom calibr
 from datetime import datetime
 import json
 import logging
-import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pandas as pd
 import shutil
 # Graboid libraries
-from calibration import cal_calibrator as ccb
+from calibration import cal_calibrator
 from classification import cost_matrix
 from classification import cls_classify
 from classification import cls_distance
@@ -299,7 +298,7 @@ class Classifier:
         the user provides cal_dir kwarg as an alternative name.
         Updates last_calibration parameter with the output directory"""
         # set calibrator
-        calibrator = ccb.Calibrator()
+        calibrator = cal_calibrator.Calibrator()
         calibrator.set_database(self.db)
         
         if 'w_starts' in kwargs.keys() and 'w_ends' in kwargs.keys():

@@ -11,7 +11,6 @@ Classify test instances during calibration
 #%% libraries
 import concurrent.futures
 import numpy as np
-from time import time
 # Graboid libraries
 from classification import cls_classify
 #%% functions
@@ -74,7 +73,6 @@ def classify_V(package, tax_tab, threads=1):
     # second array uses dtype np.float16 to save memory space
     
     # unpack classification package
-    t0 = time() # TODO: time
     distances = package[0][0]
     positions = package[0][1]
     counts = package[0][2]
@@ -111,7 +109,6 @@ def classify_V(package, tax_tab, threads=1):
     # get supports for each sequence
     id_arrays = []
     data_arrays = []
-    t1 = time() # TODO: time
     with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
         futures = [executor.submit(get_tax_supports_V, seq_idx, tax_tab[neighs], u_supps, w_supps, d_supps, dists) for seq_idx, (neighs, u_supps, w_supps, d_supps, dists) in enumerate(zip(neigh_arrays, u_support_arrays, w_support_arrays, d_support_arrays, dist_arrays))]
         for future in concurrent.futures.as_completed(futures):
@@ -121,8 +118,6 @@ def classify_V(package, tax_tab, threads=1):
     #     seq_supports = get_tax_supports_V(seq_idx, tax_tab[neighs], u_supps, w_supps, d_supps, dists)
     #     id_arrays.append(seq_supports[0])
     #     data_arrays.append(seq_supports[1])
-    t2 = time() # TODO: time
-    print(f'Main {t2 - t0:.3f}. Support {t2 - t1:.3f}')
     return np.concatenate(id_arrays), np.concatenate(data_arrays)
 
 def get_supports(id_array, data_array, tax_tab):

@@ -7,6 +7,7 @@ Created on Tue Nov 30 11:06:10 2021
 """
 
 #%% libraries
+import datetime
 import glob
 import json
 import logging
@@ -14,7 +15,6 @@ import numpy as np
 import os
 import pandas as pd
 import re
-import pickle
 import sys
 import time
 
@@ -91,26 +91,26 @@ def post_process(windows, guide, ranks, met_report=None, ce_report=None):
         replace_windows(met_report, windows, 3)
         met_report.insert(1, 'taxon', guide.loc[met_report.taxID, 'SciName'].values)
 
-def grid_search_report(date, database, n_range, k_range, criterion, row_thresh, col_thresh, min_seqs, rank, threads, report_file):
+def report_params(date, database, n_range, k_range, criterion, row_thresh, col_thresh, min_seqs, rank, threads, report_file):
     sep = '#' * 40 + '\n'
     with open(report_file, 'w') as handle:
         handle.write('Grid search report\n')
         handle.write(sep + '\n')
         handle.write('Parameters\n')
         handle.write(sep)
-        handle.write(f'Date: {date.strftime("%d/%m/%Y %H:%M:%S")}')
-        handle.write(f'Database: {database}')
-        handle.write(f'n sites: {n_range}')
-        handle.write(f'k neighbours: {k_range}')
-        handle.write(f'Classification criterion: {criterion}')
-        handle.write(f'Max unknowns per sequence: {row_thresh * 100} %')
-        handle.write(f'Max unknowns per site: {col_thresh * 100} %')
-        handle.write(f'Min non-redundant sequences: {min_seqs}')
-        handle.write(f'Rank used for site selection: {rank}')
-        handle.write(f'Threads: {threads}')
+        handle.write(f'Date: {date.strftime("%d/%m/%Y %H:%M:%S")}\n')
+        handle.write(f'Database: {database}\n')
+        handle.write(f'n sites: {n_range}\n')
+        handle.write(f'k neighbours: {k_range}\n')
+        handle.write(f'Classification criterion: {criterion}\n')
+        handle.write(f'Max unknowns per sequence: {row_thresh * 100} %\n')
+        handle.write(f'Max unknowns per site: {col_thresh * 100} %\n')
+        handle.write(f'Min non-redundant sequences: {min_seqs}\n')
+        handle.write(f'Rank used for site selection: {rank}\n')
+        handle.write(f'Threads: {threads}\n')
         handle.write('\n')
 
-def window_report(win_indexes, win_list, rej_indexes, rej_list, report_file):
+def report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file):
     sep = '#' * 40 + '\n'
     collapsed_tab = []
     for win_idx, win in zip(win_indexes, win_list):
@@ -119,8 +119,8 @@ def window_report(win_indexes, win_list, rej_indexes, rej_list, report_file):
     
     rejected_tab = []
     for rej_idx, rej in zip(rej_indexes, rej_list):
-        rejected_tab.append([rej_idx, rej.start, rej.end, len(rej.cols), len(rej.rows)])
-    rejected_tab = pd.DataFrame(rejected_tab, columns='Window Start End Length Effective_sequences'.split()).set_index('Window', drop=True)
+        rejected_tab.append([f'Window {rej_idx}', rej])
+    rejected_tab = pd.DataFrame(rejected_tab)
     
     with open(report_file, 'a') as handle:
         handle.write('Windows\n')
@@ -129,25 +129,25 @@ def window_report(win_indexes, win_list, rej_indexes, rej_list, report_file):
         collapsed_tab.to_csv(handle, sep='\t')
         handle.write('\n')
         handle.write('Rejected windows:\n')
-        rejected_tab.to_csv(handle, sep='\t')
+        rejected_tab.to_csv(handle, sep='\t', header=None, index=None)
         handle.write('\n')
 
-def ext_sites_report(win_indexes, win_list, window_sites, n_range, ext_site_report):
+def report_sites_ext(win_indexes, win_list, windows_sites, n_range, ext_site_report):
     site_tabs = []
-    for win_idx, win_sites in zip(win_indexes, window_sites):
+    for win_idx, win, win_sites in zip(win_indexes, win_list, windows_sites):
         total_sites = np.sum([len(n) for n in win_sites])
         site_array = np.full((len(n_range), total_sites), np.nan)
         n_idx = 0
         for n, n_sites in enumerate(win_sites):
             n_end = n_idx + len(n_sites)
-            total_sites[n:, n_idx:n_end] = n_sites
+            total_sites[n:, n_idx:n_end] = win.cols[n_sites]
             n_idx = n_end
         site_tabs.append(pd.DataFrame(site_array, index = pd.MuliIndex.from_product(([win_idx], n_range))))
     
     site_report = pd.concat(site_tabs).fillna(-1).astype(np.int16)
-    site_report.to_csv(ext_site_report, sep='\t', header=None)
+    site_report.to_csv(ext_site_report, sep='\t')
     
-def sites_report(win_indexes, windows_sites, n_range, ext_site_report, report_file):
+def report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_file):
     sep = '#' * 40 + '\n'
     sites_tab = []
     for win, sites in zip(win_indexes, windows_sites):
@@ -181,10 +181,12 @@ class Calibrator:
     
     def set_outdir(self, out_dir):
         self.out_dir = out_dir
-        self.reports_dir = out_dir + '/reports'
+        self.tmp_dir = out_dir + '/tmp'
+        self.metrics_dir = self.tmp_dir + '/metrics'
+        self.classif_dir = self.tmp_dir + '/classification'
         self.plots_dir = out_dir + '/plots'
-        self.classif_dir = out_dir + '/classification'
-        self.warn_dir = out_dir + '/warnings'
+        # self.reports_dir = out_dir + '/reports'
+        # self.warn_dir = out_dir + '/warnings'
         
         try:
             os.mkdir(out_dir)
@@ -192,10 +194,11 @@ class Calibrator:
             raise Exception(f'Specified output directory "{out_dir}" already exists. Pick a different name or set argmuent "clear" as True')
         self.save = True
         # make a directory to store classification reports
-        os.makedirs(self.reports_dir)
-        os.makedirs(self.plots_dir)
+        os.makedirs(self.metrics_dir)
         os.makedirs(self.classif_dir)
-        os.makedirs(self.warn_dir)
+        os.makedirs(self.plots_dir)
+        # os.makedirs(self.reports_dir)
+        # os.makedirs(self.warn_dir)
         
     def set_database(self, database):
         self.db = database
@@ -260,62 +263,62 @@ class Calibrator:
         for coor_idx, coords in enumerate(raw_coords):
             logger.info(f'\tWindow {coor_idx}: [{coords[0]} - {coords[1]}] (length {coords[1] - coords[0]})')
     
-    # report functions
-    def report_windows(self, win_indexes, win_list, rej_indexes, rej_list):
-        if not self.save:
-            return
-        with open(self.reports_dir + '/windows.report', 'w') as handle:
-            if len(win_list) > 0:
-                handle.write('Collapsed windows:\n\n')
-                for w_idx, win in zip(win_indexes, win_list):
-                    handle.write(f'Window {w_idx} {self.windows[w_idx]}: collapsed into matrix of shape {win.window.shape}\n')
-                handle.write('\n')
-            if len(rej_list) > 0:
-                handle.write('Rejected windows:\n\n')
-                for r_idx, rej in zip(rej_indexes, rej_list):
-                    handle.write(f'Window {r_idx} {self.windows[r_idx]}: ' + rej)
+    # report functions # TODO: this entire block goes away
+    # def report_windows(self, win_indexes, win_list, rej_indexes, rej_list):
+    #     if not self.save:
+    #         return
+    #     with open(self.reports_dir + '/windows.report', 'w') as handle:
+    #         if len(win_list) > 0:
+    #             handle.write('Collapsed windows:\n\n')
+    #             for w_idx, win in zip(win_indexes, win_list):
+    #                 handle.write(f'Window {w_idx} {self.windows[w_idx]}: collapsed into matrix of shape {win.window.shape}\n')
+    #             handle.write('\n')
+    #         if len(rej_list) > 0:
+    #             handle.write('Rejected windows:\n\n')
+    #             for r_idx, rej in zip(rej_indexes, rej_list):
+    #                 handle.write(f'Window {r_idx} {self.windows[r_idx]}: ' + rej)
     
-    def report_sites(self, window_sites, win_list, win_indexes, n_range):
-        if not self.save:
-            return
-        with open(self.reports_dir + '/sites.report', 'w') as handle:
-            handle.write('Selected sites:\n')
-            for w_idx, win, win_sites in zip(win_indexes, win_list, window_sites):
-                handle.write(f'Sites for window {w_idx} {self.windows[w_idx]}:\n')
-                for n, n_sites in zip(n_range, win_sites):
-                    handle.write(f'\t{n} sites: {n_sites}\n')
+    # def report_sites(self, window_sites, win_list, win_indexes, n_range):
+    #     if not self.save:
+    #         return
+    #     with open(self.reports_dir + '/sites.report', 'w') as handle:
+    #         handle.write('Selected sites:\n')
+    #         for w_idx, win, win_sites in zip(win_indexes, win_list, window_sites):
+    #             handle.write(f'Sites for window {w_idx} {self.windows[w_idx]}:\n')
+    #             for n, n_sites in zip(n_range, win_sites):
+    #                 handle.write(f'\t{n} sites: {n_sites}\n')
     
-    def report_metrics(self, report, params, metric):
-        # report already has tax_names as the second level of the multiindex
-        if not self.save:
-            return
-        # translate report tax names
-        tax_names = [i for i in map(lambda x : x.upper(), report.index.get_level_values(1).tolist())]
-        # may need to change type of column headers because csv doesn't like tuples
-        # report has a multiindex (rank, tax_name)
-        report_cp = report.copy()
-        report_cp.columns = pd.MultiIndex.from_tuples(report_cp.columns, names=['w_start', 'w_end'])
-        report_cp.to_csv(self.reports_dir + f'/{metric}_calibration.csv') # remember to load using index=[0,1] and header=[0,1]
+    # def report_metrics(self, report, params, metric):
+    #     # report already has tax_names as the second level of the multiindex
+    #     if not self.save:
+    #         return
+    #     # translate report tax names
+    #     tax_names = [i for i in map(lambda x : x.upper(), report.index.get_level_values(1).tolist())]
+    #     # may need to change type of column headers because csv doesn't like tuples
+    #     # report has a multiindex (rank, tax_name)
+    #     report_cp = report.copy()
+    #     report_cp.columns = pd.MultiIndex.from_tuples(report_cp.columns, names=['w_start', 'w_end'])
+    #     report_cp.to_csv(self.reports_dir + f'/{metric}_calibration.csv') # remember to load using index=[0,1] and header=[0,1]
         
-        # build params dictionary
-        windows = {}
-        merged_params = np.concatenate(params, 0)
-        for w_idx, (win, param_row) in enumerate(zip(report.columns.tolist(), merged_params.T)):
-            combos = [combo for combo in map(lambda x : x if isinstance(x, tuple) else 0, param_row)]
-            win_dict = {wk:{rk:[] for rk in self.ranks} for wk in set(combos)}
-            # for tax_name, param_combo in zip(tax_names, combos):
-            #     win_dict[param_combo].append(tax_name)
-            for tax_data, param_combo in zip(report.index.values, combos):
-                # tax data is a tuple with the current taxa's rank and name
-                win_dict[param_combo][tax_data[0]] = tax_data[1].upper()
-            windows[win] = win_dict
+    #     # build params dictionary
+    #     windows = {}
+    #     merged_params = np.concatenate(params, 0)
+    #     for w_idx, (win, param_row) in enumerate(zip(report.columns.tolist(), merged_params.T)):
+    #         combos = [combo for combo in map(lambda x : x if isinstance(x, tuple) else 0, param_row)]
+    #         win_dict = {wk:{rk:[] for rk in self.ranks} for wk in set(combos)}
+    #         # for tax_name, param_combo in zip(tax_names, combos):
+    #         #     win_dict[param_combo].append(tax_name)
+    #         for tax_data, param_combo in zip(report.index.values, combos):
+    #             # tax data is a tuple with the current taxa's rank and name
+    #             win_dict[param_combo][tax_data[0]] = tax_data[1].upper()
+    #         windows[win] = win_dict
 
-        with open(self.reports_dir + f'/{metric}_params.pickle', 'wb') as handle:
-            # windows dictionary has structure:
-                # windows = {(w0_start, w0_end) :
-                                # {(n0, k0, m0) :
-                                    # {rk0:[TAX_NAME0, ..., TAX_NAMEn]}}} # This json dictionary will be used to locate the best param combination for specified taxa in the classification step
-            pickle.dump(windows, handle)
+    #     with open(self.reports_dir + f'/{metric}_params.pickle', 'wb') as handle:
+    #         # windows dictionary has structure:
+    #             # windows = {(w0_start, w0_end) :
+    #                             # {(n0, k0, m0) :
+    #                                 # {rk0:[TAX_NAME0, ..., TAX_NAMEn]}}} # This json dictionary will be used to locate the best param combination for specified taxa in the classification step
+    #         pickle.dump(windows, handle)
     
     def grid_search(self,
                     max_n,
@@ -349,13 +352,20 @@ class Calibrator:
         logger.info(f'Classification criterion: {criterion}')
         logger.info(f'Threads: {threads}')
         
+        # initialize grid search report report
+        date = datetime.datetime.now().strftime('%d/%m/%Y %H/%M/%S')
+        report_file = self.out_dir + '/GS_report.tsv'
+        ext_site_report = self.out_dir + '/sites_report.tsv'
+        report_params(date, self.db, n_range, k_range, criterion, row_thresh, col_thresh, min_seqs, rank, threads, report_file)
+        
         logger.info('Beginning calibration...')
         t_collapse_0 = time.time()
         
         # collapse windows
         logger.info('Collapsing windows...')
         win_indexes, win_list, rej_indexes, rej_list = cal_preprocess.collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
-        self.report_windows(win_indexes, win_list, rej_indexes, rej_list)
+        # self.report_windows(win_indexes, win_list, rej_indexes, rej_list) # TODO: remove this call
+        report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file)
         
         t_collapse_1 = time.time()
         logger.info(f'Collapsed {len(win_list)} of {len(self.windows)} windows in {t_collapse_1 - t_collapse_0:.3f} seconds')
@@ -370,7 +380,8 @@ class Calibrator:
         t_sselection_0 = time.time()
         
         windows_sites = cal_preprocess.select_sites(win_list, self.tax_ext, rank, min_n, max_n, step_n)
-        self.report_sites(windows_sites, win_list, win_indexes, n_range)
+        # self.report_sites(windows_sites, win_list, win_indexes, n_range) # TODO: remove this call
+        report_sites_ext(win_indexes, win_list, windows_sites, n_range, ext_site_report)
         
         t_sselection_1 = time.time()
         logger.info(f'Site selection finished in {t_sselection_1 - t_sselection_0:.3f} seconds')
@@ -436,7 +447,7 @@ class Calibrator:
             window = win_dict[results['params'][0]]
             real_tax = np.nan_to_num(self.tax_ext.loc[window.taxonomy].to_numpy(), nan=-2) # undetermined taxa in real taxon are marked with -2 to distinguish them from undetermined taxa in predicted
             metrics, cross_entropy, valid_taxa = cal_metrics.get_metrics0(results, real_tax)
-            np.savez(self.reports_dir + '/' + re.sub('.npz', '_metrics.npz'), metrics = metrics, cross_entropy = cross_entropy, valid_taxa = valid_taxa, params = results['params'])
+            np.savez(self.metrics_dir + '/' + re.sub('.npz', '_metrics.npz'), metrics = metrics, cross_entropy = cross_entropy, valid_taxa = valid_taxa, params = results['params'])
         
         t_metrics_1 = time.time()
         logger.info(f'Calculated metrics in {t_metrics_1 - t_metrics_0:.3f} seconds')
@@ -445,18 +456,18 @@ class Calibrator:
         logger.info('Building report...')
         t_report_0 = time.time()
         
-        cross_entropy_report, acc_report, prc_report, rec_report, f1_report = build_reports(win_indexes, self.reports_dir, self.ranks)
+        cross_entropy_report, acc_report, prc_report, rec_report, f1_report = build_reports(win_indexes, self.metrics_dir, self.ranks)
         post_process(self.windows, self.guide, self.ranks, ce_report=cross_entropy_report)
         post_process(self.windows, self.guide, self.ranks, met_report=acc_report)
         post_process(self.windows, self.guide, self.ranks, met_report=prc_report)
         post_process(self.windows, self.guide, self.ranks, met_report=rec_report)
         post_process(self.windows, self.guide, self.ranks, met_report=f1_report)
         
-        cross_entropy_report.to_csv(self.reports_dir + '/cross_entropy.csv')
-        acc_report.to_csv(self.reports_dir + '/acc_report.csv')
-        prc_report.to_csv(self.reports_dir + '/prc_report.csv')
-        rec_report.to_csv(self.reports_dir + '/rec_report.csv')
-        f1_report.to_csv(self.reports_dir + '/f1_report.csv')
+        cross_entropy_report.to_csv(self.out_dir + '/cross_entropy.csv')
+        acc_report.to_csv(self.out_dir + '/acc_report.csv')
+        prc_report.to_csv(self.out_dir + '/prc_report.csv')
+        rec_report.to_csv(self.out_dir + '/rec_report.csv')
+        f1_report.to_csv(self.out_dir + '/f1_report.csv')
         
         t_report_1 = time.time()
         logger.info(f'Finished building reports in {t_report_1 - t_report_0:.3f} seconds')

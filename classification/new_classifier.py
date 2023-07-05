@@ -124,6 +124,62 @@ def get_param_tab(keys, ranks):
     param_tab = param_tab.sort_index(level=[0,1])
     return param_tab
 
+def get_params_ce(report, ranks):
+    # select the best parameter combinations for each rank using the cross entropy metric
+    # returns:
+        # pandas dataframe with columns: rank, window, w_start, w_end, n, k, method, score
+    
+    selected_params = []
+    for rk in ranks:
+        # get the best (minimum) score for rk, retrieve parameter combinations that yield it
+        min_ce = report[rk].min()
+        params_subtab = report.loc[report[rk] == min_ce, ['window', 'w_start', 'w_end', 'n', 'k', 'method', rk]].copy()
+        params_subtab.rename(columns={rk:'score'}, inplace=True)
+        params_subtab['rank'] = rk
+        selected_params.append(params_subtab)
+    
+    selected_params = pd.concat(selected_params).reset_index(drop=True)
+    
+    # filter params
+    # the basal rank will usually score 0 loss for all param combinations, select only combinations that yield good scores in lower ranks
+    score0_tab = selected_params.loc[selected_params.score == 0].reset_index().set_index(['window', 'n', 'k', 'method']) # all combinations with 0 entropy
+    next_best_tab = selected_params.loc[selected_params.score > 0] # all parameter combinations with cross entropy greater than 0
+    
+    filtered_idxs = []
+    for params, params_subtab in next_best_tab.groupby(['window', 'n', 'k', 'method']):
+        try:
+            filtered_idxs.append(score0_tab.loc[params, 'index'])
+        except KeyError:
+            continue
+        
+    best_params = pd.concat((selected_params.loc[filtered_idxs], next_best_tab))['rank', 'window', 'w_start', 'w_end', 'n', 'k', 'method', 'score'] # reorganize columns
+    return best_params, {} # empty dict used for compatibility with get_params_met
+
+def get_params_met(taxa, report):
+    # select the best parameter combinations for each tax in taxa using the given metrics report
+    # returns:
+        # table with columns: taxon, window, w_start, w_end, n, k, method, score
+        # warning dictionary with tax:warning key:value
+    
+    
+    best_params = []
+    warnings = {}
+    
+    for tax in taxa:
+        # locate occurrences of tax in the report. Generate a warning if tax is absent or its best score is 0
+        tax_subtab = report.loc[report.taxon == tax]
+        if tax_subtab.shape[0] == 0:
+            warnings[tax] = f'Taxon {tax} not found in the given report'
+            continue
+        best_score = tax_subtab.score.max()
+        if best_score == 0:
+            warnings[tax] = f'Taxon {tax} had a null score. Cannot be detected in the current window.'
+            continue
+        best_params.append(tax_subtab.loc[tax_subtab.score == best_score, ['taxon', 'window', 'w_start', 'w_end', 'n', 'k', 'method', 'score']])
+    
+    best_params = pd.concat(best_params)
+    return best_params, warnings
+
 #%% classes
 class Classifier:
     def __init__(self, out_dir, mat_code='s1v2', overwrite=False):

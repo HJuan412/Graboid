@@ -263,63 +263,6 @@ class Calibrator:
         for coor_idx, coords in enumerate(raw_coords):
             logger.info(f'\tWindow {coor_idx}: [{coords[0]} - {coords[1]}] (length {coords[1] - coords[0]})')
     
-    # report functions # TODO: this entire block goes away
-    # def report_windows(self, win_indexes, win_list, rej_indexes, rej_list):
-    #     if not self.save:
-    #         return
-    #     with open(self.reports_dir + '/windows.report', 'w') as handle:
-    #         if len(win_list) > 0:
-    #             handle.write('Collapsed windows:\n\n')
-    #             for w_idx, win in zip(win_indexes, win_list):
-    #                 handle.write(f'Window {w_idx} {self.windows[w_idx]}: collapsed into matrix of shape {win.window.shape}\n')
-    #             handle.write('\n')
-    #         if len(rej_list) > 0:
-    #             handle.write('Rejected windows:\n\n')
-    #             for r_idx, rej in zip(rej_indexes, rej_list):
-    #                 handle.write(f'Window {r_idx} {self.windows[r_idx]}: ' + rej)
-    
-    # def report_sites(self, window_sites, win_list, win_indexes, n_range):
-    #     if not self.save:
-    #         return
-    #     with open(self.reports_dir + '/sites.report', 'w') as handle:
-    #         handle.write('Selected sites:\n')
-    #         for w_idx, win, win_sites in zip(win_indexes, win_list, window_sites):
-    #             handle.write(f'Sites for window {w_idx} {self.windows[w_idx]}:\n')
-    #             for n, n_sites in zip(n_range, win_sites):
-    #                 handle.write(f'\t{n} sites: {n_sites}\n')
-    
-    # def report_metrics(self, report, params, metric):
-    #     # report already has tax_names as the second level of the multiindex
-    #     if not self.save:
-    #         return
-    #     # translate report tax names
-    #     tax_names = [i for i in map(lambda x : x.upper(), report.index.get_level_values(1).tolist())]
-    #     # may need to change type of column headers because csv doesn't like tuples
-    #     # report has a multiindex (rank, tax_name)
-    #     report_cp = report.copy()
-    #     report_cp.columns = pd.MultiIndex.from_tuples(report_cp.columns, names=['w_start', 'w_end'])
-    #     report_cp.to_csv(self.reports_dir + f'/{metric}_calibration.csv') # remember to load using index=[0,1] and header=[0,1]
-        
-    #     # build params dictionary
-    #     windows = {}
-    #     merged_params = np.concatenate(params, 0)
-    #     for w_idx, (win, param_row) in enumerate(zip(report.columns.tolist(), merged_params.T)):
-    #         combos = [combo for combo in map(lambda x : x if isinstance(x, tuple) else 0, param_row)]
-    #         win_dict = {wk:{rk:[] for rk in self.ranks} for wk in set(combos)}
-    #         # for tax_name, param_combo in zip(tax_names, combos):
-    #         #     win_dict[param_combo].append(tax_name)
-    #         for tax_data, param_combo in zip(report.index.values, combos):
-    #             # tax data is a tuple with the current taxa's rank and name
-    #             win_dict[param_combo][tax_data[0]] = tax_data[1].upper()
-    #         windows[win] = win_dict
-
-    #     with open(self.reports_dir + f'/{metric}_params.pickle', 'wb') as handle:
-    #         # windows dictionary has structure:
-    #             # windows = {(w0_start, w0_end) :
-    #                             # {(n0, k0, m0) :
-    #                                 # {rk0:[TAX_NAME0, ..., TAX_NAMEn]}}} # This json dictionary will be used to locate the best param combination for specified taxa in the classification step
-    #         pickle.dump(windows, handle)
-    
     def grid_search(self,
                     max_n,
                     step_n,
@@ -339,18 +282,6 @@ class Calibrator:
         # prepare n, k ranges
         n_range = np.arange(min_n, max_n + 1, step_n)
         k_range = np.arange(min_k, max_k + 1, step_k)
-        # log calibration parameters
-        logger.info('Calibration report:')
-        logger.info('=' * 10 + '\nCalibration parameters:')
-        logger.info(f'Database: {self.db}')
-        logger.info(f'N sites: {n_range}')
-        logger.info(f'K neighbours: {k_range}')
-        logger.info(f'Max unknowns per sequence: {row_thresh * 100}%')
-        logger.info(f'Max unknowns per site: {col_thresh * 100}%')
-        logger.info(f'Min non-redundant sequences: {min_seqs}')
-        logger.info(f'Rank used for site selection: {rank}')
-        logger.info(f'Classification criterion: {criterion}')
-        logger.info(f'Threads: {threads}')
         
         # initialize grid search report report
         date = datetime.datetime.now().strftime('%d/%m/%Y %H/%M/%S')
@@ -364,7 +295,6 @@ class Calibrator:
         # collapse windows
         logger.info('Collapsing windows...')
         win_indexes, win_list, rej_indexes, rej_list = cal_preprocess.collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
-        # self.report_windows(win_indexes, win_list, rej_indexes, rej_list) # TODO: remove this call
         report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file)
         
         t_collapse_1 = time.time()
@@ -380,7 +310,6 @@ class Calibrator:
         t_sselection_0 = time.time()
         
         windows_sites = cal_preprocess.select_sites(win_list, self.tax_ext, rank, min_n, max_n, step_n)
-        # self.report_sites(windows_sites, win_list, win_indexes, n_range) # TODO: remove this call
         report_sites_ext(win_indexes, win_list, windows_sites, n_range, ext_site_report)
         report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_file)
         

@@ -102,9 +102,16 @@ def plot_result(report, confidence_threshold=0.5, figsize=10):
     def deg2rad(angle):
         return angle/360 * 2 * np.pi    
     
-    def get_hatches(color_idxs, hatch_idxs):
+    def get_hatches(tax_idxs):
+        template_idxs = np.repeat(np.arange(10), 10)
+        n_repeats = np.ceil(len(tax_idxs) / 100).astype(int)
+        
+        hatch_idxs = np.concatenate(([0]*10, np.tile(template_idxs, n_repeats)))[tax_idxs]
+        hatch_densities = (np.clip(tax_idxs - 10, 0, np.inf) / 100).astype(int)
+        hatch_densities[10:] += 1
+        
         hatch_styles = ['/', '\\', '|', '-', '+', 'x', 'o', 'O', '.', '*']
-        hatches = [hatch_styles[col_idx] * hatch_idx for col_idx, hatch_idx in zip(color_idxs, hatch_idxs)]
+        hatches = [hatch_styles[hatch_idx] * hatch_density for hatch_idx, hatch_density in zip(hatch_idxs, hatch_densities)]
         return hatches
     
     # preprocess report, filter by confidence
@@ -130,7 +137,7 @@ def plot_result(report, confidence_threshold=0.5, figsize=10):
     # set taxon colors and hatching styles
     color_idxs = tax_idxs % 10
     hatch_idxs = np.floor(tax_idxs / 10).astype(int)
-    tax_hatches = get_hatches(color_idxs, hatch_idxs)
+    tax_hatches = get_hatches(tax_idxs)
     tax_colors = [cmap(color_idx) for color_idx in color_idxs]
     
     # build wedges

@@ -83,7 +83,7 @@ def plot_sample_report(report, figsize=10):
     for rk, rk_report in rk_arrays.items():
         plot_result(rk_report, figsize)
     
-def plot_result(report, figsize=10):
+def plot_result(report, confidence_threshold=0.5, figsize=10):
     # make a pie chart of sample characterization
         # each slice is a taxon
         # slices subdivided into branches (width proportional to sequences in branch)
@@ -92,8 +92,6 @@ def plot_result(report, figsize=10):
     # report is adataframe with columns: Taxon(name, not id), support, n_seqs
     # report is grouped by lineage, each taxon is sorted by support (descending)
     # figsize determines the pie diameter
-    
-    cmap = cm.get_cmap('gist_rainbow')
     
     def rotate(vector, angle):
         rot = np.array([[np.cos(angle), -np.sin(angle)],
@@ -104,6 +102,19 @@ def plot_result(report, figsize=10):
     def deg2rad(angle):
         return angle/360 * 2 * np.pi    
     
+    def get_hatches(color_idxs, hatch_idxs):
+        hatch_styles = ['/', '\\', '|', '-', '+', 'x', 'o', 'O', '.', '*']
+        hatches = [hatch_styles[col_idx] * hatch_idx for col_idx, hatch_idx in zip(color_idxs, hatch_idxs)]
+        return hatches
+    
+    # preprocess report, filter by confidence
+    report = report.loc[report.norm_support > confidence_threshold].copy()
+    report = report.sort_values(['norm_support', 'n_seqs'], ascending=False).reset_index(drop=True)
+    # TODO: retrieve lineage codes
+    # TODO: infer figsize from total seqs
+    # TODO: merge clusters of a same taxon with the same support
+    
+    cmap = cm.get_cmap('tab10')
     center = np.array([figsize, figsize]) / 2
     radius = figsize / 2
     start = 90 # pie chart initial position is at 12 o clock. Angle 0 is horizontal to the right, moves counterclockwise
@@ -112,28 +123,33 @@ def plot_result(report, figsize=10):
     total_seqs = report.n_seqs.sum()
     report['arc'] = (report.n_seqs.to_numpy() / total_seqs) * 360
     
-    # set colors
-    uniq_taxes = report.Taxon.unique()
-    tax_colors = {tax: tax_idx/len(uniq_taxes) for tax_idx, tax in enumerate(uniq_taxes)} # assign a color for each taxon
+    # get taxon indexes
+    uniq_taxes = report.tax.unique()
+    tax_idxs = np.arange(len(uniq_taxes)) # should use the order taken by sorting by lineage codes
+    
+    # set taxon colors and hatching styles
+    color_idxs = tax_idxs % 10
+    hatch_idxs = np.floor(tax_idxs / 10).astype(int)
+    tax_hatches = get_hatches(color_idxs, hatch_idxs)
+    tax_colors = [cmap(color_idx) for color_idx in color_idxs]
     
     # build wedges
     wedges = [] # outer circle, shows the number of sequences in the branch, same radii
     wedges_sec = [] # secondary circle, shows support for each branch, variable radii
-    for idx, row in report.iterrows():
-        theta = np.sort([start, start-row.arc]) # theta1 should always be smaller than theta 2
-        tax_color = tax_colors[row.Taxon]
-        wedges.append(ptch.Wedge(center, radius, theta[0], theta[1], color=cmap(tax_color), alpha=0.5)) # outer circle is clearer than the inner one, set alpha to 0.5
-        wedges_sec.append(ptch.Wedge(center, radius*row.support, theta[0], theta[1], color=cmap(tax_color)))
-        start -= row.arc # displace start position to the end of the current wedge
+    tax_positions = [] # this list determines the start position of each taxon
+    legend_reprs = [] # this list holds a representative (sec)wedge for each taxon, used to build legend
+    for tax_color, tax_hatch, tax in zip(tax_colors, tax_hatches, uniq_taxes):
+        tax_arcs = report.loc[report.tax == tax, ['arc', 'norm_support']].to_numpy()
+        tax_positions.append(len(wedges))
+        for arc, supp in tax_arcs:
+            theta = np.sort([start, start-arc]) # theta1 should always be smaller than theta 2
+            wedges.append(ptch.Wedge(center, radius, theta[0], theta[1], facecolor=tax_color, alpha=0.5, hatch=tax_hatch)) # outer circle is clearer than the inner one, set alpha to 0.5
+            wedges_sec.append(ptch.Wedge(center, radius*supp, theta[0] - 0.05, theta[1], facecolor=tax_color, hatch=tax_hatch)) # inner circle, raduis equals support
+            start -= arc # displace start position to the end of the current wedge
+        legend_reprs.append(wedges_sec[-1]) # add current taxon representative
     
-    # build separators
-    separators = [] # radial lines that separate the wedges
-    vector = np.array([0, radius]) # original vector points at 12 o clock
-    for arc in report.arc.values():
-        separators.append(np.array([center, center+vector]))
-        vector = rotate(vector, deg2rad(-arc)) # rotate vector to the end position of the current wedge
-    # get main separators, separators between taxa should be a little thiccer
-    _tax, tax_positions = np.unique(report.Taxon, return_index=True)
+    # build thresh indicator
+    thresh_circle = ptch.Circle(center, radius = radius * confidence_threshold, fill = False, linewidth = 1.5) # Draw a circle indicating the confidence threshold # TODO: make line width adjust dynamically to figsize
     
     # build figure
     fig, ax = plt.subplots(figsize=(figsize, figsize))
@@ -146,18 +162,12 @@ def plot_result(report, figsize=10):
     for w2 in wedges_sec:
         ax.add_patch(w2)
     
-    # draw separators
-    for sep in separators:
-        ax.plot(sep[:,0], sep[:,1], color='w', linewidth=1)
-    for tx in tax_positions:
-        tax_sep = separators[tx]
-        ax.plot(tax_sep[:,0], tax_sep[:,1], color='w', linewidth=2)
-    
-    # TODO: add labels
-    # hide axes
+    # draw confidence threshold
+    ax.add_patch(thresh_circle)
+    ax.legend(legend_reprs, uniq_taxes) # TODO: move legend to a different subplot
+    # TODO: add annotations
     ax.get_xaxis().set_visible(False)
     ax.get_yaxis().set_visible(False)
-    # TODO: add legend
     # TODO: add title
     # TODO: save figures
     return

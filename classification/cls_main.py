@@ -388,7 +388,6 @@ class Classifier:
         self.calibration_dir = out_dir + '/calibration'
         self.classif_dir = out_dir + '/classification'
         self.query_dir = out_dir + '/query'
-        self.tmp_dir = out_dir + '/tmp'
         self.warn_dir = out_dir + '/warnings'
         
         if overwrite:
@@ -417,7 +416,6 @@ class Classifier:
             os.makedirs(self.calibration_dir)
             os.makedirs(self.classif_dir)
             os.makedirs(self.query_dir)
-            os.makedirs(self.tmp_dir)
             os.makedirs(self.warn_dir)
     
     def load_query(self):
@@ -506,16 +504,18 @@ class Classifier:
         
         if cal_dir is None:
             cal_dir = self.last_calibration
-        ce_report = cal_dir + '/cross_entropy.tsv'
-        met_reports = {'acc' : cal_dir + 'acc_report.tsv',
-                       'prc' : cal_dir + 'prc_report.tsv',
-                       'rec' : cal_dir + 'rec_report.tsv',
-                       'f1' : cal_dir + '/f1_report.tsv'}
+        reports = {'acc' : cal_dir + 'acc_report.tsv',
+                   'prc' : cal_dir + 'prc_report.tsv',
+                   'rec' : cal_dir + 'rec_report.tsv',
+                   'f1' : cal_dir + '/f1_report.tsv',
+                   'ce' : cal_dir + '/cross_entropy.tsv'}
         
         if len(taxa) == 0:
-            best_params, warnings = get_params_ce(ce_report, self.ranks)
+            report = pd.read_csv(reports['ce'], index_col=0)
+            best_params, warnings = get_params_ce(report, self.ranks)
         else:
-            best_params, warnings = get_params_met(taxa, met_reports[metric])
+            report = pd.read_csv(reports[metric], index_col=0)
+            best_params, warnings = get_params_met(taxa, report)
         
         report_params(best_params, warnings, cal_dir + '/params_report.txt', metric, *taxa)
         

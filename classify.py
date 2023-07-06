@@ -41,21 +41,21 @@ def preparation(classifier, database=None, query=None, qry_evalue=0.005, qry_dro
                              min_width = qry_min_width,
                              threads = threads)
 
-def operation_calibrate(classifier, min_overlap_width, max_n, step_n, max_k, step_k, mat_code, row_thresh, col_thresh, min_seqs, rank, min_n, min_k, criterion, **kwargs):
+def operation_calibrate(classifier, min_overlap_width, max_n, step_n, max_k, step_k, row_thresh, col_thresh, min_seqs, rank, min_n, min_k, criterion, threads, **kwargs):
     classifier.get_overlaps(min_overlap_width)
-    classifier.custom_calibrate(max_n = max_n,
-                                step_n = step_n,
-                                max_k = max_k,
-                                step_k = step_k,
-                                mat_code = mat_code,
-                                row_thresh = row_thresh,
-                                col_thresh = col_thresh,
-                                min_seqs = min_seqs,
-                                rank = rank,
-                                min_n = min_n,
-                                min_k = min_k,
-                                criterion = criterion,
-                                kwargs = kwargs)
+    classifier.custom_calibrate(max_n,
+                                step_n,
+                                max_k,
+                                step_k,
+                                row_thresh,
+                                col_thresh,
+                                min_seqs,
+                                rank,
+                                min_n,
+                                min_k,
+                                criterion,
+                                threads,
+                                **kwargs)
 
 def operation_classify(classifier, w_start, w_end, n, k, rank, row_thresh, col_thresh, min_seqs, mat_code, criterion, method):
     classifier.classify(w_start = w_start,
@@ -188,10 +188,9 @@ parser.add_argument('--method',
                     type=str,
                     default='unweighted')
 
-args = parser.parse_args()
-
 #%% classify
 if __name__ == '__main__':
+    args = parser.parse_args()
     # initialize classifier
     classifier = cls_main.Classifier(args.out_dir, args.overwrite)
     
@@ -213,7 +212,6 @@ if __name__ == '__main__':
                             step_n = args.step_n,
                             max_k = args.max_k,
                             step_k = args.step_k,
-                            mat_code = args.dist_mat,
                             row_thresh = args.row_thresh,
                             col_thresh = args.col_thresh,
                             min_seqs = args.min_seqs,
@@ -222,7 +220,7 @@ if __name__ == '__main__':
                             min_k = args.min_k,
                             criterion = args.criterion,
                             threads = args.threads)
-
+    
     # operation: classification
     if args.classify:
         operation_classify(classifier,

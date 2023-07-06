@@ -15,6 +15,7 @@ import logging
 import numpy as np
 import os
 import pandas as pd
+import re
 import shutil
 # Graboid libraries
 from calibration import cal_calibrator
@@ -33,7 +34,61 @@ logger = logging.getLogger('Graboid.Classification')
 logger.setLevel(logging.DEBUG)
 
 #%% functions
-def map_query(out_dir, warn_dir, fasta_file, db_dir, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1):
+def map_query(out_dir,
+              warn_dir,
+              fasta_file,
+              db_dir,
+              evalue=0.005,
+              dropoff=0.05,
+              min_height=0.1,
+              min_width=2,
+              threads=1):
+    """
+    Map the query file against the database reference sequence and define
+    mesas.
+
+    Parameters
+    ----------
+    out_dir : str
+        Output directory.
+    warn_dir : str
+        Warnings directory.
+    fasta_file : str
+        Query sequence file.
+    db_dir : str
+        Graboid database director.
+    evalue : float, optional
+        Evalue threshold for the BLAST alignment. The default is 0.005.
+    dropoff : float, optional
+        Coverage dropoff threshold used to detect the edge of a mesa. The default is 0.05.
+    min_height : float, optional
+        Minimum fraction of the max coverage for a region of the alignment to be included in a mesa. The default is 0.1.
+    min_width : int, optional
+        Minimum amount of sites for a region of the alignment to be included in a mesa. The default is 2.
+    threads : int, optional
+        Number of processors to use. The default is 1.
+
+    Returns
+    -------
+    map_file : str
+        Path to the resulting map file.
+    acc_file : str
+        Path to the file of accepted accession codes.
+    blast_report : str
+        Path to the generated blast report.
+    acc_list : list
+        list of accepted accesion codes.
+    bounds : tuple
+        Edge coordinates of the query alignment over the reference sequence.
+    matrix : numpy.array
+        Generated alignment in the form of a 2d numpy array.
+    coverage : numpy.array
+        Coverage of the generated alignment.
+    mesas : numpy.array
+        Information about the generated coverage mesas.
+        
+    """
+    
     map_director = mp.Director(out_dir, warn_dir, logger)
     map_director.direct(fasta_file = fasta_file,
                         db_dir = db_dir,
@@ -54,7 +109,26 @@ def map_query(out_dir, warn_dir, fasta_file, db_dir, evalue=0.005, dropoff=0.05,
     return map_file, acc_file, blast_report, acc_list, bounds, matrix, coverage, mesas
 
 def get_mesas_overlap(ref_mesas, qry_mesas, min_width=10):
-    # array of columns [ol_start, ol_end, ol_width, ref_cov, qry_cov]
+    """
+    Locate the overlapping regions between the query and reference alignments
+
+    Parameters
+    ----------
+    ref_mesas : numpy.array
+        Information matrix for the reference mesas.
+    qry_mesas : numpy.array
+        Information matrix for the query mesas.
+    min_width : int, optional
+        Minimum overlap threshold. The default is 10.
+
+    Returns
+    -------
+    numpy.array
+        2d Array with columns: overlap_start, overlap_end, overlap_width, ref_coverage, qry_coverage.
+        Each row represent a distinct overlapping region
+
+    """
+
     mesas_overlap = []
     for q_mesa in qry_mesas:
         # get reference mesas that overlap with the current query mesa: (ref mesa start < qry mesa end) & (ref mesa end > qry mesa start)
@@ -71,70 +145,35 @@ def get_mesas_overlap(ref_mesas, qry_mesas, min_width=10):
         mesas_overlap.append(q_overlap[q_overlap[:,2] >= min_width]) # append only overlaps over the specified minimum width
     return np.concatenate(mesas_overlap, 0)
 
-def select_window_params(window_dict, rep_column):
-    # select parameters of taxa with values in rep_column above 0 (null or 0 value are worthless)
-    # for win, win_dict in params.items():
-    #     for tax in taxa:
-    #         for combo, tx in win_dict.items():
-    #             if tax in tx:
-    #                 tax_params[win].update({tax:combo})
-    #                 params_per_win[win].add(combo)
-    return
-
 ## parameter selection
-def select_params_per_window(params, report, **kwargs):
-    report_taxa = report.index.get_level_values(1)
-    tax_idx = [tx.upper() for tx in report.index.get_level_values(1)]
-    # specify rank and/or taxa
-    if 'rank' in kwargs.keys():
-        rank = kwargs['rank'].lower()
-        report_ranks = report.index.get_level_values(0)
-        if not rank in report_ranks:
-            raise Exception(f'Specified rank {rank} not found among: {" ".join(report_ranks)}')
-        report_taxa = report.loc[rank].index.values
-        tax_idx = [tx.upper() for tx in report_taxa]
-        
-    if 'taxa' in kwargs.keys():
-        taxa = list(kwargs['taxa'])
-        upper_taxa = set([upp for upp in map(lambda x : x.upper, taxa)])
-        upper_rep_taxa = set([upp for upp in map(lambda x : x.upper, report_taxa)])
-        tax_idx = set(upper_rep_taxa).intersection(upper_taxa)
-        if len(tax_idx) == 0:
-            raise Exception('None of the given taxa: {' '.join(taxa)} found in the database')
-    
-    report_cp = report.droplevel(level=0)
-    report_cp.index = [tx.upper() for tx in report_cp.index]
-    report_cp = report_cp.loc[tax_idx]
-    # takes a parameters dictionary and a taxa list
-    params_per_win = {win:set() for win in params.keys()}
-    tax_params = {win:{} for win in params.keys()}
-    
-    for win, rep_column in report_cp.T.iterrows():
-        win_params, win_tax_params = select_window_params(params[win], rep_column)
-        params_per_win[win] = win_params
-        tax_params[win] = win_tax_params
-
-    return params_per_win, tax_params
-
-def get_param_tab(keys, ranks):
-    tuples = [k for k in keys if isinstance(k, tuple)]
-    param_tab = pd.DataFrame(tuples, columns='n k m'.split())
-    param_tab = pd.compat([param_tab, pd.DataFrame(data=False, index=param_tab.index, columns=ranks, dtype=bool)], axis=1)
-    param_tab = param_tab.set_index(['n', 'k', 'm'])
-    param_tab = param_tab.sort_index(level=[0,1])
-    return param_tab
-
 def get_params_ce(report, ranks):
-    # select the best parameter combinations for each rank using the cross entropy metric
-    # returns:
-        # pandas dataframe with columns: rank, window, w_start, w_end, n, k, method, score
+    """
+    Select the best parameter combination for each taxonomic rank using the
+    cross entropy metric.
+    Cross entropy ranges from 0 to 10. Lower values are better.
+
+    Parameters
+    ----------
+    report : pandas.DataFrame
+        Cross Entropy report. Columns: window, w_start, w_end, n, k, method, rank0, rank1, ...
+    ranks : list
+        List of ranks. Must match the ranks present in the report columns
+
+    Yields
+    ------
+    best_params : pandas.DataFrame
+        Best parameters report. Columns: rank, window, w_start, w_end, n, k, method, cross_entropy
+    []
+        Empty list, kept for compatibility with get_params_met.
+
+    """ 
     
     selected_params = []
     for rk in ranks:
         # get the best (minimum) score for rk, retrieve parameter combinations that yield it
         min_ce = report[rk].min()
         params_subtab = report.loc[report[rk] == min_ce, ['window', 'w_start', 'w_end', 'n', 'k', 'method', rk]].copy()
-        params_subtab.rename(columns={rk:'score'}, inplace=True)
+        params_subtab.rename(columns={rk:'cross_entropy'}, inplace=True)
         params_subtab['rank'] = rk
         selected_params.append(params_subtab)
     
@@ -142,8 +181,8 @@ def get_params_ce(report, ranks):
     
     # filter params
     # the basal rank will usually score 0 loss for all param combinations, select only combinations that yield good scores in lower ranks
-    score0_tab = selected_params.loc[selected_params.score == 0].reset_index().set_index(['window', 'n', 'k', 'method']) # all combinations with 0 entropy
-    next_best_tab = selected_params.loc[selected_params.score > 0] # all parameter combinations with cross entropy greater than 0
+    score0_tab = selected_params.loc[selected_params.cross_entropy == 0].reset_index().set_index(['window', 'n', 'k', 'method']) # all combinations with 0 entropy
+    next_best_tab = selected_params.loc[selected_params.cross_entropy > 0] # all parameter combinations with cross entropy greater than 0
     
     filtered_idxs = []
     for params, params_subtab in next_best_tab.groupby(['window', 'n', 'k', 'method']):
@@ -152,33 +191,99 @@ def get_params_ce(report, ranks):
         except KeyError:
             continue
         
-    best_params = pd.concat((selected_params.loc[filtered_idxs], next_best_tab))['rank', 'window', 'w_start', 'w_end', 'n', 'k', 'method', 'score'] # reorganize columns
-    return best_params, {} # empty dict used for compatibility with get_params_met
+    best_params = pd.concat((selected_params.loc[filtered_idxs], next_best_tab))[['rank', 'window', 'w_start', 'w_end', 'n', 'k', 'method', 'cross_entropy']] # reorganize columns
+    return best_params, [] # empty dict used for compatibility with get_params_met
 
 def get_params_met(taxa, report):
-    # select the best parameter combinations for each tax in taxa using the given metrics report
-    # returns:
-        # table with columns: taxon, window, w_start, w_end, n, k, method, score
-        # warning dictionary with tax:warning key:value
-    
+    """
+    Select the best parameter combinations for each taxon in taxa using the
+    given metric report.
+    Scores range from 0 to 1. Higher values are better.
+
+    Parameters
+    ----------
+    taxa : list
+        List of taxa to search for.
+    report : pandas.DataFrame
+        Metric report. Columns: rank, taxon, taxID, window, w_start, w_end, n, k, method, score
+
+    Returns
+    -------
+    best_params : pandas.DataFrame
+        Best parameters report. Columns: taxon, window, w_start, w_end, n, k, method, score
+    warnings : list
+        List of generated warnings.
+
+    """
     
     best_params = []
-    warnings = {}
+    warnings = []
     
     for tax in taxa:
         # locate occurrences of tax in the report. Generate a warning if tax is absent or its best score is 0
         tax_subtab = report.loc[report.taxon == tax]
         if tax_subtab.shape[0] == 0:
-            warnings[tax] = f'Taxon {tax} not found in the given report'
+            warnings[tax] = f'{tax} not found in the given report'
             continue
         best_score = tax_subtab.score.max()
         if best_score == 0:
-            warnings[tax] = f'Taxon {tax} had a null score. Cannot be detected in the current window.'
+            warnings.append(f'{tax} had a null score. Cannot be detected in the current window.')
             continue
         best_params.append(tax_subtab.loc[tax_subtab.score == best_score, ['taxon', 'window', 'w_start', 'w_end', 'n', 'k', 'method', 'score']])
     
     best_params = pd.concat(best_params)
     return best_params, warnings
+
+def report_params(params, warnings, report_file, metric, *taxa):
+    # build parameter report
+    met_names = {'acc' : 'accuracy',
+                 'prc' : 'precision',
+                 'rec' : 'recall',
+                 'f1' : 'F1 score',
+                 'ce' : 'Cross entropy'}
+    metric = met_names[metric]
+    header = f'Best parameter combinations determined by {metric}'
+    if len(taxa) > 0:
+        header += '\nAnalyzed taxa: ' + ', '.join(taxa)
+    header += '\n\n'
+    
+    params = params.rename(columns = {'score':metric}).set_index(params.columns[0])
+    
+    with open(report_file, 'a') as handle:
+        handle.write(header)
+        handle.write(repr(params))
+        handle.write('\n\n')
+        if len(warnings) > 0:
+            handle.write('Warnings:\n')
+            for warn in warnings.values():
+                handle.write(warn + '\n')
+            handle.write('\n')
+        handle.write('#' * 40 + '\n\n')
+    return
+
+def collapse_params(params):
+    """
+    Select unique parameter combinations
+
+    Parameters
+    ----------
+    params : pandas.DataFrame
+        DataFrame generated using either get_params_ce or get_params_met.
+
+    Returns
+    -------
+    collapsed_params : dict
+        Dictionary of key:values -> (window start, window end, n, k, m):[taxa/ranks].
+
+    """
+    
+    params = params.rename(columns={'taxon':'name', 'rank':'name'})
+    collapsed_params = {}
+    for (w, n, k, m), param_subtab in params.groupby(['window', 'n', 'k', 'method']):
+        ws = param_subtab.w_start.values[0]
+        we = param_subtab.w_end.values[0]
+        collapsed_params[(ws, we, n, k, m)] = param_subtab.name.values.tolist()
+    return collapsed_params
 
 #%% classes
 class Classifier:
@@ -229,7 +334,7 @@ class Classifier:
         # get database reference sequence
         self.db_reffile = db_meta['reference']
         self.db_refpath = db_meta['ref_file']
-        self.db_refdir = '/'.join(self.db_refpath.split('/')[:-1]) # TODO: include the refdir location in the database meta file
+        self.db_refdir = re.sub('ref.fasta', '', self.db_refpath) # get the directory containing the blast database files
         # load taxonomy guides
         self.guide = pd.read_csv(db_meta['guide_file'], index_col=0)
         self.tax_ext = pd.read_csv(db_meta['expguide_file'], index_col=0)
@@ -388,50 +493,34 @@ class Classifier:
         self.update_meta()
     
     # select parameters
-    # def select_params(self, metric, cal_dir=None, **kwargs):
-    #     # specify taxa
-    #     tax_idxs = self.guide.index.to_numpy()
-    #     use_all = False
-    #     if 'rank' in kwargs.keys():
-    #         rank = kwargs['rank'].lower()
-    #         if not rank in self.ranks:
-    #             raise Exception(f'Specified rank {rank} not found among: {" ".join(self.ranks)}')
-    #     if 'taxa' in kwargs.keys():
-    #         taxa = list(kwargs['taxa'])
-    #         upper_taxa = set([upp for upp in map(lambda x : x.upper, taxa)])
-    #         upper_guide = [upp for upp in map(lambda x : x.upper, self.guide.SciName.tolist())]
-    #         rev_guide = self.guide.reset_index()
-    #         rev_guide.index = upper_guide
-    #         tax_intersect = set(upper_guide).intersection(upper_taxa)
-    #         if len(tax_intersect) == 0:
-    #             raise Exception('None of the given taxa: {' '.join(taxa)} found in the database')
-    #         tax_idxs = rev_guide.loc[tax_intersect.TaxID].to_numpy()
-    #     else:
-    #         # no rank or taxa list was provided, use all parameter combination winners
-    #         use_all = True
-    #     # locate calibration directory
-    #     if cal_dir is None:
-    #         cal_dir = self.last_calibration
-    #     elif not cal_dir in os.listdir(self.calibration_dir):
-    #         raise Exception(f'Specified calibration directory not found in {self.calibration_dir}')
+    def select_params(self, cal_dir=None, metric='f1', *taxa):
+        """
+        Select parameter combinations from calibration reports.
+        Usage:
+            1) select_params()
+            2) select_params(metric, tax1, tax2)
+        Pass taxa of interest as optional arguments. If none are given, select
+        parameters using the cross entropy report.
+        If taxa are passed, select parameters using the specified metric (acc, prc, rec, f1)
+        """
         
-    #     # open calibration and params reports
-    #     cal_report = pd.read_csv(cal_dir + f'/calibration_{metric}.csv', index_col=[0,1], header=[0,1]).fillna(-1)
-    #     cal_report.columns = pd.MultiIndex.from_arrays([cal_report.columns.get_level_values(0).astype(int), cal_report.columns.get_level_values(1).astype(int)]) # calibration report headers are read as string tuples, must convert them back to strings of ints
-    #     with open(cal_dir + f'/params_{metric}.pickle', 'rb') as handle:
-    #         params_dict = pickle.load(handle)
+        if cal_dir is None:
+            cal_dir = self.last_calibration
+        ce_report = cal_dir + '/cross_entropy.tsv'
+        met_reports = {'acc' : cal_dir + 'acc_report.tsv',
+                       'prc' : cal_dir + 'prc_report.tsv',
+                       'rec' : cal_dir + 'rec_report.tsv',
+                       'f1' : cal_dir + '/f1_report.tsv'}
         
-    #     # verify that current database is the same as the calibration report's
-    #     if self.db != params_dict['db']:
-    #         self.set_database(params_dict['db'])
+        if len(taxa) == 0:
+            best_params, warnings = get_params_ce(ce_report, self.ranks)
+        else:
+            best_params, warnings = get_params_met(taxa, met_reports[metric])
         
-    #     win_params = {col:[] for col in cal_report.columns}
-    #     # select parameters combinations for each window
-    #     for win, win_col in cal_report.T.iterrows():
-    #         accepted = win_col.loc[win_col > 0].index
-    #         rejected = win_col.loc[win_col <= 0].index.get_level_values(1)
-    #     return
-    
+        report_params(best_params, warnings, cal_dir + '/params_report.txt', metric, *taxa)
+        
+        self.collapsed_params = collapse_params(best_params)
+        return
     
     # classify using different parameter combinations, register which parameter 
     def classify(self,

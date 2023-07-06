@@ -10,7 +10,7 @@ Classification director. Handles custom calibration and classification of query 
 #%% libraries
 import argparse
 # graboid libraries
-from classification import new_classifier
+from classification import cls_main
 #%%
 ### classification steps
 ## preparations
@@ -193,7 +193,7 @@ args = parser.parse_args()
 #%% classify
 if __name__ == '__main__':
     # initialize classifier
-    classifier = new_classifier.Classifier(args.out_dir, args.overwrite)
+    classifier = cls_main.Classifier(args.out_dir, args.overwrite)
     
     # preparation
     preparation(classifier,

@@ -284,7 +284,7 @@ class Calibrator:
         k_range = np.arange(min_k, max_k + 1, step_k)
         
         # initialize grid search report report
-        date = datetime.datetime.now().strftime('%d/%m/%Y %H/%M/%S')
+        date = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
         report_file = self.out_dir + '/GS_report.txt'
         ext_site_report = self.out_dir + '/sites_report.tsv'
         report_params(date, self.db, n_range, k_range, criterion, row_thresh, col_thresh, min_seqs, rank, threads, report_file)

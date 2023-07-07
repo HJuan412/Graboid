@@ -14,7 +14,7 @@ import shutil
 
 from DATA import DATA
 from calibration import calibrator as cb
-from calibration import cal_calibrator as ccb
+from calibration import cal_main as ccb
 from classification import cost_matrix
 #% set logger
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')

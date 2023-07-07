@@ -18,7 +18,7 @@ import pandas as pd
 import re
 import shutil
 # Graboid libraries
-from calibration import cal_calibrator
+from calibration import cal_main
 from classification import cost_matrix
 from classification import cls_classify
 from classification import cls_distance
@@ -457,7 +457,7 @@ class Classifier:
         the user provides cal_dir kwarg as an alternative name.
         Updates last_calibration parameter with the output directory"""
         # set calibrator
-        calibrator = cal_calibrator.Calibrator()
+        calibrator = cal_main.Calibrator()
         calibrator.set_database(self.db)
         
         if 'w_starts' in kwargs.keys() and 'w_ends' in kwargs.keys():

@@ -126,7 +126,7 @@ def report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file):
         handle.write('Windows\n')
         handle.write(sep)
         handle.write('Collapsed windows:\n')
-        collapsed_tab.to_csv(handle, sep='\t')
+        handle.write(repr(collapsed_tab))
         handle.write('\n')
         handle.write('Rejected windows:\n')
         rejected_tab.to_csv(handle, sep='\t', header=None, index=None)
@@ -158,7 +158,7 @@ def report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_fi
         handle.write('Sites\n')
         handle.write(sep)
         handle.write(f'Extended site report: {ext_site_report}\n')
-        sites_tab.to_csv(handle, sep='\t')
+        handle.write(repr(sites_tab))
         
 #%% classes
 class Calibrator:

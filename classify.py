@@ -11,6 +11,7 @@ Classification director. Handles custom calibration and classification of query 
 import argparse
 # graboid libraries
 from classification import cls_main
+from classification import cls_plots
 #%%
 ### classification steps
 ## preparations
@@ -28,7 +29,7 @@ from classification import cls_main
 # perform custom calibration of overlapping reions
 # classify query
 
-def preparation(classifier, database=None, query=None, qry_evalue=0.005, qry_dropoff=0.05, qry_min_height=0.1, qry_min_width=2, threads=1):
+def preparation(classifier, database=None, query=None, qry_evalue=0.005, qry_dropoff=0.05, qry_min_height=0.1, qry_min_width=2, min_overlap_width=10, threads=1, plot=True):
     # preparation steps, set database and query
     if not database is None:
         classifier.set_database(database)
@@ -40,6 +41,16 @@ def preparation(classifier, database=None, query=None, qry_evalue=0.005, qry_dro
                              min_height = qry_min_height,
                              min_width = qry_min_width,
                              threads = threads)
+        classifier.get_overlaps(min_overlap_width)
+        if plot:
+            cls_plots.plot_ref_v_qry(classifier.ref_coverage,
+                                     classifier.ref_mesas,
+                                     classifier.qry_coverage,
+                                     classifier.qry_mesas,
+                                     classifier.overlaps,
+                                     ref_title = classifier.db,
+                                     qry_title = classifier.query_file,
+                                     out_file = classifier.out_dir + '/coverage.png')
 
 def operation_calibrate(classifier, min_overlap_width, max_n, step_n, max_k, step_k, row_thresh, col_thresh, min_seqs, rank, min_n, min_k, criterion, threads, **kwargs):
     classifier.get_overlaps(min_overlap_width)

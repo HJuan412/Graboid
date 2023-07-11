@@ -13,7 +13,11 @@ import matplotlib.patches as ptch
 import matplotlib.pyplot as plt
 import numpy as np
 #%% functions
-def plot_ref_v_qry(ref_coverage, ref_mesas, qry_coverage, qry_mesas, overlapps, figsize=(12,7)):
+def plot_ref_v_qry(ref_coverage, ref_mesas, qry_coverage, qry_mesas, overlaps, figsize=(12,7), **kwargs):
+    # kwargs:
+        # ref_title: name of the reference database
+        # qry_title: name of the query sequence file
+        # out_file: name of the output file
     x = np.arange(len(ref_coverage)) # set x axis
     # plot ref
     fig, ax_ref = plt.subplots(figsize = figsize)
@@ -35,15 +39,11 @@ def plot_ref_v_qry(ref_coverage, ref_mesas, qry_coverage, qry_mesas, overlapps, 
     
     # # plot overlaps
     # # vertical lines indicating overlapps between query and reference mesas
-    for ol in overlapps:
+    for ol in overlaps:
         ol_height = max(ol[4], (ol[3] / ref_coverage.max()) * qry_coverage.max())
         
         ax_qry.plot(ol[[0,0]], [0, ol_height], linestyle=':', linewidth=1.5, c='k')
         ax_qry.plot(ol[[1,1]], [0, ol_height], linestyle=':', linewidth=1.5, c='k')
-    # ol_x = overlapps[:, [0,0,1,1]].flatten() # each overlap takes two times the start coordinate and two times the end coordinate in the x axis (this is so they can be plotted as vertical lines)
-    # ol_rheight = (overlapps[:, 3] / ref_coverage.max()) * qry_coverage.max() # transform the reference mesa height to the scale in the query axis
-    # ol_y = np.array([overlapps[:,4], ol_rheight, overlapps[:,4], ol_rheight]).T.flatten() # get the ref and qry height of each overlape TWICE and interloped so we can plot th evertical lines at both ends of the overlap
-    # ax_qry.plot(ol_x, ol_y, c='k')
     
     ax_ref.plot([0], [0], c='r', label='Reference mesas')
     ax_ref.plot([0], [0], c='tab:orange', label='Query coverage')
@@ -52,17 +52,24 @@ def plot_ref_v_qry(ref_coverage, ref_mesas, qry_coverage, qry_mesas, overlapps, 
     ax_ref.legend()
     # TODO: fix issues with mesa calculations
     # only filter out overlap coordinates when they appear too closely together (<= 20 sites) in the x axis
-    ol_coords = np.unique(overlapps[:,:2])
+    ol_coords = np.unique(overlaps[:,:2])
     ol_coor_diffs = np.diff(ol_coords)
     selected_ol_coords = ol_coords[np.insert(ol_coor_diffs > 20, 0, True)]
     ax_qry.set_xticks(selected_ol_coords)
     ax_ref.set_xticklabels(selected_ol_coords.astype(int), rotation=70)
     
-    ax_ref.set_xlabel('Coordinates')
-    ax_ref.set_ylabel('Reference coverage')
-    ax_qry.set_ylabel('Query coverage')
+    ax_ref.set_xlabel('Overlaps coordinates')
+    ax_ref.set_ylabel('Reference coverage (reads)')
+    ax_qry.set_ylabel('Query coverage (reads)')
     
-    # TODO: save plot
+    # Add plot title
+    if 'ref_title' in kwargs.keys() and 'qry_title' in kwargs.keys():
+        # only add title if both ref_title and qry_title kwargs are present
+        ax_ref.set_title(kwargs['ref_title'] + '(reference) coverage\nvs\n' + kwargs['qry_title'] + '(query) coverage')
+    
+    # Save plot
+    if 'out_file' in kwargs.keys():
+        fig.savefig(kwargs['out_file'])
 
 def plot_sample_report(report, figsize=10):
     # build pie charts for sample characterization reports

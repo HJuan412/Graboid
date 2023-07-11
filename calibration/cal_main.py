@@ -32,6 +32,9 @@ from DATA import DATA
 #%% set logger
 logger = logging.getLogger('Graboid.calibrator')
 logger.setLevel(logging.DEBUG)
+sh = logging.StreamHandler()
+sh.setLevel(logging.DEBUG)
+logger.addHandler(sh)
 
 #%% functions
 # report
@@ -347,7 +350,7 @@ class Calibrator:
         t_classification_0 = time.time()
         
         # get supports
-        for win_idx, win_package in zip(win_indexes, window_packages):
+        for win_idx, window, win_package in zip(win_indexes, win_list, window_packages):
             win_tax = self.tax_ext.loc[window.taxonomy].to_numpy() # get the taxonomic classifications for the window as an array of shape: # seqs in window, # ranks
             # get packages for a single window
             for (n, k), package in win_package.items():

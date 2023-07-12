@@ -257,3 +257,33 @@ def plot_results(report, guide, ranks, windows, metric, prefix, collapse=True, c
             handle.write(f'The following taxa yielded no {metric} scores over 0 and were ommited from the plots:\n')
             for rk, dcarded in discarded_dict.items():
                 handle.write(f'{rk} ({len(dcarded)}):\n' + '\n'.join(dcarded) + '\n')
+
+def plot_CE_results(report, ranks, windows, prefix, figsize=(12,7)):
+    
+    # build parameter labels
+    report['params'] = 'n: ' + report.n.astype(str) + ', k: ' + report.k.astype(str) + ', mtd: ' + report['method']
+    # build window labels
+    window_idxs = np.unique(report.window)
+    window_labels = [f'{w0} - {w1}' for w0, w1 in windows[window_idxs]]
+    
+    # generate a plot for each rank
+    for rk in ranks:    
+        fig, ax = plt.subplots(figsize = figsize)
+        x = report.window.values
+        y = report[rk].values
+        ax.scatter(y, x, s = 5, marker = 'o', color = 'k') #
+        ax.set_xlim(-0.5, 11) # CE values exist within the [0, 10] range
+        ax.set_yticks(window_idxs)
+        ax.set_yticklabels(window_labels)
+        ax.set_ylabel('Windows')
+        ax.set_xlabel('Cross entropy')
+        # annotate minimum
+        for win, win_subtab in report.groupby('window'):
+            best_loc = np.argmin(win_subtab[rk])
+            best_x = win_subtab[rk].min()
+            params = win_subtab.iloc[best_loc].loc['params']
+            ax.text(best_x, win + 0.3, params, size=8, ha='left')
+            ax.scatter(best_x, win, s = 5.5, marker = 'o', color = 'r')
+        ax.set_title(rk)
+        
+        fig.savefig(prefix + f'/cross_entropy_{rk}.png', format='png')

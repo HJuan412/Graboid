@@ -397,11 +397,11 @@ class Calibrator:
         post_process(self.windows, self.guide, self.ranks, met_report=rec_report)
         post_process(self.windows, self.guide, self.ranks, met_report=f1_report)
         
-        cross_entropy_report.to_csv(self.out_dir + '/cross_entropy.tsv')
-        acc_report.to_csv(self.out_dir + '/acc_report.tsv')
-        prc_report.to_csv(self.out_dir + '/prc_report.tsv')
-        rec_report.to_csv(self.out_dir + '/rec_report.tsv')
-        f1_report.to_csv(self.out_dir + '/f1_report.tsv')
+        cross_entropy_report.to_csv(self.out_dir + '/cross_entropy.csv')
+        acc_report.to_csv(self.out_dir + '/acc_report.csv')
+        prc_report.to_csv(self.out_dir + '/prc_report.csv')
+        rec_report.to_csv(self.out_dir + '/rec_report.csv')
+        f1_report.to_csv(self.out_dir + '/f1_report.csv')
         
         t_report_1 = time.time()
         logger.info(f'Finished building reports in {t_report_1 - t_report_0:.3f} seconds')
@@ -415,6 +415,7 @@ class Calibrator:
                 for mt_report, mt in zip((acc_report, prc_report, rec_report, f1_report),
                                          ('acc', 'prc', 'rec', 'f1')):
                     executor.submit(cal_plot.plot_results, mt_report, self.guide, self.ranks, win_list, mt, self.plots_dir, collapse_hm, self.custom)
+            cal_plot.plot_CE_results(cross_entropy_report, self.ranks, win_list, self.plots_dir)
             pass
         
         t_plots_1 = time.time()

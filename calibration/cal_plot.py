@@ -13,6 +13,8 @@ import matplotlib as mpl
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import re
 import seaborn as sns
 
 #%% functions
@@ -83,6 +85,7 @@ def custom_heatmap(data, annot, win_poss, cell_size, ax, cax, cmap, annot_size):
 # heatmap construction
 def build_heatmap(data,
                   param_annots,
+                  windows,
                   title,
                   metric,
                   cell_size=45,
@@ -98,7 +101,7 @@ def build_heatmap(data,
     viridis.set_bad(grey)
     
     # get column widths
-    windows = np.stack(data.columns)
+    windows = windows[data.columns]
     win_widths = windows[:,1] - windows[:,0]
     win_ratios = win_widths / win_widths.min()
     win_poss = np.concatenate([[0], np.cumsum(win_ratios)])
@@ -106,7 +109,8 @@ def build_heatmap(data,
         # ensure total width doesn't exceed that of max_cols
         sum_to_max = win_poss.sum() / max_cols
         win_poss /= sum_to_max
-        
+    column_labels = [f'{w0} - {w1}' for w0, w1 in windows]
+    
     # calculate heatmap and figure dimensions
     map_width = data.shape[1] * cell_size
     if custom:
@@ -157,7 +161,7 @@ def build_heatmap(data,
     ax_hm.set_yticks(yticks)
     ax_hm.set_yticklabels(data.index, size = ytick_size, rotation = 30, va='top')
     ax_hm.set_xticks(xticks)
-    ax_hm.set_xticklabels(data.columns, size = xtick_size, rotation=60, ha='left')
+    ax_hm.set_xticklabels(column_labels, size = xtick_size, rotation=60, ha='left')
     # relocate window labels to the top of the plot
     ax_hm.xaxis.tick_top()
     ax_hm.xaxis.set_label_position('top')
@@ -172,61 +176,84 @@ def build_heatmap(data,
     
     return fig
 
-def build_annot(params):
-    # this function generates an annotations array for a given rank's report
-    def get_annot(cell):
-        if isinstance(cell, tuple):
-            return '%d\n%d\n%s' % cell
-        return ''
-    transform = np.vectorize(get_annot)
-    annot = transform(params)
-    return annot
-
-def collapse_report(report):
-    # remove rows that have all null or 0 values
-    max_vals = report.max(axis=1)
-    filtered_taxa = max_vals.loc[max_vals > 0].index
-    rejected_taxa = max_vals.loc[max_vals == 0].index.to_numpy()
-    collapsed = report.loc[filtered_taxa]
-    return collapsed, rejected_taxa
-
-def plot_results(report, params, metric, prefix, ranks, lin_codes, collapse=True, custom=False):
-    # collapse eliminates taxa with no values over 0 to reduce heatmap size, if set to True, a file of rejected taxa is generated
-    collapse_dict = {rk:[] for rk in ranks}
-    for rk_idx, rk in enumerate(ranks):
-        rk_report = report.loc[rk].copy()
-        # add lineage codes to the rk report
-        rk_taxa = rk_report.index
-        rk_lincodes = (lin_codes.loc[rk_taxa] + ' ' + rk_taxa).values
-        rk_report.index = rk_lincodes
-        #
-        sort_taxa = np.argsort(rk_report.index)
-        rk_report = rk_report.sort_index()
-        rk_params = params[rk_idx][sort_taxa]
+def extract_data(report, guide, ranks, windows, collapse=True):
+    # Add lineage codes to the report
+    report['LinCode'] = guide.loc[report.taxID, 'LinCode'].values
+    report['lin_name'] = report.LinCode + ' ' + report.taxon
+    report.sort_values(['window', 'LinCode'], inplace=True)
+    
+    # generate data tables for each rank
+    for rk in ranks:
+        rk_report = report.loc[report['rank'] == rk]
+        lincodes = pd.unique(rk_report.lin_name)
+        
+        # initialize table of rows: taxa in rank, columns: window indexes
+        # populate each cell with the index of the report row with results for
+        # each taxon/window
+        rk_tab = pd.DataFrame(-1, index=lincodes, columns=windows, dtype=int)
+        for idx, row in rk_report.iterrows():
+            rk_tab.loc[row.lin_name, row.window] = idx
+        
+        rk_tab.sort_index(inplace=True)
+        
+        # data contains the scroe for every taxon/window
+        # annot contains the winning parameter combination for every taxon/window
+        locs = (rk_tab >= 0).to_numpy()
+        data = np.full(rk_tab.shape, np.nan)
+        annot = np.full(rk_tab.shape, np.nan, dtype=object)
+        
+        # populate data and annot
+        for col_idx, col_locs in enumerate(locs.T):
+            indexes = rk_tab.to_numpy()[col_locs, col_idx]
+            col_scores_annots = rk_report.loc[indexes, ['score', 'annotation']]
+            data[col_locs, col_idx] = col_scores_annots.score.values
+            annot[col_locs, col_idx] = col_scores_annots.annotation.values
+        
+        data = pd.DataFrame(data, index=lincodes, columns=rk_tab.columns)
+        annot = pd.DataFrame(annot, index=lincodes, columns=rk_tab.columns)
+        
+        # remove rows and columns with only empty and 0 score values
+        discarded_taxa = []
         if collapse:
-            rk_idx = rk_report.index.to_numpy()
-            rk_report, rk_rejected = collapse_report(rk_report)
-            rk_params = rk_params[(~np.isin(rk_idx, rk_rejected))]
-            collapse_dict[rk] = rk_rejected
-        rk_annot = build_annot(rk_params)
-        title = f'{metric} scores for rank: {rk}\nN\nK\nmethod (u = unweighted, w = wKNN, d = dwKNN)'
+            nonnull_locs = (rk_tab >= 0).values
+            ne_cols = nonnull_locs.sum(0) > 0
+            ne_rows = nonnull_locs.sum(1) > 0
+            
+            nonzero_locs = (data > 0).values
+            nz_cols = nonzero_locs.sum(0) > 0
+            nz_rows = nonzero_locs.sum(1) > 0
+            
+            filtered_cols = ne_cols & nz_cols
+            filtered_rows = ne_rows & nz_rows
+            
+            discarded_taxa = sorted([re.sub('^[^ ]+ ', '\t', tax) for tax in rk_tab.index.values[~filtered_rows]]) # regular expression removes the LinCode
+            data = data.loc[filtered_rows, filtered_cols]
+            annot = annot.loc[filtered_rows, filtered_cols]
+        yield rk, data, annot, discarded_taxa
+        
+def plot_results(report, guide, ranks, windows, metric, prefix, collapse=True, custom=False):
+    # collapse eliminates taxa with no values over 0 to reduce heatmap size, if set to True, a file of rejected taxa is generated
+    
+    discarded_dict = {}
+    for rank, data, annot, discarded in extract_data(report, guide, ranks, np.arange(windows.shape[0]), collapse):
+        title = f'{metric} scores for rank: {rank}\nN\nK\nmethod (u = unweighted, w = wKNN, d = dwKNN)'
         
         # heatmaps have at most 1000 rows, if a rank (usually only species, MAYBE genus) exceeds the limit, split it
-        if len(rk_report) <= 1000:
-            fig = build_heatmap(rk_report, rk_annot, title, metric, custom=custom)
-            fig.savefig(prefix + f'/{metric}_{rk}.png', format='png', bbox_inches='tight')
+        if len(data) <= 1000:
+            fig = build_heatmap(data, annot, windows, title, metric, custom=custom)
+            fig.savefig(prefix + f'/{metric}_{rank}.png', format='png', bbox_inches='tight')
             plt.close()
         else:
-            for n_subplot, subplot_idx in enumerate(np.arange(0, len(rk_report), 1000)):
-                fig = build_heatmap(rk_report.iloc[subplot_idx: subplot_idx + 1000], rk_annot[subplot_idx: subplot_idx + 1000], title, metric, custom=custom)
-                fig.savefig(prefix + f'/{metric}_{rk}.{n_subplot + 1}.png', format='png', bbox_inches='tight')
+            for n_subplot, subplot_idx in enumerate(np.arange(0, len(data), 1000)):
+                fig = build_heatmap(data.iloc[subplot_idx: subplot_idx + 1000], annot.iloc[subplot_idx: subplot_idx + 1000], windows, title, metric, custom=custom)
+                fig.savefig(prefix + f'/{metric}_{rank}.{n_subplot + 1}.png', format='png', bbox_inches='tight')
                 plt.close()
-    if collapse:
+        
+        if len(discarded) > 0:
+            discarded_dict[rank] = discarded
+            
+    if len(discarded_dict) > 0:
         with open(prefix + f'/{metric}_rejected.txt', 'w') as handle:
-            handle.write('The following taxa yielded no {metric} scores over 0 and were ommited from the plots:\n')
-            for rk in ranks:
-                if len(collapse_dict[rk]) == 0:
-                    continue
-                handle.write(f'{rk}:\n')
-                for tax in collapse_dict[rk]:
-                    handle.write(f'\t{tax}\n')
+            handle.write(f'The following taxa yielded no {metric} scores over 0 and were ommited from the plots:\n')
+            for rk, dcarded in discarded_dict.items():
+                handle.write(f'{rk} ({len(dcarded)}):\n' + '\n'.join(dcarded) + '\n')

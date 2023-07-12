@@ -7,6 +7,7 @@ Created on Tue Nov 30 11:06:10 2021
 """
 
 #%% libraries
+import concurrent.futures
 import datetime
 import glob
 import json
@@ -410,12 +411,10 @@ class Calibrator:
         t_plots_0 = time.time()
         
         if self.save:
-            # lin_codes = self.guide.set_index('SciName')['LinCode'] # use this to add lineage codes to calibration heatmaps
-            # with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
-            #     for mt_report, mt_params, mt in zip((acc_report, prc_report, rec_report, f1_report),
-            #                                         (acc_params, prc_params, rec_params, f1_params),
-            #                                         ('acc', 'prc', 'rec', 'f1')):
-            #         executor.submit(cal_plot.plot_results, mt_report, mt_params, mt, self.plots_dir, self.ranks, lin_codes, collapse_hm, self.custom)
+            with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+                for mt_report, mt in zip((acc_report, prc_report, rec_report, f1_report),
+                                         ('acc', 'prc', 'rec', 'f1')):
+                    executor.submit(cal_plot.plot_results, mt_report, self.guide, self.ranks, win_list, mt, self.plots_dir, collapse_hm, self.custom)
             pass
         
         t_plots_1 = time.time()

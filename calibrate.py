@@ -55,7 +55,7 @@ def main(out_dir,
         raise
     
     # set output directory
-    if clear:
+    if clear and os.path.isdir(out_dir):
         shutil.rmtree(out_dir)
     try:
         calibrator.set_outdir(out_dir)

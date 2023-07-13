@@ -180,6 +180,7 @@ def extract_data(report, guide, ranks, windows, collapse=True):
     # Add lineage codes to the report
     report['LinCode'] = guide.loc[report.taxID, 'LinCode'].values
     report['lin_name'] = report.LinCode + ' ' + report.taxon
+    report['annotation'] = 'n: ' + report.n.astype(str) + '\nk: ' + report.k.astype(str) + '\n' + report['method']
     report.sort_values(['window', 'LinCode'], inplace=True)
     
     # generate data tables for each rank

@@ -286,16 +286,18 @@ def collapse_params(params):
     return collapsed_params
 
 #%% classes
-class Classifier:
-    def __init__(self, out_dir, mat_code='s1v2', overwrite=False):
-        self.db = None
-        self.last_calibration = None
-        self.query_file = None
-        self.query_map_file = None
-        self.query_acc_file = None
-        self.set_cost_matrix(mat_code)
-        self.set_outdir(out_dir, overwrite)
-        self.update_meta()
+class QueryConflictException(Exception):
+    "Raised when there is a conflict with query files"
+    pass
+
+class ClassifierBase:
+    def __init__(self):
+        self.__db = None
+        self.__last_calibration = None
+        self.__query_file = None
+        self.__query_map_file = None
+        self.__query_acc_file = None
+        self.__mat_code = None
     
     @property
     def meta(self):
@@ -305,28 +307,123 @@ class Classifier:
                 'query_acc_file':self.query_acc_file,
                 'last_calibration':self.last_calibration,
                 'cost_matrix':self.mat_code}
-        
+    
+    @property
+    def db(self):
+        return self.__db
+    @db.setter
+    def db(self, db):
+        self.__db = db
+        self.update_meta()
+    
+    @property
+    def query_file(self):
+        return self.__query_file
+    @query_file.setter
+    def query_file(self, query_file):
+        self.__query_file = query_file
+        self.update_meta()
+    
+    @property
+    def query_map_file(self):
+        return self.__query_map_file
+    @query_map_file.setter
+    def query_map_file(self, query_map_file):
+        self.__query_map_file = query_map_file
+        self.update_meta()
+    
+    @property
+    def query_acc_file(self):
+        return self.__query_acc_file
+    @query_acc_file.setter
+    def query_acc_file(self, query_acc_file):
+        self.__query_acc_file = query_acc_file
+        self.update_meta()
+    
+    @property
+    def last_calibration(self):
+        return self.__last_calibration
+    @last_calibration.setter
+    def last_calibration(self, last_calibration):
+        self.__last_calibration = last_calibration
+        self.update_meta()
+    
+    @property
+    def mat_code(self):
+        return self.__mat_code
+    @mat_code.setter
+    def mat_code(self, mat_code):
+        self.__mat_code = mat_code
+        self.update_meta()
+    
     def update_meta(self):
         with open(self.out_dir + '/meta.json', 'w') as handle:
             json.dump(self.meta, handle)
-    
-    def set_cost_matrix(self, mat_code):
-        self.mat_code = mat_code
-        self.cost_matrix = cost_matrix.get_matrix(mat_code)
         
-    def set_database(self, database):
+class Classifier(ClassifierBase):    
+    def set_outdir(self, out_dir, overwrite=False):
+        self.out_dir = out_dir
+        self.calibration_dir = out_dir + '/calibration'
+        self.classif_dir = out_dir + '/classification'
+        self.query_dir = out_dir + '/query'
+        self.warn_dir = out_dir + '/warnings'
+        
+        warn_handler = logging.FileHandler(self.warn_dir + '/warnings.log')
+        warn_handler.setLevel(logging.WARNING)
+        logger.addHandler(warn_handler)
+        
+        if os.path.isdir(out_dir):
+            # out dir already exists
+            if overwrite:
+                shutil.rmtree(out_dir)
+            else:
+                try:
+                    with open(out_dir + '/meta.json', 'r') as handle:
+                        meta = json.load(handle)
+                        self.set_database(meta['db'])
+                        self.set_cost_matrix(meta['mat_code'])
+                        self.last_calibration = meta['last_calibration']
+                        self.query_file = meta['query_file']
+                        self.query_map_file = meta['query_map_file']
+                        self.query_acc_file = meta['query_acc_file']
+                        self.load_query()
+                except FileNotFoundError:
+                    raise Exception('Specified output directory exists but cannot be verified as a Graboid classification directory. Recommend overwrtiting it or using a different name')
+                    # TODO: maybe include the option of verifying if it is a classif dir with a damaged/mising meta file
+        # create directories (if absent or set to overwrite)
+        os.makedirs(self.calibration_dir, exist_ok=True)
+        os.makedirs(self.classif_dir, exist_ok=True)
+        os.makedirs(self.query_dir, exist_ok=True)
+        os.makedirs(self.warn_dir, exist_ok=True)
+    
+    def set_cost_matrix(self, mat_code=None):
+        if mat_code is None:
+            # no code provided, do nothing
+            return
+        if self.mat_code is None:
+            # no code set, set new cost matrix
+            self.mat_code = mat_code
+            self.cost_matrix = cost_matrix.get_matrix(mat_code)
+            return
+        if self.mat_code != mat_code:
+            # conflict, issue warning
+            raise Exception(f'Working directory {self.out_dir} is set to use the cost matrix {self.mat_code}. Conflict with proposed cost matrix {mat_code}. To use a different cost matrix, select a different working directory or overwrite the current one (This will delete all Calibration and Classification data in the current directory).')
+        # all conditions passed, existing mat_code and proposed mat_code match, do nothing
+        
+    def set_database(self, database=None):
         # verify that given database is valid and there isn't another database already set
+        if database is None:
+            # no database provided, do nothing
+            return
         if not self.db is None and self.db != database:
-            raise Exception(f'Working directory {self.out_dir} already has a graboid database set: {self.db}. To use a different database, select a different working directory or overwrite the current one.')
+            raise Exception(f'Working directory {self.out_dir} is set to use the graboid database {self.db}. Conflict with proposed database {database}. To use a different database, select a different working directory or overwrite the current one (This will delete all Calibration and Classification data in the current directory).')
         try:
             self.db_dir = DATA.get_database(database)
         except Exception as excp:
             raise excp
-        # log database and update meta
-        if self.db is None:
-            # only update db attribute and meta when the database is set for the first time
-            self.db = database
-            self.update_meta()
+        
+        # log database
+        self.db = database
         # use meta file from database to locate necessary files
         with open(self.db_dir + '/meta.json', 'r') as meta_handle:
             db_meta = json.load(meta_handle)
@@ -356,12 +453,16 @@ class Classifier:
         self.tax_tab.index = tax_tab.index
     
     # load and map query file
-    def set_query(self, query_file, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1):
+    def set_query(self, query_file, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1, overwrite=False):
+        if query_file is None:
+            return
         if self.db is None:
             raise Exception('You must set a Graboid databse before loading a query file.')
+        
         if not self.query_file is None and query_file != self.query_file:
-            # a query is already set, raise a warning
-            raise Warning(f'Attempted to set {query_file} as query over existing one {self.query_file}. To use a different query, use a different working directory or overwrite the current one')
+            if not overwrite:
+                # a query is already set, raise a warning
+                raise QueryConflictException(f'Attempted to set {query_file} as query over existing one {self.query_file}. To use a different query, use a different working directory or overwrite the current one (This will delete all Calibration and Classification data in the current directory).')
         # map query to the same reference sequence of the database
         map_file, acc_file, blast_report, acc_list, bounds, matrix, coverage, mesas = map_query(self.query_dir,
                                                                                                 self.warn_dir,
@@ -381,42 +482,6 @@ class Classifier:
         self.query_matrix = matrix
         self.query_coverage = coverage
         self.query_mesas = mesas
-        self.update_meta()
-        
-    def set_outdir(self, out_dir, overwrite=False):
-        self.out_dir = out_dir
-        self.calibration_dir = out_dir + '/calibration'
-        self.classif_dir = out_dir + '/classification'
-        self.query_dir = out_dir + '/query'
-        self.warn_dir = out_dir + '/warnings'
-        
-        if overwrite:
-            try:
-                shutil.rmtree(out_dir)
-            except FileNotFoundError:
-                pass
-        if os.path.isdir(out_dir):
-            # out dir already exists
-            try:
-                with open(out_dir + '/meta.json', 'r') as handle:
-                    meta = json.load(handle)
-                    self.db = meta['db']
-                    self.set_database(meta['db'])
-                    self.last_calibration = meta['last_calibration']
-                    self.query_file = meta['query_file']
-                    self.query_map_file = meta['query_map_file']
-                    self.query_acc_file = meta['query_acc_file']
-                    self.load_query()
-            except FileNotFoundError:
-                raise Exception('Specified output directory exists but cannot be verified as a Graboid classification directory. Recommend overwrtiting it or using a different name')
-                # TODO: maybe include the option of verifying if it is a classif dir with a damaged/mising meta file
-        else:
-            os.mkdir(out_dir)
-            # make a directory to store classification reports
-            os.makedirs(self.calibration_dir)
-            os.makedirs(self.classif_dir)
-            os.makedirs(self.query_dir)
-            os.makedirs(self.warn_dir)
     
     def load_query(self):
         if self.query_file is None:
@@ -488,7 +553,6 @@ class Classifier:
                                collapse_hm=True,
                                threads=threads)
         self.last_calibration = calibrator.out_dir
-        self.update_meta()
     
     # select parameters
     def select_params(self, cal_dir=None, metric='f1', *taxa):

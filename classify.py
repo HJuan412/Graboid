@@ -29,6 +29,40 @@ from classification import cls_plots
 # perform custom calibration of overlapping reions
 # classify query
 
+
+def preparation0(out_dir,
+                 mat_code,
+                 database,
+                 query,
+                 qry_evalue=0.005,
+                 qry_dropoff=0.05,
+                 qry_min_height=0.1,
+                 qry_min_width=2,
+                 min_overlap_width=10,
+                 overwrite=False,
+                 qry_overwrite=False,
+                 plot=True,
+                 threads=1):
+    classifier = cls_main.Classifier()
+    classifier.set_outdir(out_dir, overwrite)
+    classifier.set_cost_matrix(mat_code)
+    classifier.set_database(database)
+    
+    # Query
+    try:
+        classifier.set_query(query, qry_evalue, qry_dropoff, qry_min_height, qry_min_width, threads, qry_overwrite)
+        if plot:
+            cls_plots.plot_ref_v_qry(classifier.ref_coverage,
+                                     classifier.ref_mesas,
+                                     classifier.qry_coverage,
+                                     classifier.qry_mesas,
+                                     classifier.overlaps,
+                                     ref_title = classifier.db,
+                                     qry_title = classifier.query_file,
+                                     out_file = classifier.out_dir + '/coverage.png')
+    except cls_main.QueryConflictException as qce:
+        raise qce + '. Use the -Q <query file> option to force query overwrite'
+    
 def preparation(classifier, database=None, query=None, qry_evalue=0.005, qry_dropoff=0.05, qry_min_height=0.1, qry_min_width=2, min_overlap_width=10, threads=1, plot=True):
     # preparation steps, set database and query
     if not database is None:
@@ -203,7 +237,9 @@ parser.add_argument('--method',
 if __name__ == '__main__':
     args = parser.parse_args()
     # initialize classifier
-    classifier = cls_main.Classifier(args.out_dir, args.overwrite)
+    classifier = cls_main.Classifier()
+    classifier.set_outdir(args.out_dir, args.overwrite)
+    classifier.set_cost_matrix(args.mat_code)
     
     # preparation
     preparation(classifier,

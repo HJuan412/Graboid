@@ -117,21 +117,16 @@ def operation_classify(classifier, w_start, w_end, n, k, rank, row_thresh, col_t
 
 #%%
 parser = argparse.ArgumentParser(prog='Graboid CLASSIFY',
-                                 usage='%(prog)s MODE_ARGS [-h]',
-                                 description='Graboid CLASSIFY loads a query fasta file, checks overlapps to a reference sequence, and classifies')
+                                 description='Common parameters for GRABOID CLASSIFY operations:')
 parser.add_argument('out_dir',
                     help='Working directory for the classification run',
                     type=str)
 parser.add_argument('--overwrite',
                     help='Overwrite provided working directory (if present)',
                     action='store_true')
-parser.add_argument('--calibrate',
-                    help='Perform a custom calibration operation',
-                    action='store_true')
-parser.add_argument('--classify',
-                    help='Classify the provided query',
-                    action='store_true')
+
 # preparation arguments
+parser.set_defaults(mode='prep')
 parser.add_argument('-db', '--database',
                     help='Database to be used in the classification',
                     type=str)
@@ -156,13 +151,17 @@ parser.add_argument('--min_width',
                     default=2)
 
 # common arguments
-parser.add_argument('-dm', '--dist_mat',
-                    default='id',
-                    help='Distance matrix to be used for distance calculation. Valid codes: "id" and "s<int>v<int>". Default: id',
-                    type=str)
+parser.add_argument('-s', '--transition',
+                    default=1,
+                    help='Cost for transition-type substitutions (A <-> T, C <-> G)',
+                    type=float)
+parser.add_argument('-v', '--transversion',
+                    default=1,
+                    help='Cost for transversion-type substitutions (A/T <-> C/G)',
+                    type=float)
 parser.add_argument('-rk', '--rank',
                     default='genus',
-                    help='Rank to be used for feature selection. Default: genus',
+                    help='Taxonomic rank to be used for feature selection. Default: genus',
                     type=str)
 parser.add_argument('-rt', '--row_thresh',
                     default=0.2,
@@ -185,57 +184,69 @@ parser.add_argument('--criterion',
                     type=str,
                     default='orbit')
 
+subparsers = parser.add_subparsers(title='Operations')
+cal_parser = subparsers.add_parser('calibrate',
+                                   prog='graboid CLASSIFY [common options]',
+                                   help='Perform a custom calibration operation',
+                                   description='Parameters specific to the calibration operation:')
+cls_parser = subparsers.add_parser('classify',
+                                   prog='graboid CLASSIFY [common options]',
+                                   help='Classify the provided query',
+                                   description='Parameters specific to the classification operation:')
+
 # calibration arguments
-parser.add_argument('-ow', '--min_overlap_width',
-                    default=10,
-                    help='Minimum overlap width betwen reference and query mesas. Default: 10',
-                    type=int)
-parser.add_argument('-mn', '--max_n',
-                    default=30,
-                    help='Max value of n. Default: 30',
-                    type=int)
-parser.add_argument('-sn', '--step_n',
-                    default=5,
-                    help='Rate of increase of n. Default: 5',
-                    type=int)
-parser.add_argument('-mk', '--max_k',
-                    default=15,
-                    help='Max value of K. Default: 15',
-                    type=int)
-parser.add_argument('-sk', '--step_k',
-                    default=2,
-                    help='Rate of increase of K. Default: 2',
-                    type=int)
-parser.add_argument('-nk', '--min_k',
-                    default=1,
-                    help='Min value of K. Default: 1',
-                    type=int)
-parser.add_argument('-nn', '--min_n',
-                    default=5,
-                    help='Min value of n. Default: 5',
-                    type=int)
+cal_parser.set_defaults(mode='calibrate')
+cal_parser.add_argument('-ow', '--min_overlap_width',
+                        default=10,
+                        help='Minimum overlap width betwen reference and query mesas. Default: 10',
+                        type=int)
+cal_parser.add_argument('-mn', '--max_n',
+                        default=30,
+                        help='Max value of n. Default: 30',
+                        type=int)
+cal_parser.add_argument('-sn', '--step_n',
+                        default=5,
+                        help='Rate of increase of n. Default: 5',
+                        type=int)
+cal_parser.add_argument('-mk', '--max_k',
+                        default=15,
+                        help='Max value of K. Default: 15',
+                        type=int)
+cal_parser.add_argument('-sk', '--step_k',
+                        default=2,
+                        help='Rate of increase of K. Default: 2',
+                        type=int)
+cal_parser.add_argument('-nk', '--min_k',
+                        default=1,
+                        help='Min value of K. Default: 1',
+                        type=int)
+cal_parser.add_argument('-nn', '--min_n',
+                        default=5,
+                        help='Min value of n. Default: 5',
+                        type=int)
 
 # classification arguments
-parser.add_argument('-ws', '--w_start',
-                    help='Start coordinate for the classification window',
-                    type=int)
-parser.add_argument('-we', '--w_end',
-                    help='End coordinate for the classification window',
-                    type=int)
-parser.add_argument('-n',
-                    help='Number of informative sites to be used in the classification',
-                    type=int)
-parser.add_argument('-k',
-                    help='Number of neighbours to include in the classification',
-                    type=int)
-parser.add_argument('--method',
-                    help='Weighting method. Default: unweighted',
-                    type=str,
-                    default='unweighted')
+cls_parser.set_defaults(mode='classify')
+cls_parser.add_argument('-ws', '--w_start',
+                        help='Start coordinate for the classification window',
+                        type=int)
+cls_parser.add_argument('-we', '--w_end',
+                        help='End coordinate for the classification window',
+                        type=int)
+cls_parser.add_argument('-n',
+                        help='Number of informative sites to be used in the classification',
+                        type=int)
+cls_parser.add_argument('-k',
+                        help='Number of neighbours to include in the classification',
+                        type=int)
+cls_parser.add_argument('--method',
+                        help='Weighting method. Default: unweighted',
+                        type=str,
+                        default='unweighted')
 
 #%% classify
 if __name__ == '__main__':
-    args = parser.parse_args()
+    args, unk = parser.parse_known_args()
     # initialize classifier
     classifier = cls_main.Classifier()
     classifier.set_outdir(args.out_dir, args.overwrite)
@@ -252,7 +263,7 @@ if __name__ == '__main__':
                 threads = args.threads)
     
     # operation: calibration
-    if args.calibrate:
+    if args.mode == 'calibrate':
         operation_calibrate(classifier,
                             min_overlap_width = args.min_overlap_width,
                             max_n = args.max_n,
@@ -269,7 +280,7 @@ if __name__ == '__main__':
                             threads = args.threads)
     
     # operation: classification
-    if args.classify:
+    if args.mode == 'classify':
         operation_classify(classifier,
                            w_start = args.w_start,
                            w_end = args.w_end,

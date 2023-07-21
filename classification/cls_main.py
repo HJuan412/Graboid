@@ -286,10 +286,6 @@ def collapse_params(params):
     return collapsed_params
 
 #%% classes
-class QueryConflictException(Exception):
-    "Raised when there is a conflict with query files"
-    pass
-
 class ClassifierBase:
     def __init__(self):
         self.__db = None
@@ -297,7 +293,8 @@ class ClassifierBase:
         self.__query_file = None
         self.__query_map_file = None
         self.__query_acc_file = None
-        self.__mat_code = None
+        self.__transition = None
+        self.__transversion = None
     
     @property
     def meta(self):
@@ -306,7 +303,8 @@ class ClassifierBase:
                 'query_map_file':self.query_map_file,
                 'query_acc_file':self.query_acc_file,
                 'last_calibration':self.last_calibration,
-                'cost_matrix':self.mat_code}
+                'transition':self.transition,
+                'transversion':self.transversion}
     
     @property
     def db(self):
@@ -349,11 +347,19 @@ class ClassifierBase:
         self.update_meta()
     
     @property
-    def mat_code(self):
-        return self.__mat_code
-    @mat_code.setter
-    def mat_code(self, mat_code):
-        self.__mat_code = mat_code
+    def transition(self):
+        return self.__transition
+    @transition.setter
+    def transition(self, transition):
+        self.__transition = transition
+        self.update_meta()
+    
+    @property
+    def transversion(self):
+        return self.__transversion
+    @transversion.setter
+    def transversion(self, transversion):
+        self.__transversion = transversion
         self.update_meta()
     
     def update_meta(self):
@@ -381,7 +387,7 @@ class Classifier(ClassifierBase):
                     with open(out_dir + '/meta.json', 'r') as handle:
                         meta = json.load(handle)
                         self.set_database(meta['db'])
-                        self.set_cost_matrix(meta['mat_code'])
+                        self.set_cost_matrix(meta['transition'], meta['transversion'])
                         self.last_calibration = meta['last_calibration']
                         self.query_file = meta['query_file']
                         self.query_map_file = meta['query_map_file']
@@ -396,20 +402,11 @@ class Classifier(ClassifierBase):
         os.makedirs(self.query_dir, exist_ok=True)
         os.makedirs(self.warn_dir, exist_ok=True)
     
-    def set_cost_matrix(self, mat_code=None):
-        if mat_code is None:
-            # no code provided, do nothing
-            return
-        if self.mat_code is None:
-            # no code set, set new cost matrix
-            self.mat_code = mat_code
-            self.cost_matrix = cost_matrix.get_matrix(mat_code)
-            return
-        if self.mat_code != mat_code:
-            # conflict, issue warning
-            raise Exception(f'Working directory {self.out_dir} is set to use the cost matrix {self.mat_code}. Conflict with proposed cost matrix {mat_code}. To use a different cost matrix, select a different working directory or overwrite the current one (This will delete all Calibration and Classification data in the current directory).')
-        # all conditions passed, existing mat_code and proposed mat_code match, do nothing
-        
+    def set_cost_matrix(self, transition, transversion):
+        self.transition = transition
+        self.transversion = transversion
+        self.cost_matrix = cost_matrix.cost_matrix(transition, transversion)
+    
     def set_database(self, database=None):
         # verify that given database is valid and there isn't another database already set
         if database is None:
@@ -453,16 +450,12 @@ class Classifier(ClassifierBase):
         self.tax_tab.index = tax_tab.index
     
     # load and map query file
-    def set_query(self, query_file, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1, overwrite=False):
+    def set_query(self, query_file, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1):
         if query_file is None:
             return
         if self.db is None:
             raise Exception('You must set a Graboid databse before loading a query file.')
         
-        if not self.query_file is None and query_file != self.query_file:
-            if not overwrite:
-                # a query is already set, raise a warning
-                raise QueryConflictException(f'Attempted to set {query_file} as query over existing one {self.query_file}. To use a different query, use a different working directory or overwrite the current one (This will delete all Calibration and Classification data in the current directory).')
         # map query to the same reference sequence of the database
         map_file, acc_file, blast_report, acc_list, bounds, matrix, coverage, mesas = map_query(self.query_dir,
                                                                                                 self.warn_dir,

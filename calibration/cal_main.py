@@ -163,7 +163,20 @@ def report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_fi
         handle.write(sep)
         handle.write(f'Extended site report: {ext_site_report}\n')
         handle.write(repr(sites_tab))
-        
+
+def report_taxa(windows, win_indexes, ranks):
+    rk_dict = {rk:idx for idx,rk in enumerate(ranks)}
+    def rk_sort(rk):
+        return rk_dict[rk]
+    rk_sort_V = np.vectorize(rk_sort)
+    merged_taxa = pd.concat([win.taxonomy for win in windows])
+    unique_taxa = merged_taxa.loc[~merged_taxa.taxon.duplicated()].sort_values('rank', key=rk_sort_V)
+    report_tab = unique_taxa.set_index('taxon')
+    report_tab[win_indexes] = 0
+    for win_idx, window in zip(win_indexes, windows):
+        counts = window.taxon.value_counts()
+        report_tab.loc[counts.index, win_idx] = counts.values
+    return report_tab
 #%% classes
 class Calibrator:
     def __init__(self, out_dir=None):

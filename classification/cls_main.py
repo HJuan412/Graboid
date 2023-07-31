@@ -192,7 +192,7 @@ def get_params_ce(report, ranks):
             continue
         
     best_params = pd.concat((selected_params.loc[filtered_idxs], next_best_tab))[['rank', 'window', 'w_start', 'w_end', 'n', 'k', 'method', 'cross_entropy']] # reorganize columns
-    return best_params, [] # empty dict used for compatibility with get_params_met
+    return best_params, [] # empty list used for compatibility with get_params_met
 
 def get_params_met(taxa, report):
     """
@@ -223,7 +223,7 @@ def get_params_met(taxa, report):
         # locate occurrences of tax in the report. Generate a warning if tax is absent or its best score is 0
         tax_subtab = report.loc[report.taxon == tax]
         if tax_subtab.shape[0] == 0:
-            warnings[tax] = f'{tax} not found in the given report'
+            warnings.append(f'{tax} not found in the given report')
             continue
         best_score = tax_subtab.score.max()
         if best_score == 0:

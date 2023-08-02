@@ -164,19 +164,32 @@ def report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_fi
         handle.write(f'Extended site report: {ext_site_report}\n')
         handle.write(repr(sites_tab))
 
-def report_taxa(windows, win_indexes, ranks):
-    rk_dict = {rk:idx for idx,rk in enumerate(ranks)}
-    def rk_sort(rk):
-        return rk_dict[rk]
-    rk_sort_V = np.vectorize(rk_sort)
-    merged_taxa = pd.concat([win.taxonomy for win in windows])
-    unique_taxa = merged_taxa.loc[~merged_taxa.taxon.duplicated()].sort_values('rank', key=rk_sort_V)
-    report_tab = unique_taxa.set_index('taxon')
-    report_tab[win_indexes] = 0
-    for win_idx, window in zip(win_indexes, windows):
-        counts = window.taxon.value_counts()
-        report_tab.loc[counts.index, win_idx] = counts.values
-    return report_tab
+def report_taxa(windows, win_indexes, guide, guide_ext, report_file):
+    # Count the number of instances of each taxon per window
+    
+    # get taxids for each window
+    merged_guides = pd.concat([guide_ext.loc[win.taxonomy] for win in windows])
+    uniq_idxs = []
+    for rk, row in merged_guides.T.iterrows():
+        uniq_idxs.append(row.dropna().unique())
+    count_tab = pd.DataFrame(0, index = np.concatenate(uniq_idxs), columns=win_indexes)
+    
+    # for count instances of each taxon (high level taxa include representatives of child taxa)
+    for win_idx, win in zip(win_indexes, windows):
+        win_tax = guide_ext.loc[win.taxonomy]
+        for rk, row in win_tax.T.iterrows():
+            counts = row.value_counts()
+            count_tab.loc[counts.index, win_idx] = counts.values
+    
+    # update headers
+    count_tab['Rank'] = guide.loc[count_tab.index, 'Rank']
+    count_tab['Taxon'] = guide.loc[count_tab.index, 'SciName']
+    count_tab = count_tab.set_index(['Taxon', 'Rank'])
+    count_tab.columns = pd.MultiIndex.from_tuples([(win.start, win.end) for win in windows], names=['w_start', 'w_end'])
+    
+    # save report
+    count_tab.to_csv(report_file)
+    
 #%% classes
 class Calibrator:
     def __init__(self, out_dir=None):
@@ -303,7 +316,8 @@ class Calibrator:
         # initialize grid search report report
         date = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
         report_file = self.out_dir + '/GS_report.txt'
-        ext_site_report = self.out_dir + '/sites_report.tsv'
+        ext_site_report = self.out_dir + '/sites_report.csv'
+        tax_report = self.out_dir + '/taxa_report.csv'
         report_params(date, self.db, n_range, k_range, criterion, row_thresh, col_thresh, min_seqs, rank, threads, report_file)
         
         logger.info('Beginning calibration...')
@@ -313,6 +327,7 @@ class Calibrator:
         logger.info('Collapsing windows...')
         win_indexes, win_list, rej_indexes, rej_list = cal_preprocess.collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
         report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file)
+        report_taxa(win_list, win_indexes, self.guide, self.tax_ext, tax_report)
         
         t_collapse_1 = time.time()
         logger.info(f'Collapsed {len(win_list)} of {len(self.windows)} windows in {t_collapse_1 - t_collapse_0:.3f} seconds')

@@ -32,15 +32,18 @@ from classification import cls_plots
 # classify query
 
 def is_graboid_dir(path):
-    # proposed directory must contain only the expected contents
+    # proposed directory must contain only the expected contents (or be empty)
     exp_contents = {'calibration', 'classification', 'query', 'meta.json'}
     dir_contents = set(os.path.listdir(path))
+    if len(dir_contents) == 0:
+        # directory exists but it's empty
+        return
     not_found = exp_contents.difference(dir_contents)
     not_belong = dir_contents.difference(exp_contents)
     check = True
-    warn_text = 'Inconsistencies found: '
+    warn_text = 'Inconsistencies found:\n'
     if len(not_found) > 0:
-        warn_text += f'Missing expected elements: {not_found}.'
+        warn_text += f'Missing expected elements: {not_found}.\n'
         check = False
     if len(not_belong) > 0:
         warn_text += f'Found extraneous elements: {not_belong}.'
@@ -51,17 +54,16 @@ def is_graboid_dir(path):
     raise Exception(warn_text)
 
 def preparation(out_dir,
-                transition,
-                transversion,
                 database,
                 query,
-                qry_evalue=0.005,
-                qry_dropoff=0.05,
-                qry_min_height=0.1,
-                qry_min_width=2,
+                transition,
+                transversion,
+                evalue=0.005,
+                dropoff=0.05,
+                min_height=0.1,
+                min_width=2,
                 min_overlap_width=10,
                 overwrite=False,
-                overwrite_force=False,
                 threads=1):
     
     # set up graboid database and query file
@@ -71,11 +73,7 @@ def preparation(out_dir,
         try:
             is_graboid_dir(out_dir)
         except Exception as excp:
-            if overwrite_force:
-                shutil.rmtree(out_dir)
-                overwrite = True # just in case
-            else:
-                raise excp + '\nProposed directory cannot be assertained as agraboid directory. Overwrite at your own risk with option --OVERWRITE'
+            raise 'Proposed directory cannot be assertained as a graboid directory\n' + excp
         
         if overwrite:
             shutil.rmtree(out_dir, ignore_errors=True)
@@ -87,13 +85,18 @@ def preparation(out_dir,
     try:
         classifier.set_database(database)
     except Exception as excp:
-        # invalid database remove generated riectories
+        # invalid database remove generated directories
         shutil.rmtree(out_dir)
         raise excp
     classifier.set_cost_matrix(transition, transversion)
     
     # Query
-    classifier.set_query(query, qry_evalue, qry_dropoff, qry_min_height, qry_min_width, threads)
+    classifier.set_query(query,
+                         evalue,
+                         dropoff,
+                         min_height,
+                         min_width,
+                         threads)
     classifier.get_overlaps(min_overlap_width)
     cls_plots.plot_ref_v_qry(classifier.ref_coverage,
                              classifier.ref_mesas,
@@ -104,53 +107,37 @@ def preparation(out_dir,
                              qry_title = classifier.query_file,
                              out_file = classifier.query_dir + '/coverage.png')
 
-def operation_calibrate(classifier, min_overlap_width, max_n, step_n, max_k, step_k, row_thresh, col_thresh, min_seqs, rank, min_n, min_k, criterion, threads, **kwargs):
-    classifier.get_overlaps(min_overlap_width)
-    classifier.custom_calibrate(max_n,
-                                step_n,
-                                max_k,
-                                step_k,
-                                row_thresh,
-                                col_thresh,
-                                min_seqs,
-                                rank,
-                                min_n,
-                                min_k,
-                                criterion,
-                                threads,
-                                **kwargs)
-
-def operation_classify(classifier, w_start, w_end, n, k, rank, row_thresh, col_thresh, min_seqs, criterion, method):
-    classifier.classify(w_start, w_end, n, k, rank, row_thresh, col_thresh, min_seqs, criterion, method)
-
 #%%
 parser = argparse.ArgumentParser(prog='Graboid CLASSIFY',
                                  description='Common parameters for GRABOID CLASSIFY operations:')
-parser.add_argument('out_dir',
-                    help='Working directory for the classification run',
-                    type=str)
-
-# common arguments
-parser.add_argument('--criterion',
-                    help='Criterion for neighbour selection. Default: orbit',
-                    type=str,
-                    default='orbit')
 
 subparsers = parser.add_subparsers(title='Operations')
 prp_parser = subparsers.add_parser('prep',
                                    help='Prepare graboid working directory',
-                                   description='Set up working directory, select graboid database, load and map query file')
+                                   description='Set up working directory, select graboid database, load and map query file',
+                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 cal_parser = subparsers.add_parser('calibrate',
                                    prog='graboid CLASSIFY [common options]',
                                    help='Perform a custom calibration operation',
-                                   description='Parameters specific to the calibration operation')
+                                   description='Parameters specific to the calibration operation',
+                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 cls_parser = subparsers.add_parser('classify',
                                    prog='graboid CLASSIFY [common options]',
                                    help='Classify the provided query',
-                                   description='Parameters specific to the classification operation')
+                                   description='Parameters specific to the classification operation',
+                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 # preparation arguments
 prp_parser.set_defaults(mode='prep')
+prp_parser.add_argument('out_dir',
+                        help='Working directory',
+                        type=str)
+prp_parser.add_argument('database',
+                        help='Database to be used in the classification',
+                        type=str)
+prp_parser.add_argument('query',
+                        help='Query file in FASTA format',
+                        type=str)
 prp_parser.add_argument('-s', '--transition',
                         default=1,
                         help='Cost for transition-type substitutions (A <-> T, C <-> G)',
@@ -159,117 +146,98 @@ prp_parser.add_argument('-v', '--transversion',
                         default=1,
                         help='Cost for transversion-type substitutions (A/T <-> C/G)',
                         type=float)
-prp_parser.add_argument('database',
-                        help='Database to be used in the classification',
-                        type=str)
-prp_parser.add_argument('query',
-                        help='Query file in FASTA format',
-                        type=str)
 prp_parser.add_argument('--evalue',
                         default=0.005,
-                        help='E-value threshold for the BLAST matches when mapping the query file. Default: 0.005',
+                        help='E-value threshold for the BLAST matches when mapping the query file',
                         type=float)
 prp_parser.add_argument('--dropoff',
-                        help='Percentage of mesa height drop to determine a border. Default: 0.05',
+                        help='Maximum coverage drop threshold for mesa candidates (percentage of maximum coverage)',
                         type=float,
                         default=0.05)
 prp_parser.add_argument('--min_height',
-                        help='Minimum sequence coverage to consider for a mesa candidate (percentage of maximum coverage). Default: 0.1',
+                        help='Minimum coverage threshold for mesa candidates (percentage of maximum coverage)',
                         type=float,
                         default=0.1)
 prp_parser.add_argument('--min_width',
-                        help='Minimum width needed for a mesa candidate to register. Default: 2',
+                        help='Minimum width threshold for mesa candidates',
                         type=int,
                         default=2)
-prp_parser.add_argument('-ow', '--min_overlap_width',
+prp_parser.add_argument('--min_overlap_width',
                         default=10,
-                        help='Minimum overlap width betwen reference and query mesas. Default: 10',
+                        help='Minimum overlap width betwen reference and query mesas',
                         type=int)
 prp_parser.add_argument('--overwrite',
-                        help='Overwrite provided working directory (if present). All existing calibration and classification data will be lost',
+                        help='Overwrite provided working directory (if present). WARNING: All existing calibration and classification data will be lost',
                         action='store_true')
-prp_parser.add_argument('--force_overwrite',
-                        help='Overwrite working directory, even if it is not a graboid directory. WARNING: the established directory will be deleted, do this at your own risk')
 prp_parser.add_argument('--threads',
-                        help='Threads to use when building the alignment. Default: 1',
+                        help='Threads to use when building the alignment',
                         type=int,
                         default=1)
 
-prp_parser.add_argument('-rk', '--rank',
-                        default='genus',
-                        help='Taxonomic rank to be used for feature selection. Default: genus',
-                        type=str)
-prp_parser.add_argument('-rt', '--row_thresh',
-                        default=0.2,
-                        help='Empty row threshold. Default: 0.2',
-                        type=float)
-prp_parser.add_argument('-ct', '--col_thresh',
-                        default=0.2,
-                        help='Empty column threshold. Default: 0.2',
-                        type=float)
-prp_parser.add_argument('-ms', '--min_seqs',
-                        default=10,
-                        help='Minimum number of sequences allowed per taxon. Default: 10',
-                        type=int)
-
-
 # calibration arguments
 cal_parser.set_defaults(mode='calibrate')
+cal_parser.add_argument('out_dir',
+                        help='Working directory',
+                        type=str)
 cal_parser.add_argument('-ow', '--min_overlap_width',
                         default=10,
-                        help='Minimum overlap width betwen reference and query mesas. Default: 10',
+                        help='Minimum overlap width betwen reference and query mesas',
                         type=int)
 cal_parser.add_argument('-mn', '--max_n',
                         default=30,
-                        help='Max value of n. Default: 30',
+                        help='Max value of n',
                         type=int)
 cal_parser.add_argument('-sn', '--step_n',
                         default=5,
-                        help='Rate of increase of n. Default: 5',
+                        help='Rate of increase of n',
                         type=int)
 cal_parser.add_argument('-mk', '--max_k',
                         default=15,
-                        help='Max value of K. Default: 15',
+                        help='Max value of K',
                         type=int)
 cal_parser.add_argument('-sk', '--step_k',
                         default=2,
-                        help='Rate of increase of K. Default: 2',
+                        help='Rate of increase of K',
                         type=int)
 cal_parser.add_argument('-rt', '--row_thresh',
-                        default=0.2,
-                        help='Empty row threshold. Default: 0.2',
+                        default=0.1,
+                        help='Maximum empty row threshold',
                         type=float)
 cal_parser.add_argument('-ct', '--col_thresh',
-                        default=0.2,
-                        help='Empty column threshold. Default: 0.2',
+                        default=0.1,
+                        help='Maximum empty column threshold',
                         type=float)
 cal_parser.add_argument('-ms', '--min_seqs',
                         default=10,
-                        help='Minimum number of sequences allowed per taxon. Default: 10',
+                        help='Minimum number of sequences allowed per taxon',
                         type=int)
 cal_parser.add_argument('-rk', '--rank',
                         default='genus',
-                        help='Taxonomic rank to be used for feature selection. Default: genus',
+                        help='Taxonomic rank to be used for feature selection',
                         type=str)
 cal_parser.add_argument('-nk', '--min_k',
                         default=1,
-                        help='Min value of K. Default: 1',
+                        help='Min value of K',
                         type=int)
 cal_parser.add_argument('-nn', '--min_n',
                         default=5,
-                        help='Min value of n. Default: 5',
+                        help='Min value of n',
                         type=int)
 cal_parser.add_argument('--criterion',
-                        help='Criterion for neighbour selection. Default: orbit',
+                        choices=['orbit', 'neighbour'],
+                        help='Criterion for neighbour sampling',
                         type=str,
                         default='orbit')
-prp_parser.add_argument('--threads',
-                        help='Threads to use when performing the calibration. Default: 1',
+cal_parser.add_argument('--threads',
+                        help='Threads to use when performing the calibration',
                         type=int,
                         default=1)
 
 # classification arguments
 cls_parser.set_defaults(mode='classify')
+cls_parser.add_argument('out_dir',
+                        help='Working directory',
+                        type=str)
 cls_parser.add_argument('-ws', '--w_start',
                         help='Start coordinate for the classification window',
                         type=int)
@@ -284,78 +252,81 @@ cls_parser.add_argument('-k',
                         type=int)
 cls_parser.add_argument('-rk', '--rank',
                         default='genus',
-                        help='Taxonomic rank to be used for feature selection. Default: genus',
+                        help='Taxonomic rank to be used for feature selection',
                         type=str)
 cls_parser.add_argument('-rt', '--row_thresh',
-                        default=0.2,
-                        help='Empty row threshold. Default: 0.2',
+                        default=0.1,
+                        help='Maximum empty row threshold',
                         type=float)
 cls_parser.add_argument('-ct', '--col_thresh',
-                        default=0.2,
-                        help='Empty column threshold. Default: 0.2',
+                        default=0.1,
+                        help='Maximum empty column threshold',
                         type=float)
 cls_parser.add_argument('-ms', '--min_seqs',
                         default=10,
-                        help='Minimum number of sequences allowed per taxon. Default: 10',
+                        help='Minimum number of sequences allowed per taxon',
                         type=int)
 cls_parser.add_argument('--criterion',
-                        help='Criterion for neighbour selection. Default: orbit',
+                        choices=['orbit', 'neighbour'],
+                        help='Criterion for neighbour sampling',
                         type=str,
                         default='orbit')
 cls_parser.add_argument('--method',
-                        help='Weighting method. Default: unweighted',
+                        choices=['unweighted', 'wknn', 'dwknn'],
+                        help='Weighting method',
                         type=str,
                         default='unweighted')
 
 #%% classify
 if __name__ == '__main__':
-    args, unk = parser.parse_known_args()    
+    args, unk = parser.parse_known_args()
     # operation: preparation
     if args.mode == 'prep':
-        preparation(args.out_dir,
-                    args.transition,
-                    args.transversion,
-                    args.database,
-                    args.query,
-                    args.evalue,
-                    args.dropoff,
-                    args.min_height,
-                    args.min_width,
-                    args.min_overlap_width,
-                    args.overwrite,
-                    args.force_overwrite,
-                    args.threads)
+        try:
+            preparation(args.out_dir,
+                        args.database,
+                        args.query,
+                        args.transition,
+                        args.transversion,
+                        args.evalue,
+                        args.dropoff,
+                        args.min_height,
+                        args.min_width,
+                        args.min_overlap_width,
+                        args.overwrite,
+                        args.threads)
+        except Exception as excp:
+            print(excp)
+            quit()
     else:
         # initialize classifier
         classifier = cls_main.Classifier()
         classifier.set_outdir(args.out_dir, overwrite=False)
         # operation: calibration
         if args.mode == 'calibrate':
-            operation_calibrate(classifier,
-                                min_overlap_width = args.min_overlap_width,
-                                max_n = args.max_n,
-                                step_n = args.step_n,
-                                max_k = args.max_k,
-                                step_k = args.step_k,
-                                row_thresh = args.row_thresh,
-                                col_thresh = args.col_thresh,
-                                min_seqs = args.min_seqs,
-                                rank = args.rank,
-                                min_n = args.min_n,
-                                min_k = args.min_k,
-                                criterion = args.criterion,
-                                threads = args.threads)
+            classifier.get_overlaps(args.min_overlap_width)
+            classifier.custom_calibrate(args.max_n,
+                                        args.step_n,
+                                        args.max_k,
+                                        args.step_k,
+                                        args.row_thresh,
+                                        args.col_thresh,
+                                        args.min_seqs,
+                                        args.rank,
+                                        args.min_n,
+                                        args.min_k,
+                                        args.criterion,
+                                        args.threads)
         
         # operation: classification
         if args.mode == 'classify':
-            operation_classify(classifier,
-                               w_start = args.w_start,
-                               w_end = args.w_end,
-                               n = args.n,
-                               k = args.k,
-                               rank = args.rank,
-                               row_thresh = args.row_thresh,
-                               col_thresh = args.col_thresh,
-                               min_seqs = args.min_seqs,
-                               criterion = args.criterion,
-                               method = args.method)
+            classifier.classify(args.w_start,
+                                args.w_end,
+                                args.n,
+                                args.k,
+                                args.rank,
+                                args.row_thresh,
+                                args.col_thresh,
+                                args.min_seqs,
+                                args.criterion,
+                                args.method)

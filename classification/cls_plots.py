@@ -12,6 +12,8 @@ from matplotlib import cm
 import matplotlib.patches as ptch
 import matplotlib.pyplot as plt
 import numpy as np
+import re
+
 #%% functions
 def plot_ref_v_qry(ref_coverage, ref_mesas, qry_coverage, qry_mesas, overlaps, figsize=(12,7), **kwargs):
     # kwargs:
@@ -48,7 +50,7 @@ def plot_ref_v_qry(ref_coverage, ref_mesas, qry_coverage, qry_mesas, overlaps, f
     ax_ref.plot([0], [0], c='r', label='Reference mesas')
     ax_ref.plot([0], [0], c='tab:orange', label='Query coverage')
     ax_ref.plot([0], [0], c='g', label='Query mesas')
-    ax_ref.plot([0], [0], linestyle=':', c='k', label='Overlapps')
+    ax_ref.plot([0], [0], linestyle=':', c='k', label='Overlaps')
     ax_ref.legend()
     # TODO: fix issues with mesa calculations
     # only filter out overlap coordinates when they appear too closely together (<= 20 sites) in the x axis
@@ -65,7 +67,7 @@ def plot_ref_v_qry(ref_coverage, ref_mesas, qry_coverage, qry_mesas, overlaps, f
     # Add plot title
     if 'ref_title' in kwargs.keys() and 'qry_title' in kwargs.keys():
         # only add title if both ref_title and qry_title kwargs are present
-        ax_ref.set_title(kwargs['ref_title'] + '(reference) coverage\nvs\n' + kwargs['qry_title'] + '(query) coverage')
+        ax_ref.set_title(kwargs['ref_title'] + ' (reference) coverage\nvs\n' + re.sub('.*/' , '', kwargs['qry_title']) + ' (query) coverage')
     
     # Save plot
     if 'out_file' in kwargs.keys():

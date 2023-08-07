@@ -295,6 +295,40 @@ class ClassifierBase:
         self.__query_acc_file = None
         self.__transition = None
         self.__transversion = None
+        
+        # self.out_dir = None
+        # self.calibration_dir = None
+        # self.classif_dir = None
+        # self.query_dir = None
+        # self.warn_dir = None
+
+        # self.cost_matrix = None
+
+        # self.db_dir = None
+        # self.db_reffile = None
+        # self.db_refpath = None
+        # self.db_refdir = None
+
+        # self.guide = None
+        # self.tax_ext = None
+        # self.ranks = None
+
+        # self.ref_matrix = None
+        # self.ref_mesas = None
+        # self.ref_coverage = None
+        # self.max_pos = None
+
+        # self.ref_accs = None
+        # self.tax_tab = None
+
+        # self.query_blast_report = None
+        # self.query_accs = None
+        # self.query_bounds = None
+        # self.query_matrix = None
+        # self.query_coverage = None
+        # self.query_mesas = None
+
+        # self.collapsed_params = None
     
     @property
     def meta(self):
@@ -374,10 +408,6 @@ class Classifier(ClassifierBase):
         self.query_dir = out_dir + '/query'
         self.warn_dir = out_dir + '/warnings'
         
-        warn_handler = logging.FileHandler(self.warn_dir + '/warnings.log')
-        warn_handler.setLevel(logging.WARNING)
-        logger.addHandler(warn_handler)
-        
         if os.path.isdir(out_dir):
             # out dir already exists
             if overwrite:
@@ -401,6 +431,10 @@ class Classifier(ClassifierBase):
         os.makedirs(self.classif_dir, exist_ok=True)
         os.makedirs(self.query_dir, exist_ok=True)
         os.makedirs(self.warn_dir, exist_ok=True)
+        
+        warn_handler = logging.FileHandler(self.warn_dir + '/warnings.log')
+        warn_handler.setLevel(logging.WARNING)
+        logger.addHandler(warn_handler)
     
     def set_cost_matrix(self, transition, transversion):
         self.transition = transition
@@ -489,7 +523,7 @@ class Classifier(ClassifierBase):
         
     # locate overlapping regions between reference and query maps
     def get_overlaps(self, min_width=10):
-        self.overlapps = get_mesas_overlap(self.ref_mesas, self.query_mesas, min_width)
+        self.overlaps = get_mesas_overlap(self.ref_mesas, self.query_mesas, min_width)
     
     # custom calibrate
     def custom_calibrate(self,

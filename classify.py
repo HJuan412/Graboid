@@ -33,8 +33,8 @@ from classification import cls_plots
 
 def is_graboid_dir(path):
     # proposed directory must contain only the expected contents (or be empty)
-    exp_contents = {'calibration', 'classification', 'query', 'meta.json'}
-    dir_contents = set(os.path.listdir(path))
+    exp_contents = {'calibration', 'classification', 'query', 'meta.json', 'warnings'}
+    dir_contents = set(os.listdir(path))
     if len(dir_contents) == 0:
         # directory exists but it's empty
         return
@@ -78,7 +78,7 @@ def preparation(out_dir,
         if overwrite:
             shutil.rmtree(out_dir, ignore_errors=True)
         else:
-            raise Exception('Proposed working directory already exists. Overwrite with option --overwrite. WARNING: this will remove all existing calibration and classification data.')
+            raise Exception('Proposed working directory already exists. Overwrite with option --overwrite. WARNING: this will remove all data in the proposed directory.')
     
     classifier = cls_main.Classifier()
     classifier.set_outdir(out_dir, overwrite)
@@ -100,8 +100,8 @@ def preparation(out_dir,
     classifier.get_overlaps(min_overlap_width)
     cls_plots.plot_ref_v_qry(classifier.ref_coverage,
                              classifier.ref_mesas,
-                             classifier.qry_coverage,
-                             classifier.qry_mesas,
+                             classifier.query_coverage,
+                             classifier.query_mesas,
                              classifier.overlaps,
                              ref_title = classifier.db,
                              qry_title = classifier.query_file,

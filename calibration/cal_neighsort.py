@@ -52,7 +52,7 @@ def build_packages(compressed, sorted_indexes, n_range, k_range, criterion):
     # get the data for each parameter combination
     for n_idx, window_n in enumerate(compressed):
         n = n_range[n_idx]
-        n_indexes = sorted_indexes[n_idx]
+        n_indexes = sorted_indexes[n_idx] # get the LAYER containing the sorted indexes for the current n value
         for k in k_range:
             # TODO: maybe get only the highest K and modify the classification function to avoid unnecesary calculations
             if criterion == 'orbit':

@@ -26,9 +26,10 @@ def get_knn_orbit_V(compressed, k):
     k_positions = np.zeros((n_seqs, k+1), dtype=np.int16)
     k_counts = np.zeros((n_seqs, k), dtype=np.int16)
     for seq_idx, (dists, idxs, counts) in enumerate(compressed):
-        k_dists[seq_idx] = dists[:k]
-        k_positions[seq_idx] = idxs[:k+1]
-        k_counts[seq_idx] = counts[:k]
+        nneighs = len(dists)
+        k_dists[seq_idx, :nneighs] = dists[:k]
+        k_positions[seq_idx, :nneighs] = idxs[:k+1]
+        k_counts[seq_idx, :nneighs] = counts[:k]
     return k_dists, k_positions, k_counts
 
 def get_knn_neigh_V(compressed, k):

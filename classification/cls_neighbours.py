@@ -24,6 +24,7 @@ def get_knn_orbit_V(compressed, k):
     # compressed is now a list of 2d arrays, each array has shape (3, #orbitals)
     """Get the neighbours from the k nearest orbitals"""
     n_seqs = len(compressed)
+    # TODO: commented is old code, delete after testing that classiffication is compatible with new code
     # k_dists = np.zeros((n_seqs, k), dtype=np.float16)
     # k_positions = np.zeros((n_seqs, k+1), dtype=np.int16)
     # k_counts = np.zeros((n_seqs, k), dtype=np.int16)
@@ -34,27 +35,37 @@ def get_knn_orbit_V(compressed, k):
     #     k_counts[seq_idx, :nneighs] = counts[:k]
     # return k_dists, k_positions, k_counts
     
-    # returns a 3d array of shape (#seqs, 3, k), second dimension contains: orbital distances, orbital END indexes (idx of last member of orbital), orbital counts
-    k_nn = np.zeros((n_seqs, 3, k), dtype=np.float16)
+    # returns a 3d array of shape (#seqs, 3, k), second dimension contains: orbital distances, orbital START indexes (idx of last member of orbital, END position obtained by start + count), orbital counts
+    k_nn = np.full((n_seqs, 3, k), -1, dtype=np.float16)
     for seq_idx, compr in enumerate(compressed):
         nneighs = min(compr.shape[1], k) # on some cases, the number of available orbitals may be lower than k
         k_nn[seq_idx, :, :nneighs] = compr[:, :k]
-        k_nn[seq_idx, 1, :nneighs] = compr[1, 1:k+1]
     return k_nn
 
 def get_knn_neigh_V(compressed, k):
+    # compressed is now a list of 2d arrays, each array has shape (3, #orbitals)
     """Get the neighbours from the orbitals up to the one containing the k-th neighbour"""
     n_seqs = len(compressed)
-    k_dists = np.full((n_seqs, k), -1, dtype=np.float16)
-    k_positions = np.full((n_seqs, k+1), -1, dtype=np.int16)
-    k_counts = np.zeros((n_seqs, k), dtype=np.int16)
-    for seq_idx, (dists, idxs, counts) in enumerate(compressed):
-        summed = np.cumsum(counts)
+    # k_dists = np.full((n_seqs, k), -1, dtype=np.float16)
+    # k_positions = np.full((n_seqs, k+1), -1, dtype=np.int16)
+    # k_counts = np.zeros((n_seqs, k), dtype=np.int16)
+    
+    # for seq_idx, (dists, idxs, counts) in enumerate(compressed):
+    #     summed = np.cumsum(counts)
+    #     break_orb = np.argmax(summed >= k) + 1 # get orbital containing the k-th nearest neighbour
+    #     k_dists[seq_idx, :break_orb] = dists[:break_orb]
+    #     k_positions[seq_idx, :break_orb+1] = idxs[:break_orb+1]
+    #     k_counts[seq_idx, :break_orb] = counts[:break_orb]
+    # return k_dists, k_positions, k_counts
+    
+    # returns a 3d array of shape (#seqs, 3, k), second dimension contains: orbital distances, orbital START indexes (idx of last member of orbital, END position obtained by start + count), orbital counts
+    k_nn = np.full((n_seqs, 3, k), -1, dtype=np.float16)
+    for seq_idx, compr in enumerate(compressed):
+        summed = np.cumsum(compr[2])
         break_orb = np.argmax(summed >= k) + 1 # get orbital containing the k-th nearest neighbour
-        k_dists[seq_idx, :break_orb] = dists[:break_orb]
-        k_positions[seq_idx, :break_orb+1] = idxs[:break_orb+1]
-        k_counts[seq_idx, :break_orb] = counts[:break_orb]
-    return k_dists, k_positions, k_counts
+        k_nn[seq_idx, :, :break_orb] = compr[:, :break_orb]
+    return k_nn
+    
     
 def get_knn_orbit(compressed, k):
     """Get the neighbours from the k nearest orbitals"""

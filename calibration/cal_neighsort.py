@@ -37,7 +37,7 @@ def compress(sorted_distances):
     compressed = []
     # compressed is a list containing, for each window, a list of the compressed distance orbitals for each n level
     for n_level in sorted_distances:
-        compressed.append([np.unique(dist, return_index=True, return_counts = True) for dist in n_level]) # for each qry_sequence, get distance groups, as well as the index where each group begins and the count for each group
+        compressed.append([np.array(np.unique(dist, return_index=True, return_counts = True)) for dist in n_level]) # for each qry_sequence, get distance groups, as well as the index where each group begins and the count for each group
     return compressed
 
 def sort_compress(distances):

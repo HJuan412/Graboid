@@ -19,18 +19,28 @@ import numpy as np
 
 # _V functions produce results as 3 2d-numpy arrays: k_dists (shape: # seqs, k), k_positions (shape: # seqs, k+1) and k_counts (shape: # seqs, k)
 # k_dists produced by knn_neigh has default values of -1 to differentiate empty orbitals from tose with distance 0 (occupied orbitals for this function is <= k)
+
 def get_knn_orbit_V(compressed, k):
+    # compressed is now a list of 2d arrays, each array has shape (3, #orbitals)
     """Get the neighbours from the k nearest orbitals"""
     n_seqs = len(compressed)
-    k_dists = np.zeros((n_seqs, k), dtype=np.float16)
-    k_positions = np.zeros((n_seqs, k+1), dtype=np.int16)
-    k_counts = np.zeros((n_seqs, k), dtype=np.int16)
-    for seq_idx, (dists, idxs, counts) in enumerate(compressed):
-        nneighs = len(dists)
-        k_dists[seq_idx, :nneighs] = dists[:k]
-        k_positions[seq_idx, :nneighs] = idxs[:k+1]
-        k_counts[seq_idx, :nneighs] = counts[:k]
-    return k_dists, k_positions, k_counts
+    # k_dists = np.zeros((n_seqs, k), dtype=np.float16)
+    # k_positions = np.zeros((n_seqs, k+1), dtype=np.int16)
+    # k_counts = np.zeros((n_seqs, k), dtype=np.int16)
+    # for seq_idx, (dists, idxs, counts) in enumerate(compressed):
+    #     nneighs = len(dists)
+    #     k_dists[seq_idx, :nneighs] = dists[:k]
+    #     k_positions[seq_idx, :nneighs] = idxs[:k+1]
+    #     k_counts[seq_idx, :nneighs] = counts[:k]
+    # return k_dists, k_positions, k_counts
+    
+    # returns a 3d array of shape (#seqs, 3, k), second dimension contains: orbital distances, orbital END indexes (idx of last member of orbital), orbital counts
+    k_nn = np.zeros((n_seqs, 3, k), dtype=np.float16)
+    for seq_idx, compr in enumerate(compressed):
+        nneighs = min(compr.shape[1], k) # on some cases, the number of available orbitals may be lower than k
+        k_nn[seq_idx, :, :nneighs] = compr[:, :k]
+        k_nn[seq_idx, 1, :nneighs] = compr[1, 1:k+1]
+    return k_nn
 
 def get_knn_neigh_V(compressed, k):
     """Get the neighbours from the orbitals up to the one containing the k-th neighbour"""

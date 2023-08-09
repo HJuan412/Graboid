@@ -554,8 +554,8 @@ class Classifier(ClassifierBase):
         
         if 'w_starts' in kwargs.keys() and 'w_ends' in kwargs.keys():
             calibrator.set_custom_windows(kwargs['w_starts'], kwargs['w_ends'])
-        elif hasattr(self, 'overlapps'):
-            calibrator.set_custom_windows(self.overlapps[:,0], self.overlapps[:,1])
+        elif hasattr(self, 'overlaps'):
+            calibrator.set_custom_windows(self.overlaps[:,0], self.overlaps[:,1])
         else:
             raise Exception('Missing parameters to set calibration windows. Run the get_overlapps method to get overlapping sections of query and reference data or provide matching sets of custom start and end positions')
         # set calibration directory

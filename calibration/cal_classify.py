@@ -88,7 +88,7 @@ def classify_V(package, tax_tab, threads=1):
     # get supports for each sequence
     supports_tab = []
     with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
-        futures = [executor.submit(get_tax_supports_V, tax_tab[neighs], u_supps, w_supps, d_supps, dists, cnts.astype(int)) for seq_idx, (neighs, u_supps, w_supps, d_supps, dists, cnts) in enumerate(zip(neigh_arrays, u_supports, w_supports, d_supports, distances, counts))]
+        futures = [executor.submit(get_tax_supports_V, tax_tab[neighs], u_supps, w_supps, d_supps, dists, cnts.astype(int), seq_idx) for seq_idx, (neighs, u_supps, w_supps, d_supps, dists, cnts) in enumerate(zip(neigh_arrays, u_supports, w_supports, d_supports, distances, counts))]
         for future in concurrent.futures.as_completed(futures):
             supports_tab.append(future.result())
     return np.concatenate(supports_tab)

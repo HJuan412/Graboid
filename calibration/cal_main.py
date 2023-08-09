@@ -352,7 +352,7 @@ class Calibrator:
         logger.info('Calculating paired distances...')
         t_distance_0 = time.time()
         
-        all_distances = []
+        all_distances = [] # contains one 3d array per window. Arrays have shape (n, #seqs, #seqs), contain paired distances for every level of n
         # TODO: parallel process
         for window, win_sites in zip(win_list, windows_sites):
             all_distances.append(cal_dists.get_distances(window, win_sites, cost_mat))
@@ -367,6 +367,8 @@ class Calibrator:
         window_packages = []
         for distances in all_distances:
             # sort distances and compress them into orbitals
+            # sorted_distances and sorted_indexes are 3d arrays of shape (n, #seqs, #seqs - 1), 3rd dimension -1 because we substract distance to self
+            # compressed is a list of len # seqs, each item is a 2d array of shape (3, # orbitals) (# orbitals vary among sequences), row0: orbital distances, row1: orbital positions, row2:orbital counts (sum = #seqs - 1)
             sorted_distances, sorted_indexes, compressed = cal_neighsort.sort_compress(distances)
             # build classification packages
             window_packages.append(cal_neighsort.build_packages(compressed, sorted_indexes, n_range, k_range, criterion))

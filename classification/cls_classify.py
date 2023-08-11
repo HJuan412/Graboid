@@ -79,7 +79,7 @@ def classify(dists, positions, counts, neigh_idxs, tax_tab, weight_func):
 
 
 def softmax(supports):
-    exp_supports = np.exp(supports.astype(np.float64))
+    exp_supports = np.exp(supports.astype(np.float128))
     return exp_supports / exp_supports.sum()
 
 # vectorized functions, may replace the normal ones

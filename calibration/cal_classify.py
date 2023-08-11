@@ -229,34 +229,37 @@ def get_supports(supports_tab, tax_tab):
         
         # get predicted taxa
         
-        # get best support for each training instance
-        # sorted_*: sorted indexes (descending) for all predictions for the current rank
-        sorted_u = np.argsort(rk_supports[:, 6])[::-1]
-        sorted_w = np.argsort(rk_supports[:, 8])[::-1]
-        sorted_d = np.argsort(rk_supports[:, 10])[::-1]
+        # get best support for each training instance EXCLUDING support for unknown taxa (-1)
+        rk_supports_known = rk_supports[rk_supports[:,2] > 0]
         
-        # get the location of the best score for every sequence
-        # np.unique(rk_supports[sorted_*, 0], return_index=True)[1] gets the first position for every SORTED sequence index in the support table (sorted by a given method)
-        # retrieve first indexes for every sequence (sorted_*[...])
-        best_u_locs = sorted_u[np.unique(rk_supports[sorted_u, 0], return_index=True)[1]]
-        best_w_locs = sorted_w[np.unique(rk_supports[sorted_w, 0], return_index=True)[1]]
-        best_d_locs = sorted_d[np.unique(rk_supports[sorted_d, 0], return_index=True)[1]]
-        
-        # extract sequence index + predicted taxon
-        pred_u = rk_supports[best_u_locs][:, [0,2]]
-        pred_w = rk_supports[best_w_locs][:, [0,2]]
-        pred_d = rk_supports[best_d_locs][:, [0,2]]
-        # update predicted_tables
-        predicted_u[pred_u[:,0].astype(int), rk_idx] = pred_u[:,1]
-        predicted_w[pred_w[:,0].astype(int), rk_idx] = pred_w[:,1]
-        predicted_d[pred_d[:,0].astype(int), rk_idx] = pred_d[:,1]
+        for pred_table, method_col in zip((predicted_u, predicted_w, predicted_d), (6,8,10)):
+            # sort support table (descending) for all predictions for the current rank, sort again by sequence id
+            support_sorted = rk_supports_known[np.argsort(rk_supports_known[:, method_col])[::-1]]
+            support_sorted = support_sorted[np.argsort(support_sorted[:, 0])]
+            
+            # count candidate classifications for each sequence
+            seq_idxs, seq_poss, seq_cnts = np.unique(support_sorted[:,0], return_index=True, return_counts=True)
+            
+            # get seqs with single candidates
+            single_pred = seq_cnts == 1
+            # check for ties (keep only sequences whit a clear winner prediction)
+            seq_firsts = seq_poss[~single_pred]
+            seq_seconds = seq_firsts + 1
+            winners = support_sorted[seq_firsts, method_col] > support_sorted[seq_seconds, method_col]
+            best_locs = np.concatenate([seq_firsts[winners], seq_poss[single_pred]]) # merge winner predictions and single predictions
+            
+            # extract sequence index + predicted taxon
+            predictions = rk_supports_known[best_locs][:, [0,2]]
+            
+            # update predicted_tables
+            pred_table[predictions[:,0].astype(int), rk_idx] = predictions[:,1]
         
         # get support of real taxa
         # get unique taxa
         unique_taxa = np.unique(rk_taxa[~np.isnan(rk_taxa)])
         # get indexes of represented sequences
         supp_indexes = np.arange(tax_tab.shape[0])
-                
+        
         # get true support per taxon
         for tax in unique_taxa:
             # locate instances of taxon
@@ -265,13 +268,10 @@ def get_supports(supports_tab, tax_tab):
             tax_supports = rk_supports[rk_supports[:,2] == tax]
             tax_supports = tax_supports[np.isin(tax_supports[:,0], tax_instances)]
             
-            # set default support as 0 (differenctiate from unclear taxa in db, with score of -1)
-            real_u_support[tax_instances] = 0
-            real_w_support[tax_instances] = 0
-            real_d_support[tax_instances] = 0
-            
-            # update supports with normalized scores
-            real_u_support[tax_supports[:,0].astype(int), rk_idx] = tax_supports[:, 7]
-            real_w_support[tax_supports[:,0].astype(int), rk_idx] = tax_supports[:, 9]
-            real_d_support[tax_supports[:,0].astype(int), rk_idx] = tax_supports[:, 11]
+            for supp_table, method_col in zip((real_u_support, real_w_support, real_d_support), (7,9,11)):
+                # set default support as 0 (differenctiate from unclear taxa in db, with score of -1)
+                supp_table[tax_instances] = 0
+                
+                # update supports with normalized scores
+                supp_table[tax_supports[:,0].astype(int), rk_idx] = tax_supports[:, method_col]
     return predicted_u, real_u_support, predicted_w, real_w_support, predicted_d, real_d_support

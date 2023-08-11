@@ -37,6 +37,9 @@ def get_tax_supports_V(taxa, u_supports, w_supports, d_supports, distances, coun
         rk_data = np.zeros((n_tax, 9), dtype=np.float32) # columns : total_neighs, mean_distance, std_distance, total_unweighted_support, softmax_u_support, total_wknn_support, softmax_wknn_support, total_dwknn_support, softmax_d_support
         for tax_idx, u_tax in enumerate(uniq_tax):
             tax_loc = rk == u_tax
+            if sum(tax_loc) == 0:
+                # no predictions for current taxon
+                continue
             rk_data[tax_idx, 0] = tax_loc.sum() # total neighbours
             rk_data[tax_idx, 1] = dist_ext[tax_loc].mean() # mean distance
             rk_data[tax_idx, 2] = dist_ext[tax_loc].std() # std distance
@@ -143,3 +146,56 @@ def get_supports(id_array, data_array, tax_tab):
             real_w_support[seq_idx, rk_idx] = seq_data[real_loc, 6]
             real_d_support[seq_idx, rk_idx] = seq_data[real_loc, 8]
     return predicted_u, real_u_support, predicted_w, real_w_support, predicted_d, real_d_support
+
+### NEW DET SUPPORTS
+# rk_idx = 3
+
+# # get supports for a given RANK
+# rk_supports = supports_tab[supports_tab[:,1] == rk_idx]
+
+# # get best support for each training instance
+
+# # sorted_*: sorted indexes (descending) for all instances
+# sorted_u = np.argsort(rk_supports[:, 6])[::-1]
+# sorted_w = np.argsort(rk_supports[:, 8])[::-1]
+# sorted_d = np.argsort(rk_supports[:, 10])[::-1]
+
+# # get the location of the best score for all instances
+# # np.unique(rk_supports[sorted_*, 0], return_index=True)[1] gets the first position for every SORTED sequence index in the support table (sorted by a given method)
+# # retrieve first indexes for every sequence (sorted_*[...])
+# best_u_locs = sorted_u[np.unique(rk_supports[sorted_u, 0], return_index=True)[1]]
+# best_w_locs = sorted_w[np.unique(rk_supports[sorted_w, 0], return_index=True)[1]]
+# best_d_locs = sorted_d[np.unique(rk_supports[sorted_d, 0], return_index=True)[1]]
+
+# # extract sequence index + predicted taxon
+# pred_u = rk_supports[best_u_locs][:, [0,2]]
+# pred_w = rk_supports[best_w_locs][:, [0,2]]
+# pred_d = rk_supports[best_w_locs][:, [0,2]]
+
+# # get support of real taxa
+# # get unique taxa
+# rk_taxa = np.unique(rk_supports.T[2][~np.isnan(rk_supports.T[2])])
+# # get indexes of represented sequences
+# supp_indexes = np.unique(rk_supports[:,0]).astype(int)
+# # prepare support vectors
+# true_support_u = np.full(supp_indexes.max(), -1, dtype=np.float32)
+# true_support_w = np.full(supp_indexes.max(), -1, dtype=np.float32)
+# true_support_d = np.full(supp_indexes.max(), -1, dtype=np.float32)
+
+# # get true support per taxon
+# for tax in rk_taxa:
+#     # locate instances of taxon
+#     tax_instances = supp_indexes[win_tax.T[rk_idx] == tax]
+#     # extract calculated supports for taxon, then filter by instances belonging to taxon
+#     tax_supports = rk_supports[rk_supports[:,2] == tax]
+#     tax_supports = tax_supports[np.isin(tax_supports[:,0], tax_instances)]
+    
+#     # set default support as 0 (differenctiate from unclear taxa in db, with score of -1)
+#     true_support_u[tax_instances] = 0
+#     true_support_w[tax_instances] = 0
+#     true_support_d[tax_instances] = 0
+    
+#     # update supports with normalized scores
+#     true_support_u[tax_supports[:,0].astype(int)] = tax_supports[:, 7]
+#     true_support_w[tax_supports[:,0].astype(int)] = tax_supports[:, 9]
+#     true_support_d[tax_supports[:,0].astype(int)] = tax_supports[:, 11]

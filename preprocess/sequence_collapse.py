@@ -30,6 +30,15 @@ def get_branches(sequences, matrix):
     # collapse the matrix into its disticnt rows, return a list of the grouped indexes
     # sequences keeps track of the indexes of the sequences as they are assigned to branches
     branches = []
+    
+    # if there is a single column remaining, split it into the corresponding branches and stop recursion
+    if matrix.shape[1] == 1:
+        for val in np.unique(matrix):
+            # generate a sub branch for each value
+            val_indexes = matrix[:, 0] == val
+            branches.append(sequences[val_indexes])
+        return branches
+    
     # select the column with the most entropy
     site_entropy = entropy(matrix)
     selected_col = np.argsort(site_entropy)[::-1][0]
@@ -39,6 +48,7 @@ def get_branches(sequences, matrix):
         # if there is a single known value in the selected column it is safe to assume the branch is exhausted
         # this is because the selected column is the most informative one in the alignment, all the rest have equal or less diversity
         return [sequences]
+    
     for val in values_in_col:
         # generate a sub branch for each value
         val_indexes = matrix[:, selected_col] == val
@@ -50,8 +60,7 @@ def get_branches(sequences, matrix):
         # remove the column used to split the sequence from the following matrices
         # This is technically not necesary because the column has a single value, and therefore entropy of 0 for every subsequent branch
         # still, it's one less column for the future entropy calculations
-        branch_cols = np.arange(matrix.shape[1]) != selected_col
-        sub_matrix = matrix[val_indexes][:, branch_cols]
+        sub_matrix = np.delete(matrix[val_indexes], selected_col, 1)
         branches += get_branches(branch_seqs, sub_matrix)
     return branches
 

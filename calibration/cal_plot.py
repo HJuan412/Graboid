@@ -58,19 +58,21 @@ def annotate_heatmap(annot, X, Y, ax, mesh, annot_size):
         ax.text(x, y, val, **text_kwargs)
 
 def custom_heatmap(data, annot, win_poss, cell_size, ax, cax, cmap, annot_size):
-    # use this to build a customized heatmap when window sizes are variable
+    """use this to build a customized heatmap when window sizes are variable"""
+    # data: 2d-array of shape (# taxa, # windows) containing metric scores
+    # annots: 2d-array of shape (# taxa, # windows) containing parameter annotations
+    
     # get mesh internal dimensions
-    C = data.to_numpy()
     # X and Y should have shapes (16, 4)
-    X = np.zeros((C.shape[0] + 1, C.shape[1] + 1))
-    Y = np.zeros((C.shape[0] + 1, C.shape[1] + 1))
-    for iidx, i in enumerate(np.arange(len(data) + 1) * cell_size):
+    X = np.zeros((data.shape[0] + 1, data.shape[1] + 1))
+    Y = np.zeros((data.shape[0] + 1, data.shape[1] + 1))
+    for iidx, i in enumerate(np.arange(data.shape[0] + 1) * cell_size):
         X[-iidx-1] = i
     for jidx, j in enumerate(win_poss * cell_size):
         Y[:,jidx] = j
     
     # generate heatmap
-    mesh = ax.pcolormesh(Y, X, C, shading='flat', cmap=cmap) # pcolormesh lets us vary the cell widths
+    mesh = ax.pcolormesh(Y, X, data, shading='flat', cmap=cmap) # pcolormesh lets us vary the cell widths
     # get cell centres
     x_centre = X[1:,0] + cell_size/2
     y_centre = Y[0,:-1] + np.diff(Y[0]) / 2
@@ -84,7 +86,8 @@ def custom_heatmap(data, annot, win_poss, cell_size, ax, cax, cmap, annot_size):
 
 # heatmap construction
 def build_heatmap(data,
-                  param_annots,
+                  annots,
+                  indexes,
                   windows,
                   title,
                   metric,
@@ -95,13 +98,26 @@ def build_heatmap(data,
                   hspace=0.01,
                   max_cols=10,
                   custom=False):
+    # data: 2d-array of shape (# taxa, # windows) containing metric scores
+    # annots: 2d-array of shape (# taxa, # windows) containing parameter annotations
+    # indexes: 1d-array, contains tax names and codes
+    # windows: 2d-array of shape (# windows, 2) containing window coordinates
+    # title: pre-generated figure title
+    # metric: metric name
+    # cell_size: pixels per cell
+    # dpi: resolution (dots per inch)
+    # height_pad: used to compensate for the space taken by the title and window labels
+    # ratio_pad: related to colorbar position
+    # hspace: related to colorbar position
+    # max_cols: set the maximum number of columns in custom heatmaps
+    # custom: adjust colum width to relative window widths
+    
     # set color map
     viridis = cm.get_cmap('viridis', 256)
     grey = np.array([128/256, 128/256, 128/256, 1])
     viridis.set_bad(grey)
     
-    # get column widths
-    windows = windows[data.columns]
+    # get column relative widths
     win_widths = windows[:,1] - windows[:,0]
     win_ratios = win_widths / win_widths.min()
     win_poss = np.concatenate([[0], np.cumsum(win_ratios)])
@@ -135,7 +151,7 @@ def build_heatmap(data,
     # build heatmap
     if custom:
         yticks, xticks = custom_heatmap(data,
-                                        param_annots,
+                                        annots,
                                         win_poss,
                                         cell_size,
                                         ax_hm,
@@ -146,7 +162,7 @@ def build_heatmap(data,
         sns.heatmap(data,
                     square = True,
                     cmap = viridis,
-                    annot = param_annots,
+                    annot = annots,
                     fmt='',
                     annot_kws={"size": annot_size, 'ha':'center', 'va':'center'},
                     ax = ax_hm,
@@ -159,7 +175,7 @@ def build_heatmap(data,
     
     # place labels for all windows and taxa
     ax_hm.set_yticks(yticks)
-    ax_hm.set_yticklabels(data.index, size = ytick_size, rotation = 30, va='top')
+    ax_hm.set_yticklabels(indexes, size = ytick_size, rotation = 30, va='top')
     ax_hm.set_xticks(xticks)
     ax_hm.set_xticklabels(column_labels, size = xtick_size, rotation=60, ha='left')
     # relocate window labels to the top of the plot
@@ -167,15 +183,132 @@ def build_heatmap(data,
     ax_hm.xaxis.set_label_position('top')
     # name axes
     ax_hm.set_ylabel('Taxa', size=hm_lab_size)
-    ax_hm.set_xlabel('Windows', size=hm_lab_size)
+    ax_hm.set_xlabel('Windows (start - end)', size=hm_lab_size)
     
     # adjust colorbar labels
     ax_cb.tick_params(labelsize = 4)
-    ax_cb.set_xlabel(metric, size = 4)
+    ax_cb.set_xlabel(metric + '\nu = unweighted, w = wKNN, d = dwKNN', size = 4)
     ax_hm.set_title(title, size=5)
     
     return fig
 
+def build_annot(table):
+    """Build parameter annotations array"""
+    win_idxs = table.columns.get_level_values(0).unique()
+    annot_tab = pd.DataFrame('', index=table.index, columns=win_idxs)
+    for win in win_idxs:
+        annot_tab[win] = 'n: ' + table[(win, 'n')].astype(str) + '\nk: ' + table[(win, 'k')].astype(str) + '\n' + table[(win, 'Method')]
+    annot_tab.fillna('', inplace=True)
+    return annot_tab.to_numpy()
+
+def plot_aprf(report_file, metric, windows, out_dir, collapse_hm=True, custom=True):
+    """Build heatmap for one of the aprf metrics"""
+    # report_file: path to a metric report file
+    # metric: full name of the current metric, used to generate the plot title
+    # windows: 2d-array of shape (#windows, 2) containing the coordinates of the represented columns
+    # rank: list of rank names (sorted by hierarchy)
+    # out_dir: directory where the generated plots will be stored
+    # custom: adjust column width to relative window lengths
+    
+    # load report table, extract ranks
+    report = pd.read_csv(report_file, index_col=[0,1], header=[0,1])
+    ranks = report.index.get_level_values(0).unique()
+    
+    # fix report headers
+    report.columns = pd.MultiIndex.from_arrays((report.columns.get_level_values(0).astype(int), report.columns.get_level_values(1)))
+    window_indexes = report.columns.get_level_values(0).unique()
+    windows = windows[window_indexes]
+    
+    # build a hetamap for each rank
+    discarded = {} # fill store discarded rows
+    for rk in ranks:
+        title = f'{metric} scores for rank: {rk}'
+        rk_subtab = report.loc[rk]
+        
+        # extract score and annotation data
+        data = rk_subtab[[(win_idx, 'Score') for win_idx in window_indexes]].to_numpy()
+        annot = build_annot(rk_subtab)
+        indexes = rk_subtab.index # get tax names
+        
+        # filter out empty rows (only unknown or 0 support values)
+        non_empty_cells = data > 0
+        empty_rows = non_empty_cells.sum(1) == 0 # locations of rows with no scores greater than 0
+        if empty_rows.sum() > 0:
+            # record empty rows
+            discarded[rk] = list(map(lambda x : re.sub('^[^ ]* ', '', x), rk_subtab.index[empty_rows])) # remove lincode from every discarded tax name
+        
+        if collapse_hm:
+            # remove empty rows from data, annotation and tax names
+            data = data[~empty_rows]
+            annot = annot[~empty_rows]
+            indexes = rk_subtab.index[~empty_rows]
+        
+        data[data == -1] = np.nan # set unknowns to nan to distinguish from 0 score cells
+        
+        # heatmaps have at most 1000 rows, if a rank (usually only species, MAYBE genus) exceeds the limit, split it
+        if len(data) <= 1000:
+            fig = build_heatmap(data, annot, indexes, windows, title, metric, custom=custom)
+            fig.savefig(out_dir + f'/{metric}_{rk}.png', format='png', bbox_inches='tight')
+            plt.close()
+        else:
+            for n_subplot, subplot_idx in enumerate(np.arange(0, len(data), 1000)):
+                fig = build_heatmap(data[subplot_idx: subplot_idx + 1000], annot[subplot_idx: subplot_idx + 1000], indexes[subplot_idx: subplot_idx + 1000], windows, title, metric, custom=custom)
+                fig.savefig(out_dir + f'/{metric}_{rk}.{n_subplot + 1}.png', format='png', bbox_inches='tight')
+                plt.close()
+    
+    # register discarded taxa
+    if len(discarded) > 0:
+        with open(out_dir + f'/{metric}_rejected.txt', 'w') as handle:
+            handle.write(f'The following taxa yielded no {metric} scores over 0 for any window:\n')
+            for rk, dcarded in discarded.items():
+                handle.write(f'{rk} ({len(dcarded)}):\n' + '\n'.join(dcarded) + '\n')
+
+def plot_CE_results(report_file, windows, out_dir, figsize=(12,7)):
+    """Plot cross entrpoy reuslts"""
+    # report_file: path to a cross entropy report file
+    # windows: 2d-array of shape (#windows, 2) containing the coordinates of the represented columns
+    # out_dir: directory where the generated plots will be stored
+    # figsize: guess
+    
+    # load report and extract ranks
+    report = pd.read_csv(report_file)
+    ranks = report.columns[4:]
+    
+    # build parameter labels
+    report['params'] = 'n: ' + report.n.astype(str) + ', k: ' + report.k.astype(str) + ', mtd: ' + report['Method']
+    
+    # generate y coordinates for each window (plot is read from top to bottom, so the earlier windows are placed higher)
+    report['y_coord'] = 0
+    for idx, win in enumerate(report.Window.unique()[::-1]):
+        report.loc[report.Window == win, 'y_coord'] = idx
+    
+    # build window labels
+    window_indexes = np.unique(report.Window)[::-1]
+    window_labels = [f'{w0} - {w1}' for w0, w1 in windows[window_indexes]]
+    
+    # generate a plot for each rank
+    for rk in ranks:
+        fig, ax = plt.subplots(figsize = figsize)
+        y = report.y_coord.values
+        x = report[rk].values
+        ax.scatter(x, y, s = 5, marker = 'o', color = 'k') #
+        ax.set_xlim(-0.5, 11) # CE values exist within the [0, 10] range
+        ax.set_ylim(-0.5, y.max() + 0.5) # add vertical padding
+        ax.set_yticks(np.unique(y))
+        ax.set_yticklabels(window_labels)
+        ax.set_ylabel('Windows')
+        ax.set_xlabel('Cross entropy')
+        # annotate minimum entropy
+        for win, win_subtab in report.groupby('y_coord'):
+            best_loc = np.argmin(win_subtab[rk])
+            best_x = win_subtab[rk].min()
+            params = win_subtab.iloc[best_loc].loc['params']
+            ax.text(best_x - 0.2, win + 0.2, params, size=10, ha='left')
+            ax.scatter(best_x, win, s = 5.5, marker = 'o', color = 'r')
+        ax.set_title('Cross entropy for rank: ' + rk)
+        
+        fig.savefig(out_dir + f'/cross_entropy_{rk}.png', format='png')
+#%% OLD functions
 def extract_data(report, guide, ranks, windows, collapse=True):
     # Add lineage codes to the report
     report['LinCode'] = guide.loc[report.taxID, 'LinCode'].values
@@ -259,7 +392,7 @@ def plot_results(report, guide, ranks, windows, metric, prefix, collapse=True, c
             for rk, dcarded in discarded_dict.items():
                 handle.write(f'{rk} ({len(dcarded)}):\n' + '\n'.join(dcarded) + '\n')
 
-def plot_CE_results(report, ranks, windows, prefix, figsize=(12,7)):
+def plot_CE_results_OLD(report, ranks, windows, prefix, figsize=(12,7)):
     
     # build parameter labels
     report['params'] = 'n: ' + report.n.astype(str) + ', k: ' + report.k.astype(str) + ', mtd: ' + report['method']

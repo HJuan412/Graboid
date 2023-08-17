@@ -134,7 +134,7 @@ def build_reports(win_indexes, metrics_dir, out_dir, ranks, guide):
     # build cross entropy report (dataframe of columns: window, n, k, metod, ranks...)
     cross_entropy_array = np.concatenate(cross_entropy_array)
     cross_entropy_report = build_ce_report(cross_entropy_array, ranks)
-    cross_entropy_report.to_csv(out_dir + '/cross_entropy.csv')
+    cross_entropy_report.to_csv(out_dir + '/cross_entropy.csv', index=False)
     report_files.append(out_dir + '/cross_entropy.csv')
     
     # prepare aprf report index

@@ -35,10 +35,10 @@ def add_map(database, fasta, map_file, acc_file, evalue=None, dropoff=None, min_
 def get_database(database):
     if not database in DBASES:
         print(f'Database {database} not found.')
-        print('Current databases include:')
+        print('Current databases include:\n')
         for db, desc in DBASE_LIST.items():
             print(f'\tDatabase: {db} \t:\t{desc}')
-        raise Exception('Database {database} not found among: {" ".join(DBASE_LIST.keys())}')
+        raise Exception(f'Database {database} not found among: {" ".join(DBASE_LIST.keys())}')
     return DATAPATH + '/' + database
 
 def add_calibration(database, fasta, report, meta):

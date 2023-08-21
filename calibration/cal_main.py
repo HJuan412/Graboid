@@ -9,7 +9,6 @@ Created on Tue Nov 30 11:06:10 2021
 #%% libraries
 import concurrent.futures
 import datetime
-import glob
 import json
 import logging
 import numpy as np
@@ -24,7 +23,6 @@ sys.path.append("..") # use this to allow importing from a sibling package
 from calibration import cal_classify
 from calibration import cal_dists
 from calibration import cal_metrics
-from calibration import cal_neighsort
 from calibration import cal_report
 from calibration import cal_plot
 from calibration import cal_preprocess
@@ -38,63 +36,6 @@ sh.setLevel(logging.DEBUG)
 logger.addHandler(sh)
 
 #%% functions
-# report
-def replace_windows(report, windows, loc):
-    w_start = windows[report.window.values, 0]
-    w_end = windows[report.window.values, 1]
-    report.insert(loc, 'w_start', w_start)
-    report.insert(loc+1, 'w_end', w_end)
-
-def build_reports(win_indexes, report_dir, ranks):
-    cross_entropy_report = []
-    acc_report = []
-    prc_report = []
-    rec_report = []
-    f1_report = []
-    
-    for win_idx in win_indexes:
-        # open window metrics
-        window_reports = glob.glob(report_dir + f'/{win_idx}*')
-        
-        cross_entropy_report.append(cal_report.compare_cross_entropy(window_reports))
-        met_reports = cal_report.compare_metrics(window_reports)
-        acc_report.append(met_reports[0])
-        prc_report.append(met_reports[1])
-        rec_report.append(met_reports[2])
-        f1_report .append(met_reports[3])
-    
-    cross_entropy_report = np.concatenate(cross_entropy_report)
-    acc_report = np.concatenate(acc_report)
-    prc_report = np.concatenate(prc_report)
-    rec_report = np.concatenate(rec_report)
-    f1_report = np.concatenate(f1_report)
-    
-    cross_entropy_report = pd.DataFrame(cross_entropy_report, columns='window n k method'.split() + ranks)
-    
-    acc_report = pd.DataFrame(acc_report, columns='rank taxID window n k method score'.split()).sort_values('window').sort_values('rank').reset_index(drop=True)
-    prc_report = pd.DataFrame(prc_report, columns='rank taxID window n k method score'.split()).sort_values('window').sort_values('rank').reset_index(drop=True)
-    rec_report = pd.DataFrame(rec_report, columns='rank taxID window n k method score'.split()).sort_values('window').sort_values('rank').reset_index(drop=True)
-    f1_report = pd.DataFrame(f1_report, columns='rank taxID window n k method score'.split()).sort_values('window').sort_values('rank').reset_index(drop=True)
-    
-    return cross_entropy_report, acc_report, prc_report, rec_report, f1_report
-
-def post_process(windows, guide, ranks, met_report=None, ce_report=None):
-    # post process reports
-    # buid dataframes
-        # cross entropy columns: 4 (window, n, k, method, ) + ranks # TODO: add # taxa per rank per param combination
-        # metric reports columns: rank, taxon, window, n, k, method, score
-    if not ce_report is None:
-        ce_report[['window', 'n', 'k']] = ce_report[['window', 'n', 'k']].astype(np.int16)
-        ce_report['method'].replace({1:'u', 2:'w', 3:'d'}, inplace=True)
-        replace_windows(ce_report, windows, 1)
-        return
-    if not met_report is None:
-        met_report[['window', 'n', 'k']] = met_report[['window', 'n', 'k']].astype(np.int16)
-        met_report['method'].replace({0:'u', 1:'w', 2:'d'}, inplace=True)
-        met_report['rank'].replace({rk_idx:rk for rk_idx, rk in enumerate(ranks)}, inplace=True)
-        replace_windows(met_report, windows, 3)
-        met_report.insert(1, 'taxon', guide.loc[met_report.taxID, 'SciName'].values)
-
 def report_params(date, database, n_range, k_range, criterion, row_thresh, col_thresh, min_seqs, rank, threads, report_file):
     sep = '#' * 40 + '\n'
     with open(report_file, 'w') as handle:
@@ -189,11 +130,51 @@ def report_taxa(windows, win_indexes, guide, guide_ext, report_file):
     
     # save report
     count_tab.to_csv(report_file)
+
+def classify(win_distances, win_list, win_indexes, taxonomy, n_range, k_range, out_dir, criterion='orbit', threads=1):
+    """Direct support calculation and classification for each calibration window"""
+    # win_distances: list of 3d-numpy arrays of shape (#seqs, #seqs, len(n_range))
+    # win_list: list of Window objects
+    # win_indexes: array of selected window indexes
+    # taxonomy: pandas dataframe containing the training set's extended taxonomy
+    # n_range, k_range: ranges of n and k values
+    # out_dir: classification directory
+    # criterion: orbit/neigh
     
+    # build list of inputs for parallel classification jobs
+    inputs = []
+    for distances, window, window_idx in zip(win_distances, win_list, win_indexes):
+        win_tax = taxonomy.loc[window.taxonomy].to_numpy()
+        for n, n_dists in zip(n_range, distances):
+            inputs.append([n_dists, win_tax, window_idx, n])
+    
+    # parallel classification, one job per window*n, each job classifies for all the k values
+    n_cells = 0
+    total_cells = len(win_list)*len(n_range)*len(k_range)
+    with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+        futures = [executor.submit(cal_classify.classify, dists, w_tax, n, k_range, out_dir, w_idx, criterion) for (dists, w_tax, w_idx, n) in inputs]
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
+            n_cells += len(k_range)
+            print(f'Classified {n_cells} of {total_cells} cells')
+
+def get_metrics(win_list, win_indexes, classif_dir, out_dir, taxonomy):
+    """Calculate calibration metrics for each cell in the grid"""
+    # win_list: list of Window objects
+    # win_indexes: array of selected window indexes
+    # classif_dir: directory containing classification results
+    # out_dir: metrics directory
+    # taxonomy: pandas dataframe containing the training set's extended taxonomy
+    
+    for res_file in os.listdir(classif_dir):
+        classif_results = np.load(classif_dir + '/' +res_file)
+        window = win_list[win_indexes == classif_results['params'][0]][0]
+        win_tax = taxonomy.loc[window.taxonomy].to_numpy()
+        aprf_metrics, cross_entropy = cal_metrics.get_metrics(classif_results, win_tax)
+        np.savez(out_dir + '/' + re.sub('.npz', '_metrics.npz', res_file), metrics = aprf_metrics, cross_entropy = cross_entropy, params = classif_results['params'])
 #%% classes
 class Calibrator:
     def __init__(self, out_dir=None):
-        self.save = False # indicates if a save location is set, if True, calibration reports are stored to files
         if not out_dir is None:
             self.set_outdir(out_dir)
     
@@ -221,14 +202,15 @@ class Calibrator:
         try:
             os.mkdir(out_dir)
         except FileExistsError:
-            raise Exception(f'Specified output directory "{out_dir}" already exists. Pick a different name or set argmuent "clear" as True')
-        self.save = True
+            raise Exception(f'Specified output directory "{out_dir}" already exists')
         # make a directory to store classification reports
         os.makedirs(self.metrics_dir)
         os.makedirs(self.classif_dir)
         os.makedirs(self.plots_dir)
-        # os.makedirs(self.reports_dir)
-        # os.makedirs(self.warn_dir)
+        # build a file handler
+        fh = logging.FileHandler(self.out_dir + '/calibration.log')
+        fh.setLevel(logging.INFO)
+        logger.addHandler(fh)
         
     def set_database(self, database):
         self.db = database
@@ -328,7 +310,6 @@ class Calibrator:
         win_indexes, win_list, rej_indexes, rej_list = cal_preprocess.collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
         report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file)
         report_taxa(win_list, win_indexes, self.guide, self.tax_ext, tax_report)
-        
         t_collapse_1 = time.time()
         logger.info(f'Collapsed {len(win_list)} of {len(self.windows)} windows in {t_collapse_1 - t_collapse_0:.3f} seconds')
         
@@ -340,114 +321,51 @@ class Calibrator:
         # select sites
         logger.info('Selecting informative sites...')
         t_sselection_0 = time.time()
-        
         windows_sites = cal_preprocess.select_sites(win_list, self.tax_ext, rank, min_n, max_n, step_n)
         report_sites_ext(win_indexes, win_list, windows_sites, n_range, ext_site_report)
         report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_file)
-        
         t_sselection_1 = time.time()
         logger.info(f'Site selection finished in {t_sselection_1 - t_sselection_0:.3f} seconds')
         
         # calculate distances
         logger.info('Calculating paired distances...')
         t_distance_0 = time.time()
-        
         all_distances = [] # contains one 3d array per window. Arrays have shape (n, #seqs, #seqs), contain paired distances for every level of n
-        # TODO: parallel process
         for window, win_sites in zip(win_list, windows_sites):
             all_distances.append(cal_dists.get_distances(window, win_sites, cost_mat))
-        
         t_distance_1 = time.time()
         logger.info(f'Distance calculation finished in {t_distance_1 - t_distance_0:.3f} seconds')
-
-        # sort neighbours
-        logger.info('Sorting neighbours...')
-        t_neighbours_0 = time.time()
-        
-        window_packages = []
-        for distances in all_distances:
-            # sort distances and compress them into orbitals
-            # sorted_distances and sorted_indexes are 3d arrays of shape (n, #seqs, #seqs - 1), 3rd dimension -1 because we substract distance to self
-            # compressed is a list of len # seqs, each item is a 2d array of shape (3, # orbitals) (# orbitals vary among sequences), row0: orbital distances, row1: orbital positions, row2:orbital counts (sum = #seqs - 1)
-            sorted_distances, sorted_indexes, compressed = cal_neighsort.sort_compress(distances)
-            # build classification packages
-            window_packages.append(cal_neighsort.build_packages(compressed, sorted_indexes, n_range, k_range, criterion))
-        
-        t_neighbours_1 = time.time()
-        logger.info(f'Sorted neighbours in {t_neighbours_1 - t_neighbours_0:.3f} seconds')
         
         # classify
         logger.info('Classifying...')
         t_classification_0 = time.time()
-        
-        # get supports
-        for win_idx, window, win_package in zip(win_indexes, win_list, window_packages):
-            win_tax = self.tax_ext.loc[window.taxonomy].to_numpy() # get the taxonomic classifications for the window as an array of shape: # seqs in window, # ranks
-            # get packages for a single window
-            for (n, k), package in win_package.items():
-                # get individual packages
-                id_array, data_array = cal_classify.classify_V(package, win_tax, threads)
-                predicted_u, real_u_support, predicted_w, real_w_support, predicted_d, real_d_support = cal_classify.get_supports(id_array, data_array, win_tax)
-                # save classification results
-                np.savez(self.classif_dir + f'/{win_idx}_{n}_{k}.npz',
-                         predicted_u = predicted_u,
-                         predicted_w = predicted_w,
-                         predicted_d = predicted_d,
-                         real_u_support = real_u_support,
-                         real_w_support = real_w_support,
-                         real_d_support = real_d_support,
-                         params = np.array([win_idx, n, k]))
-        
+        classify(all_distances, win_list, win_indexes, self.tax_ext, n_range, k_range, self.classif_dir, criterion, threads)
         t_classification_1 = time.time()
         logger.info(f'Finished classifications in {t_classification_1 - t_classification_0:.3f} seconds')
         
         # get metrics
         logger.info('Calculating metrics...')
         t_metrics_0 = time.time()
-        
-        win_dict = {w_idx:win for w_idx,win in zip(win_indexes, win_list)} # use this to locate the right window from the file's parameters
-        for res_file in os.listdir(self.classif_dir):
-            results = np.load(self.classif_dir + '/' +res_file)
-            window = win_dict[results['params'][0]]
-            real_tax = np.nan_to_num(self.tax_ext.loc[window.taxonomy].to_numpy(), nan=-2) # undetermined taxa in real taxon are marked with -2 to distinguish them from undetermined taxa in predicted
-            metrics, cross_entropy, valid_taxa = cal_metrics.get_metrics0(results, real_tax)
-            np.savez(self.metrics_dir + '/' + re.sub('.npz', '_metrics.npz', res_file), metrics = metrics, cross_entropy = cross_entropy, valid_taxa = valid_taxa, params = results['params'])
-        
+        get_metrics(win_list, win_indexes, self.classif_dir, self.metrics_dir, self.tax_ext)
         t_metrics_1 = time.time()
         logger.info(f'Calculated metrics in {t_metrics_1 - t_metrics_0:.3f} seconds')
         
         # report
         logger.info('Building report...')
         t_report_0 = time.time()
-        
-        cross_entropy_report, acc_report, prc_report, rec_report, f1_report = build_reports(win_indexes, self.metrics_dir, self.ranks)
-        post_process(self.windows, self.guide, self.ranks, ce_report=cross_entropy_report)
-        post_process(self.windows, self.guide, self.ranks, met_report=acc_report)
-        post_process(self.windows, self.guide, self.ranks, met_report=prc_report)
-        post_process(self.windows, self.guide, self.ranks, met_report=rec_report)
-        post_process(self.windows, self.guide, self.ranks, met_report=f1_report)
-        
-        cross_entropy_report.to_csv(self.out_dir + '/cross_entropy.csv')
-        acc_report.to_csv(self.out_dir + '/acc_report.csv')
-        prc_report.to_csv(self.out_dir + '/prc_report.csv')
-        rec_report.to_csv(self.out_dir + '/rec_report.csv')
-        f1_report.to_csv(self.out_dir + '/f1_report.csv')
-        
+        ce_file, acc_file, prc_file, rec_file, f1_file = cal_report.build_reports(win_indexes, self.metrics_dir, self.out_dir, self.ranks, self.guide)
         t_report_1 = time.time()
         logger.info(f'Finished building reports in {t_report_1 - t_report_0:.3f} seconds')
         
         # # plot results
         logger.info('Plotting results...')
         t_plots_0 = time.time()
-        
-        if self.save:
-            with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
-                for mt_report, mt in zip((acc_report, prc_report, rec_report, f1_report),
-                                         ('acc', 'prc', 'rec', 'f1')):
-                    executor.submit(cal_plot.plot_results, mt_report, self.guide, self.ranks, self.windows, mt, self.plots_dir, collapse_hm, self.custom)
-            cal_plot.plot_CE_results(cross_entropy_report, self.ranks, self.windows, self.plots_dir)
-            pass
-        
+        # plot aprf
+        for report_file, metric in zip((acc_file, prc_file, rec_file, f1_file),
+                                       ('Accuracy', 'Precision', 'Recall', 'F1 score')):
+            cal_plot.plot_aprf(report_file, metric, self.windows, out_dir = self.plots_dir)
+        # plot ce
+        cal_plot.plot_CE_results(ce_file, self.windows, out_dir = self.plots_dir)
         t_plots_1 = time.time()
         logger.info(f'Finished in {t_plots_1 - t_plots_0:.3f} seconds')
         return

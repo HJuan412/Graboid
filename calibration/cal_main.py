@@ -166,9 +166,10 @@ def get_metrics(win_list, win_indexes, classif_dir, out_dir, taxonomy):
     # out_dir: metrics directory
     # taxonomy: pandas dataframe containing the training set's extended taxonomy
     
+    win_array = np.array(win_list)
     for res_file in os.listdir(classif_dir):
         classif_results = np.load(classif_dir + '/' +res_file)
-        window = win_list[win_indexes == classif_results['params'][0]][0]
+        window = win_array[win_indexes == classif_results['params'][0]][0]
         win_tax = taxonomy.loc[window.taxonomy].to_numpy()
         aprf_metrics, cross_entropy = cal_metrics.get_metrics(classif_results, win_tax)
         np.savez(out_dir + '/' + re.sub('.npz', '_metrics.npz', res_file), metrics = aprf_metrics, cross_entropy = cross_entropy, params = classif_results['params'])
@@ -367,5 +368,5 @@ class Calibrator:
         # plot ce
         cal_plot.plot_CE_results(ce_file, self.windows, out_dir = self.plots_dir)
         t_plots_1 = time.time()
-        logger.info(f'Finished in {t_plots_1 - t_plots_0:.3f} seconds')
+        logger.info(f'Finished plotting in {t_plots_1 - t_plots_0:.3f} seconds')
         return

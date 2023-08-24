@@ -10,7 +10,9 @@ Calculate metrics (accuracy, precision, recall, f1 score) for calibration
 
 #%% libraries
 import concurrent.futures
+import glob
 import numpy as np
+import os
 import pandas as pd
 
 #%% functions
@@ -82,6 +84,139 @@ def get_metrics(results, real_tax):
                               get_cross_entropy(results['real_d_support'], real_tax)])
     return metrics, cross_entropy
 
+def aprf_full_report(metrics_dir, metric, guide):
+    """Merge metrics for all parameter combinations for all calibrated taxa"""
+    # returns a dataframe with row index (Rank, Taxon) and column index (Window, n, k, mth)
+    
+    metrics_cols = {'a':2, 'p':3, 'r':4, 'f':5}
+    metric_idx = metrics_cols[metric[0].lower()]
+    
+    # list all metrics files
+    metrics_list = os.listdir(metrics_dir)
+    
+    # first pass, exploratory, list uniqe taxa and parameter combinations
+    uniq_taxa = []
+    params = []
+    for fl in metrics_list:
+        file_npz = np.load(metrics_dir + '/' + fl)
+        tax_data = file_npz['metrics'][0][:,:2].astype(int)
+        uniq_taxa.append(tax_data)
+        
+        fl_params = np.zeros((3,4), int)
+        fl_params[:,:3] = file_npz['params']
+        fl_params[:,3] = [0,1,2]
+        params.append(fl_params)
+    
+    
+    # build index, sorted by rank
+    uniq_taxa = np.concatenate(uniq_taxa)
+    uniq_taxa = uniq_taxa[np.unique(uniq_taxa[:,1], return_index=True)[1]]
+    uniq_taxa = uniq_taxa[np.argsort(uniq_taxa[:,0])]
+    tab_index = pd.MultiIndex.from_frame(guide.loc[uniq_taxa[:,1], ['Rank', 'SciName']], names=['Rank', 'Taxon']) # tab index contains full names, added after table is complete
+    # build columns, multiindex with 4 levels
+    params = np.concatenate(params, dtype=np.int16)
+    params = params[np.lexsort((params[:,3], params[:,2], params[:,1], params[:,0]))]
+    tab_columns = pd.MultiIndex.from_arrays(params.T, names=['Window', 'n', 'k', 'mth'])
+    # build metrics table
+    metrics_tab = pd.DataFrame(index=uniq_taxa[:,1], columns = tab_columns, dtype=np.float16)
+    
+    # second pass, populate table
+    for fl in metrics_list:
+        file_npz = np.load(metrics_dir + '/' + fl)
+        params = file_npz['params']
+        metrics = file_npz['metrics']
+        # metrics is a 3d array of shape (3 (unweighted, wknn, dwknn), # taxa, 6 (rank_id, tax_id, acc, prc, rec, f1))
+        
+        for mth_idx, mth_metrics in enumerate(metrics):
+            taxa = mth_metrics[:,1]
+            pars = tuple(np.append(params, mth_idx))
+            metrics_tab.loc[taxa, pars] = mth_metrics[:,metric_idx]
+    
+    metrics_tab.index = tab_index
+    return metrics_tab
+
+def get_window_CE(window_files, window_taxa, guide):
+    """Build a table with cross entropy for each taxon for each parameter combination in a given window"""
+    params = []
+    # first pass, exploratory. Retrieve parameters
+    for fl in window_files:
+        npz = np.load(fl)
+        
+        fl_params = np.zeros((3,4), int)
+        fl_params[:,:3] = npz['params']
+        fl_params[:,3] = [0,1,2]
+        params.append(fl_params)
+        
+    # Build results and count tables
+    params = np.concatenate(params)
+    columns = pd.MultiIndex.from_arrays(params.T, names='Window n k mth'.split()).sort_values()
+    index = np.unique(window_taxa)
+    index = pd.Index(index[~np.isnan(index)].astype(int))
+    
+    results = pd.DataFrame(-1, index=index, columns=columns, dtype=np.float16)
+    tax_counts = pd.Series(0, index=index, dtype=int)
+    
+    # hierarchic sort taxa
+    sorted_tax = np.lexsort(window_taxa.T)
+    real_taxa = window_taxa[sorted_tax]
+    
+    # second pass, populate tables
+    for fl in window_files:
+        npz = np.load(fl)
+        fl_params = npz['params']
+        real_supports = np.array([npz['real_u_support'],
+                                  npz['real_w_support'],
+                                  npz['real_d_support']])
+        
+        # clip and log supports
+        clipped_supports = np.clip(real_supports, np.exp(-10), 1) # max loss is 10, min support is exp(-10) because log function is defined for > 0 values
+        log_supports = -np.log(clipped_supports)
+        
+        # calculate Cross Entropy for each parameter combination in the window
+        # calculate entropy
+        for rk_idx, rk_taxa in enumerate(real_taxa.T):
+            known_real = ~np.isnan(rk_taxa)
+            rk_log_supports = log_supports[:,:,rk_idx].T[sorted_tax][known_real]
+            
+            rk_taxa = rk_taxa[known_real]
+            
+            taxa, taxa_start, taxa_count = np.unique(rk_taxa, return_index=True, return_counts=True)
+            taxa_end = taxa_start + taxa_count
+            
+            for tax, tax_start, tax_end, tax_count in zip(taxa, taxa_start, taxa_end, taxa_count):
+                tax_log_supp = rk_log_supports[tax_start:tax_end]
+                tax_CE = tax_log_supp.sum(0) / tax_count
+                results.loc[tax, tuple(fl_params)] = tax_CE
+                tax_counts.loc[tax] = tax_count
+    
+    # reindex results, replace taxIDs with (Rank, Taxon)
+    index = pd.MultiIndex.from_frame(guide.loc[results.index, ['Rank', 'SciName']], names='Rank Taxon'.split())
+    results.index = index
+    tax_counts.index = index    
+    return results, tax_counts
+
+def CE_full_report(window_list, window_indexes, classif_dir, taxonomy, guide):
+    """Get the full CE for each taxon for each window, """
+    results = []
+    counts = []
+    for win_idx, window in zip(window_indexes, window_list):
+        win_taxa = taxonomy.loc[window.taxonomy]
+        win_files = glob.glob(classif_dir + f'/{win_idx}*')
+        window_CE, tax_count = get_window_CE(win_files, win_taxa.to_numpy(), guide = guide)
+        results.append(window_CE)
+        tax_count.name = win_idx
+        counts.append(tax_count.to_frame())
+    results = pd.concat(results, axis=1)
+    counts = pd.concat(counts, axis=1).fillna(0).astype(int)
+    
+    # sort results and counts by rank
+    ranks = taxonomy.columns.tolist()
+    rank_dict = {rk:idx for idx,rk in enumerate(ranks)}
+    keyfunk = np.vectorize(lambda x : rank_dict[x])
+    results.sort_index(level=0, key = keyfunk, inplace=True)
+    counts.sort_index(level=0, key = keyfunk, inplace=True)
+    return results, counts
+
 def groupby_np(array, col):
     # array must be sorted by column
     values, starts, counts = np.unique(array[:,col], return_index=True, return_counts=True)
@@ -128,6 +263,7 @@ def build_confusion(pred, real):
     # (confusion.T / confusion.sum(1)).T # get fraction of pred_values / real_values (of the real values of taxon, what proportions are predicted as each taxon)
     # confusion / confusion.sum(0) # get fraction of real_values / pred_values (of the predicted values of taxon, what proportion belong to each REAL taxon)
     return confusion
+
 #%% OLD functions
 def get_window_metrics(win_classif, window_tax):
     # calcualtes the metrics for every parameter combination and taxonomic rank in win_classif

@@ -192,7 +192,7 @@ class Calibrator:
         return 0
     
     def set_outdir(self, out_dir):
-        self.out_dir = out_dir
+        self.out_dir = re.sub('/$', '', out_dir)
         self.tmp_dir = out_dir + '/tmp'
         self.metrics_dir = self.tmp_dir + '/metrics'
         self.classif_dir = self.tmp_dir + '/classification'
@@ -348,6 +348,18 @@ class Calibrator:
         logger.info('Calculating metrics...')
         t_metrics_0 = time.time()
         get_metrics(win_list, win_indexes, self.classif_dir, self.metrics_dir, self.tax_ext)
+        CE_full_report, CE_counts = cal_metrics.CE_full_report(win_list, win_indexes, self.classif_dir, self.tax_ext, self.guide)
+        acc_full_report = cal_metrics.aprf_full_report(self.metrics_dir, 'a', self.guide)
+        prc_full_report = cal_metrics.aprf_full_report(self.metrics_dir, 'p', self.guide)
+        rec_full_report = cal_metrics.aprf_full_report(self.metrics_dir, 'r', self.guide)
+        f1_full_report = cal_metrics.aprf_full_report(self.metrics_dir, 'f', self.guide)
+        # save full_reports
+        CE_full_report.to_csv(self.out_dir + '/full_report__cross_entropy.csv')
+        CE_counts.to_csv(self.out_dir + '/full_report__counts.csv')
+        acc_full_report.to_csv(self.out_dir + '/full_report_accuracy.csv')
+        prc_full_report.to_csv(self.out_dir + '/full_report_precision.csv')
+        rec_full_report.to_csv(self.out_dir + '/full_report_recall.csv')
+        f1_full_report.to_csv(self.out_dir + '/full_report_f1.csv')
         t_metrics_1 = time.time()
         logger.info(f'Calculated metrics in {t_metrics_1 - t_metrics_0:.3f} seconds')
         

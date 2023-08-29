@@ -12,8 +12,8 @@ import argparse
 import os
 import shutil
 # graboid libraries
-from classification import cls_main
-from classification import cls_plots
+from classification import cls_main, cls_parameters, cls_plots
+
 #%%
 ### classification steps
 ## preparations
@@ -120,6 +120,11 @@ cal_parser = subparsers.add_parser('calibrate',
                                    prog='graboid CLASSIFY [common options]',
                                    help='Perform a custom calibration operation',
                                    description='Parameters specific to the calibration operation',
+                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+par_parser = subparsers.add_parser('params',
+                                   prog='graboid CLASSIFY [common options]',
+                                   help='Select classification parameters',
+                                   description='Parameters specific to the parameter selection operation',
                                    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 cls_parser = subparsers.add_parser('classify',
                                    prog='graboid CLASSIFY [common options]',
@@ -233,6 +238,26 @@ cal_parser.add_argument('--threads',
                         type=int,
                         default=1)
 
+# param selection arguments
+par_parser.set_defaults(mode='params')
+par_parser.add_argument('out_dir',
+                        help='Working directory',
+                        type=str)
+par_parser.add_argmuent('window',
+                        help='Calibration window index',
+                        type=int)
+par_parser.add_argument('--metric',
+                        help='Select parameters based on this calibration metric',
+                        choices=['acc', 'prc', 'rec', 'f1', 'ce'],
+                        default='f1')
+par_parser.add_argument('--cal_dir',
+                        help='Calibration directory name (other than the latest). Use only the directory name, do not include absolute/relative path',
+                        type=str)
+par_parser.add_argument('--taxa',
+                        help='Taxa of interest',
+                        type=str,
+                        nargs='*')
+
 # classification arguments
 cls_parser.set_defaults(mode='classify')
 cls_parser.add_argument('out_dir',
@@ -318,8 +343,17 @@ if __name__ == '__main__':
                                         args.criterion,
                                         args.threads)
         
+        if args.mode == 'param':
+            # TODO: this should fail if no calibration has been performed
+            cal_dir = classifier.last_calibration # TODO, make last calibration a symlink directory
+            if not args.cal_dir is None:
+                cal_dir = classifier.calibration_dir + '/' + args.cal_dir
+            metric = args.metric[0].upper()
+            general_params, general_auto, taxa_params, taxa_auto, taxa_collapsed, taxa_diff = cls_parameters.get_parameters(cal_dir, args.window, metric, *args.taxa)
+        
         # operation: classification
         if args.mode == 'classify':
+            # TODO: add automatic parameter selection
             classifier.classify(args.w_start,
                                 args.w_end,
                                 args.n,

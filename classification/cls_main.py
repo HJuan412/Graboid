@@ -19,10 +19,12 @@ import re
 import shutil
 # Graboid libraries
 from calibration import cal_main
+from calibration import cal_metrics
 from classification import cost_matrix
 from classification import cls_classify
 from classification import cls_distance
 from classification import cls_neighbours
+from classification import cls_parameters
 from classification import cls_preprocess
 from classification import cls_report
 
@@ -295,6 +297,11 @@ class ClassifierBase:
         self.__query_acc_file = None
         self.__transition = None
         self.__transversion = None
+        self.__auto_start = None
+        self.__auto_end = None
+        self.__auto_n = None
+        self.__auto_k = None
+        self.__auto_mth = None
         
         # self.out_dir = None
         # self.calibration_dir = None
@@ -338,7 +345,12 @@ class ClassifierBase:
                 'query_acc_file':self.query_acc_file,
                 'last_calibration':self.last_calibration,
                 'transition':self.transition,
-                'transversion':self.transversion}
+                'transversion':self.transversion,
+                'auto_start':self.auto_start,
+                'auto_end':self.auto_end,
+                'auto_n':self.auto_n,
+                'auto_k':self.auto_k,
+                'auto_mth':self.auto_mth}
     
     @property
     def db(self):
@@ -394,6 +406,43 @@ class ClassifierBase:
     @transversion.setter
     def transversion(self, transversion):
         self.__transversion = transversion
+        self.update_meta()
+    
+    # automatic parameters
+    @property
+    def auto_start(self):
+        return self.__auto_start
+    @auto_start.setter
+    def auto_start(self, start):
+        self.__auto_start = start
+        self.update_meta()
+    @property
+    def auto_end(self):
+        return self.__auto_end
+    @auto_end.setter
+    def auto_end(self, end):
+        self.__auto_end = end
+        self.update_meta()
+    @property
+    def auto_n(self):
+        return self.__auto_n
+    @auto_n.setter
+    def auto_n(self, n):
+        self.__auto_n = n
+        self.update_meta()
+    @property
+    def auto_k(self):
+        return self.__auto_k
+    @auto_k.setter
+    def auto_k(self, k):
+        self.__auto_k = k
+        self.update_meta()
+    @property
+    def auto_mth(self):
+        return self.__auto_mth
+    @auto_mth.setter
+    def auto_mth(self, mth):
+        self.__auto_mth = mth
         self.update_meta()
     
     def update_meta(self):
@@ -612,6 +661,83 @@ class Classifier(ClassifierBase):
         
         self.collapsed_params = collapse_params(best_params)
         return
+    
+    def get_parameters(self, calibration_dir, w_idx, w_start, w_end, metric, report, *taxa):
+        """Generate a parameter report, print to screen"""
+        # work dir is the CALIBRATION DIRECTORY containing the full reports
+        # window is an int indicating the window to select the parameters from
+        # metric is a single capital letter indicating the metric to base the parameter selection on
+        # taxa is an optional list of taxa to select the best parameters for
+        
+        # get report files
+        reports = {'A': cal_metrics.read_full_report_tab(calibration_dir + '/report_accuracy.csv'),
+                   'P': cal_metrics.read_full_report_tab(calibration_dir + '/report_precision.csv'),
+                   'R': cal_metrics.read_full_report_tab(calibration_dir + '/report_recall.csv'),
+                   'F': cal_metrics.read_full_report_tab(calibration_dir + '/report_f1.csv'),
+                   'C': cal_metrics.read_full_report_tab(calibration_dir + '/report__cross_entropy.csv')}
+        
+        # get window identifier
+        window_table = pd.read_csv(calibration_dir + '/windows.csv', index_col=0)
+        if not w_idx is None:
+            try:
+                win_coors = window_table.loc[w_idx].to_numpy()
+                window = w_idx
+            except KeyError:
+                raise Exception(f'Given window index not found, available indexes are: {window_table.index.values}')
+        elif not w_start is None and not w_end is None:
+            window_row = window_table.loc[(window_table.Start == w_start) & (window_table.End == w_end)]
+            if window_row.shape[0] != 1:
+                raise Exception('Invalid window coordinates! Too many or too few selected')
+            window = window_row.index[0]
+            win_coors = window_row.to_numpy()
+        else:
+            raise Exception('No valid window index or coordinates given, aborting')
+            
+        try:
+            table = reports[metric]
+        except KeyError:
+            raise Exception(f'Given metric {metric} is not valid. Must be A, P, R, F or C')
+        general_params, general_auto, taxa_params, taxa_auto, taxa_collapsed, taxa_diff = cls_parameters.report_parameters(table, window, metric == 'C', *taxa)
+        
+        def report():
+            selection_metric = {'A':'accuracy',
+                                'P':'precision',
+                                'R':'recall',
+                                'F':'f1',
+                                'C':'cross entropy'}[metric]
+            print(f'# Parameter selection for window {window} [{win_coors[0]} - {win_coors[1]}]')
+            print(f'# Selection based on metric: {selection_metric}')
+            print('\n### General parameters')
+            print(general_params.sort_values('Mean', ascending = metric == 'C'))
+            
+            if not taxa_params is None:
+                print('\n### Taxon specific parameters')
+                print(taxa_params)
+                print('\n### Scores for all parameter combinations')
+                print(taxa_collapsed.T)
+            
+            if len(taxa_diff) > 0:
+                print('\nThe following taxa were not present in the given reports:')
+                for tax in taxa_diff:
+                    print(tax)
+                    
+            methods = ['unweighted', 'wknn', 'dwknn']
+            print('\nAutomatically selected parameters:')
+            print(f'In general:\t n: {general_auto[0]}, k: {general_auto[1]}, method: {methods[general_auto[2]]}')
+            if not taxa_auto is None:
+                print(f'For the given taxa:\t n: {taxa_auto[0]}, k: {taxa_auto[1]}, method: {methods[taxa_auto[2]]}')
+        if report:
+            report()
+        
+        self.auto_start = win_coors[0]
+        self.auto_end = win_coors[1]
+        self.auto_n = general_auto[1]
+        self.auto_k = general_auto[2]
+        self.auto_mth = ['unweighted', 'wknn', 'dwknn'][general_auto[3]]
+        if not taxa_auto is None:
+            self.auto_n = taxa_auto[1]
+            self.auto_k = taxa_auto[2]
+            self.auto_mth = ['unweighted', 'wknn', 'dwknn'][taxa_auto[3]]
     
     # classify using different parameter combinations, register which parameter 
     def classify(self,

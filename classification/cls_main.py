@@ -631,44 +631,30 @@ class Classifier(ClassifierBase):
         self.last_calibration = calibrator.out_dir
     
     # select parameters
-    def select_params(self, cal_dir=None, metric='f1', *taxa):
-        """
-        Select parameter combinations from calibration reports.
-        Usage:
-            1) select_params()
-            2) select_params(metric, tax1, tax2)
-        Pass taxa of interest as optional arguments. If none are given, select
-        parameters using the cross entropy report.
-        If taxa are passed, select parameters using the specified metric (acc, prc, rec, f1)
-        """
-        
-        if cal_dir is None:
-            cal_dir = self.last_calibration
-        reports = {'acc' : cal_dir + 'acc_report.tsv',
-                   'prc' : cal_dir + 'prc_report.tsv',
-                   'rec' : cal_dir + 'rec_report.tsv',
-                   'f1' : cal_dir + '/f1_report.tsv',
-                   'ce' : cal_dir + '/cross_entropy.tsv'}
-        
-        if len(taxa) == 0:
-            report = pd.read_csv(reports['ce'], index_col=0)
-            best_params, warnings = get_params_ce(report, self.ranks)
-        else:
-            report = pd.read_csv(reports[metric], index_col=0)
-            best_params, warnings = get_params_met(taxa, report)
-        
-        report_params(best_params, warnings, cal_dir + '/params_report.txt', metric, *taxa)
-        
-        self.collapsed_params = collapse_params(best_params)
-        return
-    
-    def get_parameters(self, calibration_dir, w_idx, w_start, w_end, metric, report, *taxa):
+    def select_parameters(self, calibration_dir, w_idx, w_start, w_end, metric, report, *taxa):
         """Generate a parameter report, print to screen"""
         # work dir is the CALIBRATION DIRECTORY containing the full reports
         # window is an int indicating the window to select the parameters from
         # metric is a single capital letter indicating the metric to base the parameter selection on
         # taxa is an optional list of taxa to select the best parameters for
         
+        # verify calibration directory
+        if self.last_calibration is None:
+            raise Exception('No calibration has been performed, run the calibration step before attempting to select parameters')
+        
+        if calibration_dir is None:
+            # no calibration directory provided, default to the last calibration
+            calibration_dir = self.last_calibration
+        else:
+            # calibration directory was provided, verify before selecting
+            cal_dirs = os.listdir(self.calibration_dir)
+            if not calibration_dir in cal_dirs:
+                print(f'Calibration directory {calibration_dir} not found among the calibration runs')
+                print('Available calibration directories include:')
+                for cdir in cal_dirs:
+                    print('\t' + cdir)
+                raise Exception('No calibration directory')
+                    
         # get report files
         reports = {'A': cal_metrics.read_full_report_tab(calibration_dir + '/report_accuracy.csv'),
                    'P': cal_metrics.read_full_report_tab(calibration_dir + '/report_precision.csv'),

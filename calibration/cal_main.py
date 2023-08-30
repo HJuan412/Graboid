@@ -113,7 +113,7 @@ def report_taxa(windows, win_indexes, guide, guide_ext, report_file):
     uniq_idxs = []
     for rk, row in merged_guides.T.iterrows():
         uniq_idxs.append(row.dropna().unique())
-    count_tab = pd.DataFrame(0, index = np.concatenate(uniq_idxs), columns=win_indexes)
+    count_tab = pd.DataFrame(0, index = np.concatenate(uniq_idxs), columns=pd.Series(win_indexes, name = 'window'))
     
     # for count instances of each taxon (high level taxa include representatives of child taxa)
     for win_idx, win in zip(win_indexes, windows):
@@ -125,11 +125,14 @@ def report_taxa(windows, win_indexes, guide, guide_ext, report_file):
     # update headers
     count_tab['Rank'] = guide.loc[count_tab.index, 'Rank']
     count_tab['Taxon'] = guide.loc[count_tab.index, 'SciName']
-    count_tab = count_tab.set_index(['Taxon', 'Rank'])
-    count_tab.columns = pd.MultiIndex.from_tuples([(win.start, win.end) for win in windows], names=['w_start', 'w_end'])
+    count_tab = count_tab.set_index(['Rank', 'Taxon'])
     
+    with open(report_file, 'w') as handle:
+        handle.write('# Effective sequences for each taxa found in collapsed calibration windows:\n')
+        for win_idx, window in zip(win_indexes, windows):
+            handle.write(f'# Window {win_idx}: [{window.start} - {window.end}]\n')
     # save report
-    count_tab.to_csv(report_file)
+    count_tab.to_csv(report_file, sep='\t', mode='a')
 
 def classify(win_distances, win_list, win_indexes, taxonomy, n_range, k_range, out_dir, criterion='orbit', threads=1):
     """Direct support calculation and classification for each calibration window"""

@@ -238,39 +238,60 @@ def build_confusion(pred, real):
     # pred is the predicted array, shape (#seqs, #ranks)
     # real is the real taxonomy of the calibration sequences, shape (#seqs, #ranks)
     
-    # returns pandas dataframe of shape (#taxa, #taxa) with index multiindex(rank, real_taxon) and columns multiindex(rank, pred_taxon)
-    # contains COUNT of predictions
-    n_ranks = real.shape[1]
-    n_seqs = real.shape[0]
-    rank_indexes = np.tile(np.arange(n_ranks, dtype=int), (n_seqs, 1))
+    # returns 2d-array of shape (#taxa, #taxa + 1)
+        # first column contains the taxIDs (already sorted by rank)
+        # rows: REAL taxa
+        # columns: PREDICTED taxa
+        # confusion[i, j]: instances belonging to taxon i classified as taxon j
+        # confusion[:,1:].sum(axis=0) gives the total PREDICTIONS for each taxon
+        # confusion[:,1:].sum(axis=1) gives the total instances of REAL taxa for which a prediction was made, real counts for each taxa in each column are stored in the taxa_report
     
-    known_real = ~np.isnan(real)
-        
-    flat_known = known_real.flatten()
-    flat_real = real.flatten()[flat_known].astype(int)
-    flat_pred = pred.flatten()[flat_known].astype(int)
-    flat_ranks = rank_indexes.flatten()[flat_known]
+    # sort rows of pred and real arrays by hierarchical order based on the real taxa table
+    sorted_rows = np.lexsort(list((col for col in real.T[::-1])))
+    real = real[sorted_rows]
+    pred = pred[sorted_rows]
+
+    # pre build confusion table
+    taxa = np.array([], dtype=int)
+    for row in real.T:
+        taxa = np.concatenate((taxa, np.unique(row)))
+    taxa = taxa[taxa >= 0]
+    confusion = pd.DataFrame(0, index=taxa, columns=taxa, dtype=int)
     
-    sorted_headers = np.lexsort((flat_real, flat_ranks))
-    flat_ranks = flat_ranks[sorted_headers]
-    flat_real = flat_real[sorted_headers]
-    flat_pred = flat_pred[sorted_headers]
+    for real_col, pred_col in zip(real.T, pred.T):
+        real_taxa, starts, counts = np.unique(real_col, return_index=True, return_counts=True)
+        ends = starts + counts
+        starts = starts[real_taxa >= 0]
+        ends = ends[real_taxa >= 0]
+        counts = counts[real_taxa >= 0]
+        real_taxa = real_taxa[real_taxa >= 0]
+        for real_tax, start, end, count in zip(real_taxa, starts, ends, counts):
+            pred_tax_array = pred_col[start:end]
+            pred_tax, pred_counts = np.unique(pred_tax_array, return_counts=True)
+            confusion.loc[real_tax, pred_tax] = pred_counts
+    try:
+        confusion.drop(columns=-1, inplace=True)
+    except KeyError:
+        pass
+    return confusion
+
+def confusion_matrix(win_taxa, window, classif_file, method, guide):
+    """Build a confusion matrix dataframe with multiindex rank, taxon for real (rows) and predicted (columns) taxa"""
+    # win_taxa: npz file generated during grid search, contains the taxonomy for every collapsed window
+    # window: window index
+    # classif_file: file containing the classification results for a given parameter combination (must belong to the given window)
+    # method: u/w/d, weighting method used
+    # guide: taxonomy guide containing scientific name and rank for each taxID
     
-    collapsed_taxa, collapsed_idxs = np.unique(flat_real, return_index=True)
-    collapsed_idxs = np.sort(collapsed_idxs)
+    # returns dataframe of shape (#taxa, #taxa), index:multiindex (Rank, Taxa), columns:multiindex (Rank, Taxa)
     
-    confusion_index = pd.MultiIndex.from_arrays((flat_ranks[collapsed_idxs], flat_real[collapsed_idxs].astype(int)), names=['rank', 'real_taxon'])
-    confusion_columns = pd.MultiIndex.from_arrays((flat_ranks[collapsed_idxs], flat_real[collapsed_idxs].astype(int)), names=['rank', 'pred_taxon'])
-    confusion = pd.DataFrame(0, index=confusion_index, columns=confusion_columns)
-    
-    for rk, rk_subtab in groupby_np(np.array((flat_ranks, flat_real, flat_pred)).T, 0):
-        for real_tax, tax_subtab in groupby_np(rk_subtab, 1):
-            pred_taxa, pred_counts = np.unique(tax_subtab, return_counts=True)
-            confusion.loc[rk, rk].loc[real_tax, pred_taxa] = pred_counts
-    
-    # get fractions
-    # (confusion.T / confusion.sum(1)).T # get fraction of pred_values / real_values (of the real values of taxon, what proportions are predicted as each taxon)
-    # confusion / confusion.sum(0) # get fraction of real_values / pred_values (of the predicted values of taxon, what proportion belong to each REAL taxon)
+    real = np.load(win_taxa)[str(window)]
+    pred = np.load(classif_file)[f'predicted_{method[0].lower()}']
+    confusion = build_confusion(pred, real)
+    index = pd.MultiIndex.from_frame(guide.loc[confusion.index, ['Rank', 'SciName']].rename(columns={'SciName':'Taxon'}))
+    cols = pd.MultiIndex.from_frame(guide.loc[confusion.columns, ['Rank', 'SciName']].rename(columns={'SciName':'Taxon'}))
+    confusion.index = index
+    confusion.columns = cols
     return confusion
 
 #%% OLD functions

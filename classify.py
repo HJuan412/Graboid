@@ -247,14 +247,14 @@ par_parser.add_argmuent('window',
                         help='Calibration window index',
                         type=int)
 par_parser.add_argument('--metric',
-                        help='Select parameters based on this calibration metric',
+                        help='Calibration metric used for parameter selection',
                         choices=['acc', 'prc', 'rec', 'f1', 'ce'],
                         default='f1')
 par_parser.add_argument('--cal_dir',
-                        help='Calibration directory name (other than the latest). Use only the directory name, do not include absolute/relative path',
+                        help='Calibration directory to be used in parameter selection. If none is provided the latest run will be used',
                         type=str)
 par_parser.add_argument('--taxa',
-                        help='Taxa of interest',
+                        help='Select parameters that optimize selection for the given taxa',
                         type=str,
                         nargs='*')
 
@@ -263,6 +263,24 @@ cls_parser.set_defaults(mode='classify')
 cls_parser.add_argument('out_dir',
                         help='Working directory',
                         type=str)
+# automatic parameter selection
+cls_parser.add_argument('--auto',
+                        help='Automatically select parameters',
+                        action='store_true')
+cls_parser.add_argument('-w', '--win_idx',
+                        help='Window index, use alternatively to w_start and w_end',
+                        type=int)
+cls_parser.add_argument('--metric',
+                        help='Calibration metric used for parameter selection',
+                        choices=['acc', 'prc', 'rec', 'f1', 'ce'])
+cls_parser.add_argument('--cal_dir',
+                        help='Calibration directory to be used in parameter selection. If none is provided the latest run will be used',
+                        type=str)
+cls_parser.add_argument('--taxa',
+                        help='Select parameters that optimize selection for the given taxa',
+                        type=str,
+                        nargs='*')
+# classification parameters
 cls_parser.add_argument('-ws', '--w_start',
                         help='Start coordinate for the classification window',
                         type=int)
@@ -344,23 +362,33 @@ if __name__ == '__main__':
                                         args.threads)
         
         if args.mode == 'param':
-            # TODO: this should fail if no calibration has been performed
-            cal_dir = classifier.last_calibration # TODO, make last calibration a symlink directory
-            if not args.cal_dir is None:
-                cal_dir = classifier.calibration_dir + '/' + args.cal_dir
             metric = args.metric[0].upper()
-            general_params, general_auto, taxa_params, taxa_auto, taxa_collapsed, taxa_diff = cls_parameters.get_parameters(cal_dir, args.window, metric, *args.taxa)
+            classifier.select_parameters(args.cal_dir, args.window, None, None, metric, True, *args.taxa)
         
         # operation: classification
         if args.mode == 'classify':
-            # TODO: add automatic parameter selection
-            classifier.classify(args.w_start,
-                                args.w_end,
-                                args.n,
-                                args.k,
+            start = args.w_start
+            end = args.w_end
+            n = args.n
+            k = args.k
+            mth = args.method
+            if args.auto:
+                # no previous selection or user has given selection parameters, perform a new selection
+                if classifier.auto_start is None or (not args.win_idx is None and not args.metric is None):
+                    classifier.select_parameters(args.cal_dir, args.win_idx, args.w_start, args.w_end, args.metric, False, args.taxa)
+                start = classifier.auto_start
+                end = classifier.auto_end
+                n = classifier.auto_n
+                k = classifier.auto_k
+                mth = classifier.auto_mth
+                
+            classifier.classify(start,
+                                end,
+                                n,
+                                k,
                                 args.rank,
                                 args.row_thresh,
                                 args.col_thresh,
                                 args.min_seqs,
                                 args.criterion,
-                                args.method)
+                                mth)

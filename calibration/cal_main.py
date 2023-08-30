@@ -36,6 +36,7 @@ sh.setLevel(logging.DEBUG)
 logger.addHandler(sh)
 
 #%% functions
+# report functions
 def report_params(date, database, n_range, k_range, criterion, row_thresh, col_thresh, min_seqs, rank, threads, report_file):
     sep = '#' * 40 + '\n'
     with open(report_file, 'w') as handle:
@@ -73,8 +74,11 @@ def report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file):
         handle.write('Collapsed windows:\n')
         handle.write(repr(collapsed_tab))
         handle.write('\n')
-        handle.write('Rejected windows:\n')
-        rejected_tab.to_csv(handle, sep='\t', header=None, index=None)
+        if len(rejected_tab) > 0:
+            handle.write('Rejected windows:\n')
+            rejected_tab.to_csv(handle, sep='\t', header=None, index=None)
+        else:
+            handle.write('No windows were rejected\n')
         handle.write('\n')
 
 def report_sites_ext(win_indexes, win_list, windows_sites, n_range, ext_site_report):
@@ -105,12 +109,12 @@ def report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_fi
         handle.write(f'Extended site report: {ext_site_report}\n')
         handle.write(repr(sites_tab))
 
-def report_taxa(windows, win_indexes, guide, guide_ext, report_file):
+def report_taxa(windows, win_indexes, guide, guide_ext, tax_report_file, report_file):
     # Count the number of instances of each taxon per window
     
     # get taxids for each window
     merged_guides = pd.concat([guide_ext.loc[win.taxonomy] for win in windows])
-    uniq_idxs = []
+    uniq_idxs = [] # contains the unique KNOWN taxa for each rank (sorted by rank)
     for rk, row in merged_guides.T.iterrows():
         uniq_idxs.append(row.dropna().unique())
     count_tab = pd.DataFrame(0, index = np.concatenate(uniq_idxs), columns=pd.Series(win_indexes, name = 'window'))
@@ -122,18 +126,27 @@ def report_taxa(windows, win_indexes, guide, guide_ext, report_file):
             counts = row.value_counts()
             count_tab.loc[counts.index, win_idx] = counts.values
     
-    # update headers
-    count_tab['Rank'] = guide.loc[count_tab.index, 'Rank']
-    count_tab['Taxon'] = guide.loc[count_tab.index, 'SciName']
-    count_tab = count_tab.set_index(['Rank', 'Taxon'])
+    # update index
+    index = pd.MultiIndex.from_frame(guide.loc[count_tab.index, ['Rank', 'SciName']].rename(columns={'SciName':'Taxon'}))
+    count_tab.index = index
     
-    with open(report_file, 'w') as handle:
+    with open(tax_report_file, 'w') as handle:
         handle.write('# Effective sequences for each taxa found in collapsed calibration windows:\n')
         for win_idx, window in zip(win_indexes, windows):
             handle.write(f'# Window {win_idx}: [{window.start} - {window.end}]\n')
     # save report
-    count_tab.to_csv(report_file, sep='\t', mode='a')
+    count_tab.to_csv(tax_report_file, sep='\t', mode='a')
+    
+    # summary tax report, write n tax per rank for each window
+    summary_report = pd.DataFrame(index = count_tab.columns, columns = merged_guides.columns)
+    for rk, rk_tab in count_tab.groupby(level=0):
+        summary_report.loc[:, rk] = (rk_tab > 0).sum(0)
+    with open(report_file, 'a') as handle:
+        handle.write('Taxa per rank per window:\n')
+        handle.write(repr(summary_report))
+        handle.write('\n')
 
+# grid search functions
 def classify(win_distances, win_list, win_indexes, taxonomy, n_range, k_range, out_dir, criterion='orbit', threads=1):
     """Direct support calculation and classification for each calibration window"""
     # win_distances: list of 3d-numpy arrays of shape (#seqs, #seqs, len(n_range))
@@ -313,7 +326,7 @@ class Calibrator:
         logger.info('Collapsing windows...')
         win_indexes, win_list, rej_indexes, rej_list = cal_preprocess.collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
         report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file)
-        report_taxa(win_list, win_indexes, self.guide, self.tax_ext, tax_report)
+        report_taxa(win_list, win_indexes, self.guide, self.tax_ext, tax_report, report_file)
         # build windows tab
         win_tab = pd.DataFrame(self.windows, columns = ['Start', 'End'])
         win_tab.index.name = 'Window'

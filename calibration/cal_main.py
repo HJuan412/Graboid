@@ -314,6 +314,15 @@ class Calibrator:
         win_indexes, win_list, rej_indexes, rej_list = cal_preprocess.collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
         report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file)
         report_taxa(win_list, win_indexes, self.guide, self.tax_ext, tax_report)
+        # build windows tab
+        win_tab = pd.DataFrame(self.windows, columns = ['Start', 'End'])
+        win_tab.index.name = 'Window'
+        win_tab.to_csv(self.out_dir + '/windows.csv')
+        # store window taxonomies (used for building confusion matrices later)
+        win_taxa = {}
+        for win_idx, window in zip(win_indexes, win_list):
+            win_taxa[str(win_idx)] = self.tax_ext.loc[window.taxonomy].fillna(-1).to_numpy().astype(int)
+        np.savez(self.out_dir + '/win_taxa.npz', **win_taxa)
         t_collapse_1 = time.time()
         logger.info(f'Collapsed {len(win_list)} of {len(self.windows)} windows in {t_collapse_1 - t_collapse_0:.3f} seconds')
         
@@ -357,12 +366,12 @@ class Calibrator:
         rec_full_report = cal_metrics.aprf_full_report(self.metrics_dir, 'r', self.guide)
         f1_full_report = cal_metrics.aprf_full_report(self.metrics_dir, 'f', self.guide)
         # save full_reports
-        CE_full_report.to_csv(self.out_dir + '/full_report__cross_entropy.csv')
-        CE_counts.to_csv(self.out_dir + '/full_report__counts.csv')
-        acc_full_report.to_csv(self.out_dir + '/full_report_accuracy.csv')
-        prc_full_report.to_csv(self.out_dir + '/full_report_precision.csv')
-        rec_full_report.to_csv(self.out_dir + '/full_report_recall.csv')
-        f1_full_report.to_csv(self.out_dir + '/full_report_f1.csv')
+        CE_full_report.to_csv(self.out_dir + '/report__cross_entropy.csv') # double underscore so CE doesn't mix with APRF
+        # CE_counts.to_csv(self.out_dir + '/full_report__counts.csv') # this information is already given in taxa_report
+        acc_full_report.to_csv(self.out_dir + '/report_accuracy.csv')
+        prc_full_report.to_csv(self.out_dir + '/report_precision.csv')
+        rec_full_report.to_csv(self.out_dir + '/report_recall.csv')
+        f1_full_report.to_csv(self.out_dir + '/report_f1.csv')
         t_metrics_1 = time.time()
         logger.info(f'Calculated metrics in {t_metrics_1 - t_metrics_0:.3f} seconds')
         

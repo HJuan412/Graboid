@@ -146,6 +146,74 @@ def report_taxa(windows, win_indexes, guide, guide_ext, tax_report_file, report_
         handle.write(repr(summary_report))
         handle.write('\n')
 
+def build_APRF_summary(table, out_file=None):
+    """Get best score for a given metric, for each window"""
+    # prepare report(get best metric for each taxon for each window)
+    summary = pd.DataFrame(index=table.index, columns = pd.MultiIndex.from_product((table.columns.levels[0], ('n', 'k', 'Method', 'Score'))))
+    for win, win_tab in table.T.groupby(level=0, sort=False):
+        scores = win_tab.max(0)
+        locs = np.argmax(win_tab.values, 0)[scores >= 0]
+        scores = scores.loc[scores >= 0]
+        params = win_tab.index[locs].to_frame().values
+        summary.loc[scores.index, (win, 'Score')] = scores
+        summary.loc[scores.index, [(win, 'n'), (win, 'k'), (win, 'Method')]] = params[:,1:]
+    if not out_file is None:
+        summary.to_csv(out_file, sep='\t')
+    return summary
+
+def final_recount(report, out_dir=None):
+    """Count absences, losses, failures and wins"""
+    # for each taxon:
+        # abs_report: lists windows in which the taxon is absent
+        # lose_report: lists windows in which the taxon yields a score of 0
+        # fail_report: lists taxa that are absent or yield 0 in all windows
+        # win_report: lists windows in which the taxon yields a score over 0
+        
+    # get absents (taxa that are missing in one or more windows)
+    abs_scores = report.droplevel(0, axis=1)['Score'].isna()
+    abs_scores = abs_scores.loc[abs_scores.sum(1) > 0]
+    x_array = np.full(abs_scores.shape, np.nan, dtype=object)
+    x_array[abs_scores.to_numpy()] = 'X'
+    abs_report = pd.DataFrame(x_array, abs_scores.index, columns=report.columns.levels[0])
+    abs_report['Total_absences'] = abs_scores.sum(1)
+    
+    # get loses (taxa that have score 0 in one or more windows)
+    lose_scores = report.droplevel(0, axis=1)['Score'] == 0
+    lose_scores = lose_scores.loc[lose_scores.sum(1) > 0]
+    x_array = np.full(lose_scores.shape, np.nan, dtype=object)
+    x_array[lose_scores.to_numpy()] = 'X'
+    lose_report = pd.DataFrame(x_array, lose_scores.index, columns=report.columns.levels[0])
+    lose_report['Total_losses'] = lose_scores.sum(1)
+    
+    # get failures (taxa that have only 0 or null values)
+    lose_scores = report.droplevel(0, axis=1)['Score'] == 0
+    abs_scores = report.droplevel(0, axis=1)['Score'].isna()
+    fail_scores = lose_scores | abs_scores
+    fail_scores = fail_scores.loc[fail_scores.sum(1) == fail_scores.shape[1]]
+    fail_report = fail_scores.index.to_frame().reset_index(drop=True)
+    
+    # get successes (taxa that have valid score over 0 in one or more windows)
+    win_scores = report.droplevel(0, axis=1)['Score'] > 0
+    win_scores = win_scores.loc[win_scores.sum(1) > 0]
+    x_array = np.full(win_scores.shape, np.nan, dtype=object)
+    x_array[win_scores.to_numpy()] = 'X'
+    win_report = pd.DataFrame(x_array, win_scores.index, columns=report.columns.levels[0])
+    win_report['Total_successes'] = win_scores.sum(1)
+    
+    if not out_dir is None:
+        with open(out_dir + '/recount_absences.csv', 'w') as handle:
+            handle.write('# Absent taxa per window\n')
+            handle.write(repr(abs_report))
+        with open(out_dir + '/recount_loses.csv', 'w') as handle:
+            handle.write('# Taxa with a score of 0 per window\n')
+            handle.write(repr(lose_report))
+        with open(out_dir + '/recount_failures.csv', 'w') as handle:
+            handle.write('# Taxa that are missing or yeld a score of 0 in all windows\n')
+            handle.write(repr(fail_report))
+        with open(out_dir + '/recount_wins.csv', 'w') as handle:
+            handle.write('# Taxa with score greater than 0 per window\n')
+            handle.write(repr(win_report))
+
 # grid search functions
 def classify(win_distances, win_list, win_indexes, taxonomy, n_range, k_range, out_dir, criterion='orbit', threads=1):
     """Direct support calculation and classification for each calibration window"""
@@ -391,7 +459,12 @@ class Calibrator:
         # report
         logger.info('Building report...')
         t_report_0 = time.time()
-        ce_file, acc_file, prc_file, rec_file, f1_file = cal_report.build_reports(win_indexes, self.metrics_dir, self.out_dir, self.ranks, self.guide)
+        # ce_file, acc_file, prc_file, rec_file, f1_file = cal_report.build_reports(win_indexes, self.metrics_dir, self.out_dir, self.ranks, self.guide)
+        summ_acc = build_APRF_summary(acc_full_report, out_file = self.out_dir + '/summary_accuracy.csv')
+        summ_prc = build_APRF_summary(prc_full_report, out_file = self.out_dir + '/summary_precision.csv')
+        summ_rec = build_APRF_summary(rec_full_report, out_file = self.out_dir + '/summary_recall.csv')
+        summ_f1 = build_APRF_summary(f1_full_report, out_file = self.out_dir + '/summary_f1.csv')
+        final_recount(summ_f1)
         t_report_1 = time.time()
         logger.info(f'Finished building reports in {t_report_1 - t_report_0:.3f} seconds')
         

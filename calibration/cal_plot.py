@@ -192,58 +192,63 @@ def build_heatmap(data,
     
     return fig
 
-def build_annot(table):
-    """Build parameter annotations array"""
-    win_idxs = table.columns.get_level_values(0).unique()
-    annot_tab = pd.DataFrame('', index=table.index, columns=win_idxs)
-    for win in win_idxs:
-        annot_tab[win] = 'n: ' + table[(win, 'n')].astype(str) + '\nk: ' + table[(win, 'k')].astype(str) + '\n' + table[(win, 'Method')]
-    annot_tab.fillna('', inplace=True)
-    return annot_tab.to_numpy()
+def get_APRF_heatmap_arrays(report):
+    """Prepare heatmap arrays for the given APRF report"""
+    # returns:
+        # scores, containing the best score for each taxon per window (missing taxa are None != score 0)
+        # annots, contains parameter annotations (missing taxa get an empty string)
+    shape = (report.shape[0], len(report.columns.levels[0]))
+    scores = np.full(shape, np.nan)
+    annots = np.full(shape, '', dtype=object)
+    
+    win_headers = []
+    for w_idx, (win, win_tab) in enumerate(report.groupby(level=0, axis=1, sort=False)):
+        win_headers.append(win)
+        win_array = win_tab.to_numpy().astype(float)
+        valid_rows = ~np.isnan(win_array[:,3])
+        scores[valid_rows, w_idx] = win_array[valid_rows, 3]
+        param_array = win_array[valid_rows,:3].astype(int)
+        annots[valid_rows, w_idx] = np.array(list(map(lambda x : f'n: {x[0]}\nk: {x[1]}\n{"uwd"[x[2]]}', param_array)))
+    scores = pd.DataFrame(scores, index=report.index, columns=win_headers)
+    annots = pd.DataFrame(annots, index=report.index, columns=win_headers)
+    return scores, annots
 
-def plot_aprf(report_file, metric, windows, out_dir, collapse_hm=True, custom=True):
+def plot_APRF(report_tab, metric, windows, out_dir, lincodes, collapse_hm=True, custom=True):
     """Build heatmap for one of the aprf metrics"""
-    # report_file: path to a metric report file
+    # report_tab: table containing a given metric's summary report (best scores per tax per window)
     # metric: full name of the current metric, used to generate the plot title
-    # windows: 2d-array of shape (#windows, 2) containing the coordinates of the represented columns
-    # rank: list of rank names (sorted by hierarchy)
+    # windows: dataframe containing window coordinates
     # out_dir: directory where the generated plots will be stored
+    # lincodes: series with index: SciName and values LinCode + ' ' + SciName
     # custom: adjust column width to relative window lengths
     
     # load report table, extract ranks
-    report = pd.read_csv(report_file, index_col=[0,1], header=[0,1])
-    ranks = report.index.get_level_values(0).unique()
+    scores, annots = get_APRF_heatmap_arrays(report_tab)
     
     # fix report headers
-    report.columns = pd.MultiIndex.from_arrays((report.columns.get_level_values(0).astype(int), report.columns.get_level_values(1)))
-    window_indexes = report.columns.get_level_values(0).unique()
-    windows = windows[window_indexes]
+    windows = windows.loc[scores.columns].to_numpy()
     
     # build a hetamap for each rank
-    discarded = {} # fill store discarded rows
-    for rk in ranks:
+    for rk, rk_scores in scores.groupby(level=0, sort=False):
         title = f'{metric} scores for rank: {rk}'
-        rk_subtab = report.loc[rk]
+        rk_annots = annots.loc[rk]
         
         # extract score and annotation data
-        data = rk_subtab[[(win_idx, 'Score') for win_idx in window_indexes]].to_numpy()
-        annot = build_annot(rk_subtab)
-        indexes = rk_subtab.index # get tax names
+        data = rk_scores.to_numpy()
+        annot = rk_annots.to_numpy()
+        
+        tax_names = rk_scores.droplevel(0).index.values
+        indexes = lincodes.loc[tax_names].values
         
         # filter out empty rows (only unknown or 0 support values)
         non_empty_cells = data > 0
         empty_rows = non_empty_cells.sum(1) == 0 # locations of rows with no scores greater than 0
-        if empty_rows.sum() > 0:
-            # record empty rows
-            discarded[rk] = list(map(lambda x : re.sub('^[^ ]* ', '', x), rk_subtab.index[empty_rows])) # remove lincode from every discarded tax name
         
         if collapse_hm:
             # remove empty rows from data, annotation and tax names
-            data = data[~empty_rows]
+            data = data.loc[~empty_rows]
             annot = annot[~empty_rows]
-            indexes = rk_subtab.index[~empty_rows]
-        
-        data[data == -1] = np.nan # set unknowns to nan to distinguish from 0 score cells
+            indexes = indexes[~empty_rows]
         
         # heatmaps have at most 1000 rows, if a rank (usually only species, MAYBE genus) exceeds the limit, split it
         if len(data) <= 1000:
@@ -255,59 +260,157 @@ def plot_aprf(report_file, metric, windows, out_dir, collapse_hm=True, custom=Tr
                 fig = build_heatmap(data[subplot_idx: subplot_idx + 1000], annot[subplot_idx: subplot_idx + 1000], indexes[subplot_idx: subplot_idx + 1000], windows, title, metric, custom=custom)
                 fig.savefig(out_dir + f'/{metric}_{rk}.{n_subplot + 1}.png', format='png', bbox_inches='tight')
                 plt.close()
-    
-    # register discarded taxa
-    if len(discarded) > 0:
-        with open(out_dir + f'/{metric}_rejected.txt', 'w') as handle:
-            handle.write(f'The following taxa yielded no {metric} scores over 0 for any window:\n')
-            for rk, dcarded in discarded.items():
-                handle.write(f'{rk} ({len(dcarded)}):\n' + '\n'.join(dcarded) + '\n')
 
-def plot_CE_results(report_file, windows, out_dir, figsize=(12,7)):
+def build_annot(table):
+    """Build parameter annotations array"""
+    win_idxs = table.columns.get_level_values(0).unique()
+    annot_tab = pd.DataFrame('', index=table.index, columns=win_idxs)
+    for win in win_idxs:
+        annot_tab[win] = 'n: ' + table[(win, 'n')].astype(str) + '\nk: ' + table[(win, 'k')].astype(str) + '\n' + table[(win, 'Method')]
+    annot_tab.fillna('', inplace=True)
+    return annot_tab.to_numpy()
+
+# TODO: this function build the heatmaps from the report files generated by cal_report.build_reports, now deprecated, delete it (and build_annot) after testing the new one
+# def plot_aprf(report_file, metric, windows, out_dir, collapse_hm=True, custom=True):
+#     """Build heatmap for one of the aprf metrics"""
+#     # report_file: path to a metric report file
+#     # metric: full name of the current metric, used to generate the plot title
+#     # windows: 2d-array of shape (#windows, 2) containing the coordinates of the represented columns
+#     # rank: list of rank names (sorted by hierarchy)
+#     # out_dir: directory where the generated plots will be stored
+#     # custom: adjust column width to relative window lengths
+    
+#     # load report table, extract ranks
+#     report = pd.read_csv(report_file, index_col=[0,1], header=[0,1])
+#     ranks = report.index.get_level_values(0).unique()
+    
+#     # fix report headers
+#     report.columns = pd.MultiIndex.from_arrays((report.columns.get_level_values(0).astype(int), report.columns.get_level_values(1)))
+#     window_indexes = report.columns.get_level_values(0).unique()
+#     windows = windows[window_indexes]
+    
+#     # build a hetamap for each rank
+#     discarded = {} # fill store discarded rows
+#     for rk in ranks:
+#         title = f'{metric} scores for rank: {rk}'
+#         rk_subtab = report.loc[rk]
+        
+#         # extract score and annotation data
+#         data = rk_subtab[[(win_idx, 'Score') for win_idx in window_indexes]].to_numpy()
+#         annot = build_annot(rk_subtab)
+#         indexes = rk_subtab.index # get tax names
+        
+#         # filter out empty rows (only unknown or 0 support values)
+#         non_empty_cells = data > 0
+#         empty_rows = non_empty_cells.sum(1) == 0 # locations of rows with no scores greater than 0
+#         if empty_rows.sum() > 0:
+#             # record empty rows
+#             discarded[rk] = list(map(lambda x : re.sub('^[^ ]* ', '', x), rk_subtab.index[empty_rows])) # remove lincode from every discarded tax name
+        
+#         if collapse_hm:
+#             # remove empty rows from data, annotation and tax names
+#             data = data[~empty_rows]
+#             annot = annot[~empty_rows]
+#             indexes = rk_subtab.index[~empty_rows]
+        
+#         data[data == -1] = np.nan # set unknowns to nan to distinguish from 0 score cells
+        
+#         # heatmaps have at most 1000 rows, if a rank (usually only species, MAYBE genus) exceeds the limit, split it
+#         if len(data) <= 1000:
+#             fig = build_heatmap(data, annot, indexes, windows, title, metric, custom=custom)
+#             fig.savefig(out_dir + f'/{metric}_{rk}.png', format='png', bbox_inches='tight')
+#             plt.close()
+#         else:
+#             for n_subplot, subplot_idx in enumerate(np.arange(0, len(data), 1000)):
+#                 fig = build_heatmap(data[subplot_idx: subplot_idx + 1000], annot[subplot_idx: subplot_idx + 1000], indexes[subplot_idx: subplot_idx + 1000], windows, title, metric, custom=custom)
+#                 fig.savefig(out_dir + f'/{metric}_{rk}.{n_subplot + 1}.png', format='png', bbox_inches='tight')
+#                 plt.close()
+    
+#     # register discarded taxa
+#     if len(discarded) > 0:
+#         with open(out_dir + f'/{metric}_rejected.txt', 'w') as handle:
+#             handle.write(f'The following taxa yielded no {metric} scores over 0 for any window:\n')
+#             for rk, dcarded in discarded.items():
+#                 handle.write(f'{rk} ({len(dcarded)}):\n' + '\n'.join(dcarded) + '\n')
+
+def plot_CE(report_tab, windows, out_dir, figsize=(12,7)):
     """Plot cross entrpoy reuslts"""
-    # report_file: path to a cross entropy report file
-    # windows: 2d-array of shape (#windows, 2) containing the coordinates of the represented columns
+    # report_tab: dataframe containing cross entropy summary (avg CE per rank per param combo)
+    # windows: dataframe containing window coordinates
     # out_dir: directory where the generated plots will be stored
     # figsize: guess
     
-    # load report and extract ranks
-    report = pd.read_csv(report_file)
-    ranks = report.columns[4:]
+    win_labels = '[' + windows.Start + ' - ' + windows.End + ']'
+    y_coords = pd.Series(np.arange(len(report_tab.columns.levels[0]))[::-1], index = report_tab.columns.levels[0])
     
-    # build parameter labels
-    report['params'] = 'n: ' + report.n.astype(str) + ', k: ' + report.k.astype(str) + ', mtd: ' + report['Method']
-    
-    # generate y coordinates for each window (plot is read from top to bottom, so the earlier windows are placed higher)
-    report['y_coord'] = 0
-    for idx, win in enumerate(report.Window.unique()[::-1]):
-        report.loc[report.Window == win, 'y_coord'] = idx
-    
-    # build window labels
-    window_indexes = np.unique(report.Window)[::-1]
-    window_labels = [f'{w0} - {w1}' for w0, w1 in windows[window_indexes]]
-    
-    # generate a plot for each rank
-    for rk in ranks:
+    for rk, rk_row in report_tab.iterrows():
         fig, ax = plt.subplots(figsize = figsize)
-        y = report.y_coord.values
-        x = report[rk].values
-        ax.scatter(x, y, s = 5, marker = 'o', color = 'k') #
+        for win, win_subtab in rk_row.groupby(level=0):
+            y = y_coords.loc[win]
+            x = win_subtab.values
+            best_x = win_subtab.min()
+            best_params = win_subtab.sort_values.index[0]
+            best_label = f'n: {best_params[1]}, k: {best_params[2]}, mth: {"uwd"[best_params[3]]}'
+            ax.scatter(x, y, s = 5, marker = 'o', color = 'k')
+            # annotate minimum entropy
+            ax.scatter(best_x, win, s = 5.5, marker = 'o', color = 'r')
+            ax.text(best_x - 0.2, win + 0.2, best_label, size=10, ha='left')
+        
+        # post process plot
         ax.set_xlim(-0.5, 11) # CE values exist within the [0, 10] range
-        ax.set_ylim(-0.5, y.max() + 0.5) # add vertical padding
-        ax.set_yticks(np.unique(y))
-        ax.set_yticklabels(window_labels)
+        ax.set_ylim(-0.5, y_coords.max() + 0.5) # add vertical padding
+        ax.set_yticks(np.unique(y_coords))
+        ax.set_yticklabels(win_labels.values)
         ax.set_ylabel('Windows')
         ax.set_xlabel('Cross entropy')
-        # annotate minimum entropy
-        for win, win_subtab in report.groupby('y_coord'):
-            best_loc = np.argmin(win_subtab[rk])
-            best_x = win_subtab[rk].min()
-            params = win_subtab.iloc[best_loc].loc['params']
-            ax.text(best_x - 0.2, win + 0.2, params, size=10, ha='left')
-            ax.scatter(best_x, win, s = 5.5, marker = 'o', color = 'r')
         ax.set_title('Cross entropy for rank: ' + rk)
-        
         fig.savefig(out_dir + f'/cross_entropy_{rk}.png', format='png')
+        
+# def plot_CE_results(report_file, windows, out_dir, figsize=(12,7)):
+#     """Plot cross entrpoy reuslts"""
+#     # report_file: path to a cross entropy report file
+#     # windows: 2d-array of shape (#windows, 2) containing the coordinates of the represented columns
+#     # out_dir: directory where the generated plots will be stored
+#     # figsize: guess
+    
+#     # load report and extract ranks
+#     report = pd.read_csv(report_file)
+#     ranks = report.columns[4:]
+    
+#     # build parameter labels
+#     report['params'] = 'n: ' + report.n.astype(str) + ', k: ' + report.k.astype(str) + ', mtd: ' + report['Method']
+    
+#     # generate y coordinates for each window (plot is read from top to bottom, so the earlier windows are placed higher)
+#     report['y_coord'] = 0
+#     for idx, win in enumerate(report.Window.unique()[::-1]):
+#         report.loc[report.Window == win, 'y_coord'] = idx
+    
+#     # build window labels
+#     window_indexes = np.unique(report.Window)[::-1]
+#     window_labels = [f'{w0} - {w1}' for w0, w1 in windows[window_indexes]]
+    
+#     # generate a plot for each rank
+#     for rk in ranks:
+#         fig, ax = plt.subplots(figsize = figsize)
+#         y = report.y_coord.values
+#         x = report[rk].values
+#         ax.scatter(x, y, s = 5, marker = 'o', color = 'k') #
+#         ax.set_xlim(-0.5, 11) # CE values exist within the [0, 10] range
+#         ax.set_ylim(-0.5, y.max() + 0.5) # add vertical padding
+#         ax.set_yticks(np.unique(y))
+#         ax.set_yticklabels(window_labels)
+#         ax.set_ylabel('Windows')
+#         ax.set_xlabel('Cross entropy')
+#         # annotate minimum entropy
+#         for win, win_subtab in report.groupby('y_coord'):
+#             best_loc = np.argmin(win_subtab[rk])
+#             best_x = win_subtab[rk].min()
+#             params = win_subtab.iloc[best_loc].loc['params']
+#             ax.text(best_x - 0.2, win + 0.2, params, size=10, ha='left')
+#             ax.scatter(best_x, win, s = 5.5, marker = 'o', color = 'r')
+#         ax.set_title('Cross entropy for rank: ' + rk)
+        
+#         fig.savefig(out_dir + f'/cross_entropy_{rk}.png', format='png')
 #%% OLD functions
 def extract_data(report, guide, ranks, windows, collapse=True):
     # Add lineage codes to the report

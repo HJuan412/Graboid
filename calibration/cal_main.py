@@ -146,6 +146,17 @@ def report_taxa(windows, win_indexes, guide, guide_ext, tax_report_file, report_
         handle.write(repr(summary_report))
         handle.write('\n')
 
+def build_CE_summary(ce_table, out_file=None):
+    ce_summary = []
+    for rk, rk_subtab in ce_table.groupby(level=0, sort=False):
+        mean_vals = rk_subtab.mean(0)
+        mean_vals.name = rk
+        ce_summary.append(mean_vals)
+    ce_summary = pd.DataFrame(ce_summary)
+    if not out_file is None:
+        ce_summary.to_csv(out_file, sep='\t')
+    return ce_summary
+
 def build_APRF_summary(table, out_file=None):
     """Get best score for a given metric, for each window"""
     # prepare report(get best metric for each taxon for each window)
@@ -464,6 +475,7 @@ class Calibrator:
         summ_prc = build_APRF_summary(prc_full_report, out_file = self.out_dir + '/summary_precision.csv')
         summ_rec = build_APRF_summary(rec_full_report, out_file = self.out_dir + '/summary_recall.csv')
         summ_f1 = build_APRF_summary(f1_full_report, out_file = self.out_dir + '/summary_f1.csv')
+        summ_ce = build_CE_summary(CE_full_report, out_file = self.out_dir + '/summary__cross_entropy.csv')
         final_recount(summ_f1)
         t_report_1 = time.time()
         logger.info(f'Finished building reports in {t_report_1 - t_report_0:.3f} seconds')
@@ -472,11 +484,18 @@ class Calibrator:
         logger.info('Plotting results...')
         t_plots_0 = time.time()
         # plot aprf
-        for report_file, metric in zip((acc_file, prc_file, rec_file, f1_file),
+        lincode_guide = self.guide.set_index('SciName', drop=False)
+        lincode_guide = lincode_guide.LinCode + ' ' +lincode_guide.SciName
+        
+        for report_tab, metric in zip((summ_acc, summ_prc, summ_rec, summ_f1),
                                        ('Accuracy', 'Precision', 'Recall', 'F1 score')):
-            cal_plot.plot_aprf(report_file, metric, self.windows, out_dir = self.plots_dir)
+            # TODO: remove old plot_aprf function
+            # cal_plot.plot_aprf(report_file, metric, self.windows, out_dir = self.plots_dir)
+            cal_plot.plot_APRF(report_tab, metric, win_tab, self.plots_dir, lincode_guide, collapse_hm, custom=True)
+        
         # plot ce
-        cal_plot.plot_CE_results(ce_file, self.windows, out_dir = self.plots_dir)
+        # cal_plot.plot_CE_results(ce_file, self.windows, out_dir = self.plots_dir)
+        cal_plot.plot_CE(summ_ce, win_tab, self.plots_dir)
         t_plots_1 = time.time()
         logger.info(f'Finished plotting in {t_plots_1 - t_plots_0:.3f} seconds')
         return

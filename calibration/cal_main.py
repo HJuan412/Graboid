@@ -23,7 +23,6 @@ sys.path.append("..") # use this to allow importing from a sibling package
 from calibration import cal_classify
 from calibration import cal_dists
 from calibration import cal_metrics
-from calibration import cal_report
 from calibration import cal_plot
 from calibration import cal_preprocess
 from DATA import DATA
@@ -34,6 +33,12 @@ logger.setLevel(logging.DEBUG)
 sh = logging.StreamHandler()
 sh.setLevel(logging.DEBUG)
 logger.addHandler(sh)
+
+# Set display options to show all rows and columns (used for report construction)
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+# Set the option to prevent expanding DataFrame repr
+pd.set_option('display.expand_frame_repr', False)
 
 #%% functions
 # report functions
@@ -75,7 +80,7 @@ def report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file):
         handle.write(repr(collapsed_tab))
         handle.write('\n')
         if len(rejected_tab) > 0:
-            handle.write('Rejected windows:\n')
+            handle.write('\nRejected windows:\n')
             rejected_tab.to_csv(handle, sep='\t', header=None, index=None)
         else:
             handle.write('No windows were rejected\n')
@@ -106,8 +111,9 @@ def report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_fi
     with open(report_file, 'a') as handle:
         handle.write('Sites\n')
         handle.write(sep)
-        handle.write(f'Extended site report: {ext_site_report}\n')
+        handle.write('Non redundant sites selected for each value of n:\n')
         handle.write(repr(sites_tab))
+        handle.write(f'\nExtended site report: {ext_site_report}\n')
 
 def report_taxa(windows, win_indexes, guide, guide_ext, tax_report_file, report_file):
     # Count the number of instances of each taxon per window
@@ -144,7 +150,8 @@ def report_taxa(windows, win_indexes, guide, guide_ext, tax_report_file, report_
     with open(report_file, 'a') as handle:
         handle.write('Taxa per rank per window:\n')
         handle.write(repr(summary_report))
-        handle.write('\n')
+        handle.write('\n\n')
+    return count_tab
 
 def build_CE_summary(ce_table, out_file=None):
     ce_summary = []
@@ -172,7 +179,7 @@ def build_APRF_summary(table, out_file=None):
         summary.to_csv(out_file, sep='\t')
     return summary
 
-def final_recount(report, out_dir=None):
+def final_recount(report, taxa_count, out_dir=None):
     """Count absences, losses, failures and wins"""
     # for each taxon:
         # abs_report: lists windows in which the taxon is absent
@@ -191,8 +198,11 @@ def final_recount(report, out_dir=None):
     # get loses (taxa that have score 0 in one or more windows)
     lose_scores = report.droplevel(0, axis=1)['Score'] == 0
     lose_scores = lose_scores.loc[lose_scores.sum(1) > 0]
+    # locate taxa that have single representatives (can only result in loses)
+    single_taxa = (taxa_count.loc[lose_scores.index] == 1).to_numpy()
     x_array = np.full(lose_scores.shape, np.nan, dtype=object)
     x_array[lose_scores.to_numpy()] = 'X'
+    x_array[lose_scores.to_numpy() & single_taxa] = 'S'
     lose_report = pd.DataFrame(x_array, lose_scores.index, columns=report.columns.levels[0])
     lose_report['Total_losses'] = lose_scores.sum(1)
     
@@ -214,16 +224,19 @@ def final_recount(report, out_dir=None):
     if not out_dir is None:
         with open(out_dir + '/recount_absences.csv', 'w') as handle:
             handle.write('# Absent taxa per window\n')
-            handle.write(repr(abs_report))
+            abs_report.to_csv(handle, mode='a')
         with open(out_dir + '/recount_loses.csv', 'w') as handle:
-            handle.write('# Taxa with a score of 0 per window\n')
-            handle.write(repr(lose_report))
+            handle.write('# X: Taxa yielded a score of 0 in window\n')
+            handle.write('# S: Taxa has a single representative in window')
+            handle.write('# NOTICE: taxa with a single representative can\'t be correctly classified during calibration\n')
+            lose_report.to_csv(handle, mode='a')
         with open(out_dir + '/recount_failures.csv', 'w') as handle:
             handle.write('# Taxa that are missing or yeld a score of 0 in all windows\n')
-            handle.write(repr(fail_report))
+            fail_report.to_csv(handle, mode='a')
         with open(out_dir + '/recount_wins.csv', 'w') as handle:
             handle.write('# Taxa with score greater than 0 per window\n')
-            handle.write(repr(win_report))
+            win_report.to_csv(handle, mode='a')
+    return abs_report, lose_report, fail_report, win_report
 
 # grid search functions
 def classify(win_distances, win_list, win_indexes, taxonomy, n_range, k_range, out_dir, criterion='orbit', threads=1):
@@ -405,7 +418,7 @@ class Calibrator:
         logger.info('Collapsing windows...')
         win_indexes, win_list, rej_indexes, rej_list = cal_preprocess.collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
         report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file)
-        report_taxa(win_list, win_indexes, self.guide, self.tax_ext, tax_report, report_file)
+        taxa_counts = report_taxa(win_list, win_indexes, self.guide, self.tax_ext, tax_report, report_file) # keep the number of taxa per window
         # build windows tab
         win_tab = pd.DataFrame(self.windows, columns = ['Start', 'End'])
         win_tab.index.name = 'Window'
@@ -476,7 +489,7 @@ class Calibrator:
         summ_rec = build_APRF_summary(rec_full_report, out_file = self.out_dir + '/summary_recall.csv')
         summ_f1 = build_APRF_summary(f1_full_report, out_file = self.out_dir + '/summary_f1.csv')
         summ_ce = build_CE_summary(CE_full_report, out_file = self.out_dir + '/summary__cross_entropy.csv')
-        final_recount(summ_f1)
+        final_recount(summ_f1, taxa_counts, out_dir = self.out_dir)
         t_report_1 = time.time()
         logger.info(f'Finished building reports in {t_report_1 - t_report_0:.3f} seconds')
         
@@ -489,12 +502,9 @@ class Calibrator:
         
         for report_tab, metric in zip((summ_acc, summ_prc, summ_rec, summ_f1),
                                        ('Accuracy', 'Precision', 'Recall', 'F1 score')):
-            # TODO: remove old plot_aprf function
-            # cal_plot.plot_aprf(report_file, metric, self.windows, out_dir = self.plots_dir)
             cal_plot.plot_APRF(report_tab, metric, win_tab, self.plots_dir, lincode_guide, collapse_hm, custom=True)
         
         # plot ce
-        # cal_plot.plot_CE_results(ce_file, self.windows, out_dir = self.plots_dir)
         cal_plot.plot_CE(summ_ce, win_tab, self.plots_dir)
         t_plots_1 = time.time()
         logger.info(f'Finished plotting in {t_plots_1 - t_plots_0:.3f} seconds')

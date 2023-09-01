@@ -13,48 +13,31 @@ import os
 import shutil
 
 from DATA import DATA
-from calibration import calibrator as cb
-from calibration import cal_calibrator as ccb
+from calibration import cal_main
 from classification import cost_matrix
 #% set logger
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-#%
-# GRID SEARCH arguments
-# max_n,
-# step_n,
-# max_k,
-# step_k,
-# cost_mat,
-# row_thresh=0.1,
-# col_thresh=0.1,
-# min_seqs=50,
-# rank='genus',
-# metric='f1',
-# min_n=5,
-# min_k=3,
-# criterion='orbit',
-# threads=1
 
-def main0(out_dir,
-          database,
-          max_n,
-          step_n,
-          max_k,
-          step_k,
-          mat_code,
-          row_thresh,
-          col_thresh,
-          min_seqs,
-          rank,
-          metric,
-          min_n,
-          min_k,
-          threads,
-          clear,
-          criterion,
-          **kwargs):
+def main(out_dir,
+         database,
+         max_n,
+         step_n,
+         max_k,
+         step_k,
+         mat_code,
+         row_thresh,
+         col_thresh,
+         min_seqs,
+         rank,
+         min_n,
+         min_k,
+         threads,
+         clear,
+         criterion,
+         collapse_hm=True,
+         **kwargs):
     # initialize calibrator and set database
-    calibrator = ccb.Calibrator()
+    calibrator = cal_main.Calibrator()
     try:
         calibrator.set_database(database)
     except:
@@ -72,7 +55,7 @@ def main0(out_dir,
         raise
     
     # set output directory
-    if clear:
+    if clear and os.path.isdir(out_dir):
         shutil.rmtree(out_dir)
     try:
         calibrator.set_outdir(out_dir)
@@ -86,76 +69,28 @@ def main0(out_dir,
         raise
     
     # grid calibrate
-    calibrator.grid_search(max_n,
-                           step_n,
-                           max_k,
-                           step_k,
-                           cost_mat,
-                           row_thresh,
-                           col_thresh,
-                           min_seqs,
-                           rank,
-                           metric,
-                           min_n,
-                           min_k,
-                           criterion,
-                           threads)
-            
+    calibrator.grid_search(max_n = max_n,
+                           step_n = step_n,
+                           max_k = max_k,
+                           step_k = step_k,
+                           cost_mat = cost_mat,
+                           row_thresh = row_thresh,
+                           col_thresh = col_thresh,
+                           min_seqs = min_seqs,
+                           rank = rank,
+                           min_n = min_n,
+                           min_k = min_k,
+                           criterion = criterion,
+                           collapse_hm = collapse_hm,
+                           threads = threads)
     return
-def main(database, row_thresh=0.1, col_thresh=0.1, min_seqs=10, rank='genus', dist_mat='id', w_size=200, w_step=15, max_k=15, step_k=2, max_n=30, step_n=5, min_k=1, min_n=5, threads=1, clear=True, keep_classif=False, log_report=False):
-    # check that database exists
-    if not database in DATA.DBASES:
-        print(f'Database {database} not found. Existing databases:')
-        print('\n'.join(DATA.DBASES))
-        return
-    # build calibration directory in DATA dir
-    db_dir = DATA.DATAPATH + '/' + database
-    wrn_dir = db_dir + '/warning'
-    cal_dir = db_dir + '/calibration'
-    # check cal_dir (if it exists, check clear (if true, overwrite, else interrupt))
-    if os.path.isdir(cal_dir):
-        print(f'Database {database} has already been calibrated...')
-        if not clear:
-            raise Exception('Set "clear" as True to replace previous calibration')
-        print(f'Removing existing calibration for database {database}...')
-        shutil.rmtree(cal_dir)
-    os.mkdir(cal_dir)
-    
-    # prepare calibration logger
-    fh = logging.FileHandler(cal_dir + '/calibration.log')
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(formatter)
-    cb.logger.addHandler(fh)
-    # assemble calibration meta file
-    # calibrate
-    # update database map in DATA
-    # initialize calibrator, establish windows
-    calibrator = cb.Calibrator(cal_dir, wrn_dir)
-    calibrator.set_database(database)
-    calibrator.set_windows(size = w_size, step = w_step)
-    calibrator.dist_mat = dist_mat
-
-    # calibration
-    calibrator.grid_search(max_k,
-                           step_k,
-                           max_n,
-                           step_n,
-                           min_seqs,
-                           rank,
-                           row_thresh,
-                           col_thresh,
-                           min_k,
-                           min_n,
-                           threads,
-                           keep_classif,
-                           log_report)
-    # build cal summaries
-    calibrator.build_summaries()    
-
 #%%
 parser = argparse.ArgumentParser(prog='Graboid CALIBRATE',
                                  usage='%(prog)s MODE_ARGS [-h]',
                                  description='Graboid CALIBRATE performs a grid search of the given ranges of K and n along a sliding window over the alignment matrix')
+parser.add_argument('-o', '--out_dir',
+                    help='Output directory',
+                    type=str)
 parser.add_argument('-db', '--database',
                     help='Database to calibrate',
                     type=str)
@@ -211,6 +146,9 @@ parser.add_argument('-nn', '--min_n',
                     default=5,
                     help='Min value of n. Default: 5',
                     type=int)
+parser.add_argument('-c', '--criterion',
+                    default = 'orbit',
+                    choices=['orbit', 'neighbour'])
 parser.add_argument('-t', '--threads',
                     default=1,
                     help='Number of threads to be used in the calibration. Default: 1',
@@ -225,23 +163,23 @@ parser.add_argument('--log_report',
                     action='store_true',
                     help='Log memory usage and time elapsed for each calibration cycle')
 
-args = parser.parse_args()
 if __name__ == '__main__':
-    main(database = args.database,
+    args = parser.parse_args()
+    main(out_dir = args.out_dir,
+         database = args.database,
+         max_n = args.max_n,
+         step_n = args.step_n,
+         max_k = args.max_k,
+         step_k = args.min_k,
+         mat_code = args.dist_mat,
          row_thresh = args.row_thresh,
          col_thresh = args.col_thresh,
          min_seqs = args.min_seqs,
          rank = args.rank,
-         dist_mat = args.dist_mat,
-         w_size = args.w_size,
-         w_step = args.w_step,
-         max_k = args.max_k,
-         step_k = args.step_k,
-         max_n = args.max_n,
-         step_n = args.step_n,
-         min_k = args.min_k,
          min_n = args.min_n,
+         min_k = args.min_k,
          threads = args.threads,
          clear = args.clear,
-         keep_classif = args.keep,
-         log_report = args.log_report)
+         criterion = args.criterion,
+         w_size = args.w_size,
+         w_step = args.w_step)

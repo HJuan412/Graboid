@@ -192,16 +192,16 @@ def main(db_name,
         summary.write(f'Database location: {db_dir}\n')
         summary.write(f'Reference sequence (length): {ref_seq} ({marker_len})\n')
         summary.write(f'N sequences: {db_director.nseqs}\n')
-        summary.write(f'Sequences in alignment: {map_director.matrix.shape[0]}')
+        summary.write(f'Sequences in alignment: {map_director.matrix.shape[0]}\n')
         summary.write('Taxa:\n')
         summary.write('Rank (N taxa):\n')
         summary.write('\n'.join([f'\t{rk} ({count})' for rk, count in db_director.rank_counts.items()]))
-        summary.write('\nMesas:\n')
+        summary.write('\nAlignment mesas:\n')
     # mesas summary
     mesa_tab = pd.DataFrame(map_director.mesas, columns = 'start end bases average_cov'.split())
-    mesa_tab.index.name = 'mesa'
-    mesa_tab = mesa_tab.astype({'start':int, 'end':int, 'bases':int})
-    mesa_tab['average_cov'] = mesa_tab.average_cov.round(2)
+    mesa_tab.index.name = 'Mesa'
+    mesa_tab = mesa_tab.astype({'Start':int, 'End':int, 'Bases':int})
+    mesa_tab['Average_cov'] = mesa_tab.average_cov.round(2)
     mesa_tab.to_csv(summ_file, sep='\t', mode='a')
 
 #%% main execution

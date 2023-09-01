@@ -9,10 +9,153 @@ Build calibration report
 """
 
 #%% libraries
+import glob
 import numpy as np
 import pandas as pd
 
-#%% functions
+#%%
+def compare_aprf(files):
+    """Get the best metrics for each parameter combination n/k/method used in window"""
+    # files is a list of WINDOW report files
+    
+    # returns 3 arrays:
+        # tax_data: 2d-array of shape (#taxa, 2 (rank_id, tax_id))
+        # winner_vals: 2d-array of shape (#taxa, 4 (acc, prc, rec, f1)) contains the best value per metric per taxon
+        # params_report: 3d-array of shape (#taxa, 4 (acc, prc, rec, f1), 3 (n, k, method)) contains the parameter combinations that generated the best value for each metric for each taxon
+    
+    params = [] # 2d-array of shape (#files, 3 (window_index, n, k))
+    metrics = [] # 3d-array of shape (#files*3, #taxa, 4 (acc, prc, rec, f1))
+    for fil in files:
+        fil_dict = np.load(fil)
+        params.append(fil_dict['params']) # [window_idx, n, k]
+        metrics.append(fil_dict['metrics'][:,:,2:]) # 3d array of shape (3 (unweighted, wknn, dwknn), # taxa, 6 (rank_id, tax_id, acc, prc, rec, f1)) keep only metrics column for each layer
+        # tax_data.append(fil_dict['metrics'][0,:,:2].astype(int)) # retrieve taxonomic data (first 2 columns of first layer (any layer would do))
+    
+    # retrieve taxonomy data
+    tax_data = fil_dict['metrics'][0,:,:2].astype(int)
+    params = np.array(params)
+    metrics = np.concatenate(metrics, 0)
+    
+    # get best values and corresponding parameters
+    winner_metrics = np.argmax(metrics, 0)
+    winner_vals = np.max(metrics, 0)
+    winner_nk = np.floor(winner_metrics / 3).astype(int)
+    winner_uwd = winner_metrics % 3
+    
+    # prepare report
+    n_seqs = metrics.shape[1]
+    params_report = np.zeros((n_seqs, 4, 3), dtype=int)
+    params_report[:,:,:2] = params[:,1:][winner_nk]
+    params_report[:,:,2] = winner_uwd
+    
+    return tax_data, winner_vals, params_report
+
+def compare_cross_entropy(files):
+    # returns array of shape: # files * 3 (unweighted, wknn, dwknn), 4 (window, n, k, method, ) + # ranks
+    cross_entropy_report = []
+    for fil in files:
+        fil_dict = np.load(fil)
+        fil_params = fil_dict['params'] # [window_idx, n, k]
+        fil_cross_entropy = fil_dict['cross_entropy'] # 2-d array of shape: 3 (unweighted, wknn, dwknn), # ranks
+        package_report = np.zeros((fil_cross_entropy.shape[0], fil_cross_entropy.shape[1]+4))
+        package_report[:, 4:] = fil_cross_entropy
+        package_report[:,:3] = fil_params
+        package_report[:,3] = np.arange(1,4)
+        cross_entropy_report.append(package_report)
+    return np.concatenate(cross_entropy_report)
+
+def build_ce_report(report, ranks):
+    """Build the cross entropy dataframe"""
+    # report: 2d-array of shape (#param combinations, (window, n, k, method, ranks...))
+    # ranks: list of taxonomic rank names
+    # returns datafrmae of shape(#param combinations, (window, n, k, method, ranks...))
+    
+    # name dataframe columns
+    columns = ['Window', 'n', 'k', 'Method'] + ranks
+    method_dict = {-1:'', 1:'u', 2:'w', 3:'d'} # assign method codes
+    ce_report = pd.DataFrame(report, columns=columns)
+    # set column data types
+    ce_report[['Window', 'n', 'k']] = ce_report[['Window', 'n', 'k']].astype(np.int16)
+    ce_report.Method.replace(method_dict, inplace=True)
+    return ce_report
+
+def build_aprf_report(template, window_indexes, window_reports, col):
+    """Build a report for a given aprf metric"""
+    # template: template dataframe for the metric report
+    # window_indexes: array of window indexes
+    # window_reports: list of tuples (tax_data, winner_vals, params) (one per window)
+    # col: index of the current metric column ({acc:0, prc:1, rec:2, f1:4})
+    # returns a copy of template, populated with the corresponding values
+    
+    report = template.copy()
+    # extract values from each window report (window reports are unpacked into tax_data, winner_vals, params_report)
+    for win_idx, (tax_data, winner_vals, params_report) in zip(window_indexes, window_reports):
+        indexes = list(map(tuple, tax_data)) # get row indexes
+        vals = winner_vals[:,col] # get scores for the current metric
+        n, k, met = params_report[:,col].T # get params for the winning scores
+        report.loc[indexes, win_idx] = np.array((n, k, met, vals)).T # populate report
+    return report
+
+def postprocess_aprf(report, guide):
+    """Update aprf reports to human-readable"""
+    # report: build_aprf_report output dataframe
+    # guide: taxonomy guide (contains LinCode)
+    
+    # prepare human-readable index (replace rank and tax ids with full names)
+    tax_ids = report.index.get_level_values(1)
+    tax_names = (guide.LinCode + ' ' + guide.SciName).loc[tax_ids]
+    rank_names = guide.Rank.loc[tax_ids]
+    new_index = pd.MultiIndex.from_arrays((rank_names, tax_names), names=['Rank', 'Taxon'])
+    
+    # update column datatypes and apply method codes
+    win_indexes = report.columns.get_level_values(0).unique()
+    method_dict = {-1:'', 0:'u', 1:'w', 2:'d'}
+    for win_idx in win_indexes:
+        report[[(win_idx, 'n'), (win_idx, 'k')]] = report[[(win_idx, 'n'), (win_idx, 'k')]].astype(np.int16)
+        report[(win_idx, 'Method')].replace(method_dict, inplace=True)
+    report.index = new_index
+    
+def build_reports(win_indexes, metrics_dir, out_dir, ranks, guide):
+    """Process metrics files and build user-readable reports"""
+    # win_indexes: array containing the indexes of the selected windows
+    # metrics_dir: directory containing the metric files
+    
+    report_files = []
+    cross_entropy_array = []
+    aprf_arrays = []
+    
+    for win_idx in win_indexes:
+        # open window metrics and retrieve data
+        window_reports = glob.glob(metrics_dir + f'/{win_idx}*')
+        cross_entropy_array.append(compare_cross_entropy(window_reports))
+        aprf_arrays.append(compare_aprf(window_reports)) # retrieve the BEST metric values and generating parameter combinations for each window
+        # aprf_arrays contains tuples of (tax_data, winner_vals, params). One tuple per window
+    
+    # build cross entropy report (dataframe of columns: window, n, k, metod, ranks...)
+    cross_entropy_array = np.concatenate(cross_entropy_array)
+    cross_entropy_report = build_ce_report(cross_entropy_array, ranks)
+    cross_entropy_report.to_csv(out_dir + '/cross_entropy.csv', index=False)
+    report_files.append(out_dir + '/cross_entropy.csv')
+    
+    # prepare aprf report index
+    # get all taxa represented across the different windows
+    merged_taxa = np.concatenate([mt_array[0] for mt_array in aprf_arrays]) # remember, mt_array is a 3 element tuple, first one is the tax data array
+    uniq_taxa, uniq_locs = np.unique(merged_taxa[:,1], return_index=True)
+    merged_taxa = merged_taxa[uniq_locs]
+    merged_taxa = merged_taxa[np.lexsort((merged_taxa[:,1], merged_taxa[:,0]))] # merged taxonomy sorted by rank and tax ids
+    # build indexes
+    report_index = pd.MultiIndex.from_arrays((merged_taxa[:,0], merged_taxa[:,1]), names=['Rank', 'Taxon'])
+    report_columns = pd.MultiIndex.from_product((win_indexes, ['n', 'k', 'Method', 'Score']), names=['Window', ''])
+    template_report = pd.DataFrame(-1., index=report_index, columns=report_columns)
+    
+    # build a report for each metric
+    for met_col, met in enumerate(['acc', 'prc', 'rec', 'f1']):
+        met_report = build_aprf_report(template_report, win_indexes, aprf_arrays, met_col)
+        postprocess_aprf(met_report, guide)
+        met_report.to_csv(out_dir + f'/{met}_report.csv')
+        report_files.append(out_dir + f'/{met}_report.csv')
+    return report_files
+#%% OLD functions
 def build_prereport(metrics, report_by, tax_tab):
     # metrics is the list of metrics results per window generated by get_metricas
     # report_by indicates the metric that will be reported. 0 : accuracy, 1 : precision, 2 : recall, 3 : f1 score
@@ -88,3 +231,64 @@ def build_report(win_list, metrics, metric, tax_ext, guide, n_range, k_range):
     
     params = translate_params(params, n_range, k_range)
     return pre_report, params
+
+def compare_metrics(files):
+    # for each metric (accuracy, precision, recall, f1) generate a report of the parameter combinations that yield the best results for each taxon
+    # returns acc_report, prc_report, rec_report, f1_report. 2d arrays of shape: # taxa, rank, taxon, window_idx, n, k, method, score. Only the best parameter combination and the generated score are recorded per taxon
+    params = []
+    metrics = []
+    tax_data = []
+    for fil in files:
+        fil_dict = np.load(fil)
+        params.append(fil_dict['params']) # [window_idx, n, k]
+        metrics.append(fil_dict['metrics'][:,1:,:]) # 3d array of shape: # taxa, 6 (rank_id, tax_id, acc, prc, rec, f1), 3 (unweighted, wknn, dwknn)
+        tax_data.append(fil_dict['metrics'][:,:2,0]) # retrieve taxonomic data (first 2 columns of first layer (any layer would do))
+    
+    params = np.array(params)
+    tax_data = np.concatenate(tax_data).astype(np.int32)
+    taxa, tax_loc = np.unique(tax_data[:,1], return_index = True) # get number of taxon and index location to match tax and rank
+
+    template_tab = np.zeros((len(taxa), 6, len(params))) # rows: taxa, columns: rank, taxon, acc, prec, rec, f1, layers: param (n-k) combos
+    template_tab[:, 0] = np.tile(tax_data[tax_loc, 0], (len(params), 1)).T
+    template_tab[:, 1] = np.tile(tax_data[tax_loc, 1], (len(params), 1)).T
+    
+    idx_dict = {tax:tax_idx for tax_idx,tax in enumerate(taxa)} # used to place a taxon on nk_tab and method_tab
+    nk_tab = template_tab.copy() # holds the scores of the winning method for each taxon for each metric, for each param combination
+    method_tab = template_tab.copy().astype(np.int32) # holds the indexes of the winning methods for each cell in nk_tab
+    
+    # select the winning method for each metric for each n-k combination
+    for met_idx, mets in enumerate(metrics):
+        indexes = [idx_dict[mt] for mt in mets[:,0,0]] # get the indexes of the sequences that appeared in this parameter combination
+        nk_tab[indexes, 2:, met_idx] = np.max(mets[:,1:], axis = 2) # update nk_tab with best scores for the current n-k combination
+        method_tab[indexes, 2:, met_idx] = np.argmax(mets[:,1:], axis = 2) # record methods that generated the best scores for each taxon for each metric
+    
+    nk_winner = np.max(nk_tab[:,2:], axis = 2) # get the best score for each taxon for each n-k combination
+    nk_idxs = np.argmax(nk_tab[:,2:], axis = 2) # get the indexes of the n-k combinations that generated the best scores for each taxon for each metric
+    method_winners = method_tab[:,2:,:][np.indices(nk_idxs.shape)[0], np.indices(nk_idxs.shape)[1], nk_idxs] # retrieve the methods that generated the best scores for each taxon for each metric for each n-k combination
+    
+    template_report = np.zeros((len(taxa), 2 + 4 + 1), dtype=np.float32) # first 2 columns are rank & taxon, next 4 are window, n, k, method, last 1 is best score. Table includes only the best scores and the param combination that generated them
+    template_report[:, :2] = tax_data[tax_loc]
+    acc_report = template_report.copy()
+    prc_report = template_report.copy()
+    rec_report = template_report.copy()
+    f1_report = template_report.copy()
+
+    # record winner n-k
+    acc_report[:, 2:5] = params[nk_idxs[:,0]]
+    prc_report[:, 2:5] = params[nk_idxs[:,1]]
+    rec_report[:, 2:5] = params[nk_idxs[:,2]]
+    f1_report[:, 2:5] = params[nk_idxs[:,3]]
+
+    # record winner method
+    acc_report[:, 5] = method_winners[:, 0]
+    prc_report[:, 5] = method_winners[:, 1]
+    rec_report[:, 5] = method_winners[:, 2]
+    f1_report[:, 5] = method_winners[:, 3]
+
+    # record best metrics
+    acc_report[:, -1] = nk_winner[:,0]
+    prc_report[:, -1] = nk_winner[:,1]
+    rec_report[:, -1] = nk_winner[:,2]
+    f1_report[:, -1] = nk_winner[:,3]
+    
+    return acc_report, prc_report, rec_report, f1_report

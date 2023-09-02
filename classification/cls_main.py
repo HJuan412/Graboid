@@ -628,14 +628,15 @@ class Classifier(ClassifierBase):
                                criterion,
                                collapse_hm=True,
                                threads=threads)
-        self.last_calibration = re.sub('.*/', '', calibrator.out_dir)
+        self.last_calibration = calibrator.out_dir
     
     # select parameters
-    def select_parameters(self, calibration_dir, w_idx, w_start, w_end, metric, report, *taxa):
+    def select_parameters(self, calibration_dir, w_idx, w_start, w_end, metric, show, *taxa):
         """Generate a parameter report, print to screen"""
         # work dir is the CALIBRATION DIRECTORY containing the full reports
         # window is an int indicating the window to select the parameters from
         # metric is a single capital letter indicating the metric to base the parameter selection on
+        # show: boolean, print selection summary
         # taxa is an optional list of taxa to select the best parameters for
         
         # verify calibration directory
@@ -654,6 +655,7 @@ class Classifier(ClassifierBase):
                 for cdir in cal_dirs:
                     print('\t' + cdir)
                 raise Exception('No calibration directory')
+            calibration_dir = self.calibration_dir + '/' + calibration_dir
                     
         # get report files
         reports = {'A': cal_metrics.read_full_report_tab(calibration_dir + '/report_accuracy.csv'),
@@ -712,7 +714,7 @@ class Classifier(ClassifierBase):
             print(f'In general:\t n: {general_auto[0]}, k: {general_auto[1]}, method: {methods[general_auto[2]]}')
             if not taxa_auto is None:
                 print(f'For the given taxa:\t n: {taxa_auto[0]}, k: {taxa_auto[1]}, method: {methods[taxa_auto[2]]}')
-        if report:
+        if show:
             report()
         
         self.auto_start = win_coors[0]

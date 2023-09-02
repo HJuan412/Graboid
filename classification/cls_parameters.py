@@ -34,7 +34,7 @@ def get_general_APRF(table, window):
         """Automatically select the best parameter combination as that with the highest mean score for the ranks in the given window"""
         # returns tuple: (n, k, method)
         # build parameters table, index:(n, k, mth), columns:ranks
-        param_idxs = pd.MultiIndex.from_frame(results[['n', 'k', 'mth']]).unique().sort_values()
+        param_idxs = pd.MultiIndex.from_frame(results[['n', 'k', 'mth']].astype(int)).unique().sort_values()
         param_tab = pd.DataFrame(index=param_idxs, columns=results.index)
         
         for rk, rk_tab in table.groupby(level=0):
@@ -70,7 +70,7 @@ def get_general_CE(table, window):
         """Automatically select the best parameter combination as that with the lowest mean CE for the ranks in the given window"""
         # returns tuple: (n, k, method)
         # build parameters table, index:(n, k, mth), columns:ranks
-        param_idxs = pd.MultiIndex.from_frame(results[['n', 'k', 'mth']]).unique().sort_values()
+        param_idxs = pd.MultiIndex.from_frame(results[['n', 'k', 'mth']].astype(int)).unique().sort_values()
         param_tab = pd.DataFrame(index=param_idxs, columns=results.index)
         
         for rk, rk_tab in table.groupby(level=0):
@@ -125,7 +125,7 @@ def get_taxa_params(table, window, taxa, CE=False):
         results.loc[(rk, tax),:] = n, k, mth, score
     
     # collapse results
-    collapsed = pd.DataFrame(index = pd.MultiIndex.from_frame(results[['n', 'k', 'mth']]).unique(), columns=results.index)
+    collapsed = pd.DataFrame(index = pd.MultiIndex.from_frame(results[['n', 'k', 'mth']].astype(int)).unique(), columns=results.index)
     # locate the score of each taxon for all selected parameter combinations
     for params in collapsed.index:
         collapsed.loc[params] = tax_table[params]
@@ -152,7 +152,7 @@ def get_taxa_params(table, window, taxa, CE=False):
         # multiindex built from candidate parameter combinations
         # columns built from given taxa
         res_idx = results.index
-        param_idx = pd.MultiIndex.from_frame(results[['n', 'k', 'mth']]).unique().sort_values()
+        param_idx = pd.MultiIndex.from_frame(results[['n', 'k', 'mth']].astype(int)).unique().sort_values()
         param_tab = pd.DataFrame(index = param_idx, columns = res_idx)
         
         # populate parameters table, average scores and select winner parameters

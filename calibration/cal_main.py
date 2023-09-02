@@ -231,10 +231,10 @@ def final_recount(report, taxa_count, out_dir=None):
             handle.write('# NOTICE: taxa with a single representative can\'t be correctly classified during calibration\n')
             lose_report.to_csv(handle, mode='a')
         with open(out_dir + '/recount_failures.csv', 'w') as handle:
-            handle.write('# Taxa that are missing or yeld a score of 0 in all windows\n')
+            handle.write('# Taxa that are missing or yield a score of 0 in all windows\n')
             fail_report.to_csv(handle, mode='a')
         with open(out_dir + '/recount_wins.csv', 'w') as handle:
-            handle.write('# Taxa with score greater than 0 per window\n')
+            handle.write('# Taxa that yield a score greater than 0 in at least one window\n')
             win_report.to_csv(handle, mode='a')
     return abs_report, lose_report, fail_report, win_report
 

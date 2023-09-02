@@ -414,35 +414,35 @@ class ClassifierBase:
         return self.__auto_start
     @auto_start.setter
     def auto_start(self, start):
-        self.__auto_start = start
+        self.__auto_start = int(start)
         self.update_meta()
     @property
     def auto_end(self):
         return self.__auto_end
     @auto_end.setter
     def auto_end(self, end):
-        self.__auto_end = end
+        self.__auto_end = int(end)
         self.update_meta()
     @property
     def auto_n(self):
         return self.__auto_n
     @auto_n.setter
     def auto_n(self, n):
-        self.__auto_n = n
+        self.__auto_n = int(n)
         self.update_meta()
     @property
     def auto_k(self):
         return self.__auto_k
     @auto_k.setter
     def auto_k(self, k):
-        self.__auto_k = k
+        self.__auto_k = int(k)
         self.update_meta()
     @property
     def auto_mth(self):
         return self.__auto_mth
     @auto_mth.setter
     def auto_mth(self, mth):
-        self.__auto_mth = mth
+        self.__auto_mth = int(mth)
         self.update_meta()
     
     def update_meta(self):
@@ -717,13 +717,13 @@ class Classifier(ClassifierBase):
         
         self.auto_start = win_coors[0]
         self.auto_end = win_coors[1]
-        self.auto_n = general_auto[1]
-        self.auto_k = general_auto[2]
-        self.auto_mth = ['unweighted', 'wknn', 'dwknn'][general_auto[3]]
+        self.auto_n = general_auto[0]
+        self.auto_k = general_auto[1]
+        self.auto_mth = ['unweighted', 'wknn', 'dwknn'][general_auto[2]]
         if not taxa_auto is None:
-            self.auto_n = taxa_auto[1]
-            self.auto_k = taxa_auto[2]
-            self.auto_mth = ['unweighted', 'wknn', 'dwknn'][taxa_auto[3]]
+            self.auto_n = taxa_auto[0]
+            self.auto_k = taxa_auto[1]
+            self.auto_mth = ['unweighted', 'wknn', 'dwknn'][taxa_auto[2]]
     
     # classify using different parameter combinations, register which parameter 
     def classify(self,

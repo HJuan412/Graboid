@@ -442,7 +442,7 @@ class ClassifierBase:
         return self.__auto_mth
     @auto_mth.setter
     def auto_mth(self, mth):
-        self.__auto_mth = int(mth)
+        self.__auto_mth = mth
         self.update_meta()
     
     def update_meta(self):
@@ -628,7 +628,7 @@ class Classifier(ClassifierBase):
                                criterion,
                                collapse_hm=True,
                                threads=threads)
-        self.last_calibration = calibrator.out_dir
+        self.last_calibration = re.sub('.*/', '', calibrator.out_dir)
     
     # select parameters
     def select_parameters(self, calibration_dir, w_idx, w_start, w_end, metric, report, *taxa):

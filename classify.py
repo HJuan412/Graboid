@@ -361,9 +361,12 @@ if __name__ == '__main__':
                                         args.criterion,
                                         args.threads)
         
-        if args.mode == 'param':
+        if args.mode == 'params':
             metric = args.metric[0].upper()
-            classifier.select_parameters(args.cal_dir, args.window, None, None, metric, True, *args.taxa)
+            taxa = args.taxa
+            if taxa is None:
+                taxa = []
+            classifier.select_parameters(args.cal_dir, args.window, None, None, metric, True, *taxa)
         
         # operation: classification
         if args.mode == 'classify':

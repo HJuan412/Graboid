@@ -34,12 +34,17 @@ sh = logging.StreamHandler()
 sh.setLevel(logging.DEBUG)
 logger.addHandler(sh)
 
-# Set display options to show all rows and columns (used for report construction)
-pd.set_option('display.max_rows', None)
-pd.set_option('display.max_columns', None)
-# Set the option to prevent expanding DataFrame repr
-pd.set_option('display.expand_frame_repr', False)
+def set_options():
+    # Set display options to show all rows and columns (used for report construction)
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.max_columns', None)
+    # Set the option to prevent expanding DataFrame repr
+    pd.set_option('display.expand_frame_repr', False)
 
+def reset_options():
+    pd.reset_option('display.max_rows')
+    pd.reset_option('display.max_columns')
+    pd.reset_option('display.expand_frame_repr')
 #%% functions
 # report functions
 def report_params(date, database, n_range, k_range, criterion, row_thresh, col_thresh, min_seqs, rank, threads, report_file):
@@ -73,6 +78,7 @@ def report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file):
         rejected_tab.append([f'Window {rej_idx}', rej])
     rejected_tab = pd.DataFrame(rejected_tab)
     
+    set_options()
     with open(report_file, 'a') as handle:
         handle.write('Windows\n')
         handle.write(sep)
@@ -85,6 +91,7 @@ def report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file):
         else:
             handle.write('No windows were rejected\n')
         handle.write('\n')
+    reset_options()
 
 def report_sites_ext(win_indexes, win_list, windows_sites, n_range, ext_site_report):
     site_tabs = []
@@ -108,12 +115,15 @@ def report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_fi
         site_counts = np.cumsum([len(n) for n in sites]).tolist()
         sites_tab.append([win] + site_counts)
     sites_tab = pd.DataFrame(sites_tab, columns=['Window'] + [n for n in n_range]).set_index('Window', drop=True)
+    
+    set_options()
     with open(report_file, 'a') as handle:
         handle.write('Sites\n')
         handle.write(sep)
         handle.write('Non redundant sites selected for each value of n:\n')
         handle.write(repr(sites_tab))
         handle.write(f'\nExtended site report: {ext_site_report}\n')
+    reset_options()
 
 def report_taxa(windows, win_indexes, guide, guide_ext, tax_report_file, report_file):
     # Count the number of instances of each taxon per window
@@ -147,10 +157,13 @@ def report_taxa(windows, win_indexes, guide, guide_ext, tax_report_file, report_
     summary_report = pd.DataFrame(index = count_tab.columns, columns = merged_guides.columns)
     for rk, rk_tab in count_tab.groupby(level=0):
         summary_report.loc[:, rk] = (rk_tab > 0).sum(0)
+        
+    set_options()
     with open(report_file, 'a') as handle:
         handle.write('Taxa per rank per window:\n')
         handle.write(repr(summary_report))
         handle.write('\n\n')
+    reset_options()
     return count_tab
 
 def build_CE_summary(ce_table, out_file=None):

@@ -243,7 +243,7 @@ par_parser.set_defaults(mode='params')
 par_parser.add_argument('out_dir',
                         help='Working directory',
                         type=str)
-par_parser.add_argmuent('window',
+par_parser.add_argument('window',
                         help='Calibration window index',
                         type=int)
 par_parser.add_argument('--metric',

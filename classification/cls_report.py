@@ -12,13 +12,13 @@ import numpy as np
 import pandas as pd
 
 #%% functions
-def build_prereport_V(id_array, data_array, branch_counts):
-# for each rank, generates a dataframe with columns: tax_id, total_neighbours, mean_distances, std_distances, total_support, softmax_support, n_seqs (sequences in the collapsed query branch), with indexes corresponding to the classified query sequence (indexes repeat themselves for multiple potential candidates)
-# supports come sorted in descending order by classify_V
+def build_prereport_V(id_array, data_array, branch_counts, ranks):
+    # for each rank, generates a dataframe with columns: tax_id, total_neighbours, mean_distances, std_distances, total_support, softmax_support, n_seqs (sequences in the collapsed query branch), with indexes corresponding to the classified query sequence (indexes repeat themselves for multiple potential candidates)
+    # supports come sorted in descending order by classify_V
     rank_idxs = np.unique(id_array[:,1])
     rk_tabs = {}
-    for rk in rank_idxs:
-        rk_locs = id_array[:,1] == rk
+    for rk_idx, rk in zip(rank_idxs, ranks):
+        rk_locs = id_array[:,1] == rk_idx
         rk_id = id_array[rk_locs][:, [0,2]]
         rk_data = data_array[rk_locs]
         rk_branch_counts = branch_counts[rk_id[:, 0]].reshape((-1,1))

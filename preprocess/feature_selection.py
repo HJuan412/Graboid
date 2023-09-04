@@ -76,11 +76,11 @@ def get_sorted_sites(matrix, tax_table, return_general=False, return_entropy=Fal
         
     return result
 
-def get_nsites(sorted_sites, min_n, max_n, step_n, **kwargs):
+def get_nsites(sorted_sites, min_n=None, max_n=None, step_n=None, n=None):
     # takes the resulting array from get_sorted_sites, returns a list with the (unique) n-1:n best sites for the range min_n:max_n with step_
     # if n is given in kwargs, use a single value of n
-    if 'n' in kwargs.keys():
-        n_sites = np.array([kwargs['n']], dtype=int)
+    if not n is None:
+        n_sites = np.array([n], dtype=int)
     else:
         n_sites = np.arange(min_n, max_n+1, step_n)
     

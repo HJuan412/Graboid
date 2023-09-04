@@ -775,24 +775,27 @@ class Classifier(ClassifierBase):
         compressed = [np.unique(dist, return_index=True, return_counts = True) for dist in sorted_dists] # for each qry_sequence, get distance groups, as well as the index where each group begins and the count for each group
         # get k nearest orbital or orbital containing the kth neighbour
         if criterion == 'orbit':
-            k_dists, k_positions, k_counts = cls_neighbours.get_k_nearest_orbit_V(compressed, k)
+            k_nearest = cls_neighbours.get_knn_orbit(compressed, k)
         else:
-            k_dists, k_positions, k_counts = cls_neighbours.get_k_nearest_neigh_V(compressed, k)
+            k_nearest = cls_neighbours.get_knn_neigh(compressed, k)
+        k_dists = np.array([row[0] for row in k_nearest])
+        k_positions = np.concatenate([row[1] for row in k_nearest])
+        k_counts = np.array([row[2] for row in k_nearest])
         
         # assign classifications
         # clasif_id is a 2d array containing columns: query_idx, rank_idx, tax_id
         # classif_data is a 2d array containing columns: total_neighbours, mean_distances, std_distances, total_support and softmax_support
-        classif_id, classif_data = cls_classify.classify_V(k_dists, k_positions, k_counts, sorted_idxs, window_tax, classif_method)
+        classif_id, classif_data = cls_classify.classify_V(k_dists, k_positions, k_counts, sorted_idxs, window_tax.to_numpy(), classif_method)
         
         #build reports
-        pre_report = cls_report.build_prereport_V(classif_id, classif_data, seqs_per_branch)
-        report = cls_report.build_report(pre_report, self.guide, q_seqs, seqs_per_branch) # TODO: remember to remove LinCode columns
+        pre_report = cls_report.build_prereport_V(classif_id, classif_data, seqs_per_branch, self.ranks)
+        report = cls_report.build_report(pre_report, q_seqs, seqs_per_branch, self.guide)
         characterization = cls_report.characterize_sample(report)
         designation = cls_report.designate_branch_seqs(qry_branches, self.query_accs)
         
         # replace tax codes in pre report for their real names
         for rep in pre_report.values():
-            rep['tax'] = self.guide.loc[rep.tax.values, 'SciName'].values
+            rep['tax'] = self.guide.loc[rep.tax_id.values, 'SciName'].values
         
         if save:
             # save results to files

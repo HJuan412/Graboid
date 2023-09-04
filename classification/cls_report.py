@@ -13,22 +13,24 @@ import pandas as pd
 
 #%% functions
 def build_prereport_V(id_array, data_array, branch_counts):
-    # for each rank, generates a dataframe with columns: tax_id, total_neighbours, mean_distances, std_distances, total_support, softmax_support, n_seqs (sequences in the collapsed query branch), with indexes corresponding to the classified query sequence (indexes repeat themselves for multiple potential candidates)
-    # supports come sorted in descending order by classify_V
+# for each rank, generates a dataframe with columns: tax_id, total_neighbours, mean_distances, std_distances, total_support, softmax_support, n_seqs (sequences in the collapsed query branch), with indexes corresponding to the classified query sequence (indexes repeat themselves for multiple potential candidates)
+# supports come sorted in descending order by classify_V
     rank_idxs = np.unique(id_array[:,1])
     rk_tabs = {}
     for rk in rank_idxs:
         rk_locs = id_array[:,1] == rk
-        qry_locs = id_array[rk_locs, 0]
-        rk_tab = pd.DataFrame(np.concatenate((id_array[rk_locs,[0,2]], data_array[rk_locs], branch_counts[qry_locs]), 1), columns = 'query tax_id total_neighbours mean_distances std_distances total_support softmax_support n_seqs'.split())
-        rk_tab.astype({'query':np.int32,
-                       'tax_id':np.int32,
-                       'total_neighbours':np.int32,
-                       'mean_distances':np.float32,
-                       'std_distances':np.float32,
-                       'total_support':np.float32,
-                       'softmax_support':np.float32,
-                       'n_seqs':np.int32})
+        rk_id = id_array[rk_locs][:, [0,2]]
+        rk_data = data_array[rk_locs]
+        rk_branch_counts = branch_counts[rk_id[:, 0]].reshape((-1,1))
+        rk_tab = pd.DataFrame(np.concatenate((rk_id, rk_data, rk_branch_counts), 1), columns = 'query tax_id total_neighbours mean_distances std_distances total_support softmax_support n_seqs'.split())
+        rk_tab = rk_tab.astype({'query':np.int32,
+                                'tax_id':np.int32,
+                                'total_neighbours':np.int32,
+                                'mean_distances':np.float32,
+                                'std_distances':np.float32,
+                                'total_support':np.float32,
+                                'softmax_support':np.float32,
+                                'n_seqs':np.int32})
         rk_tabs[rk] = rk_tab.set_index('query').sort_index()
     return rk_tabs
 
@@ -73,7 +75,7 @@ def build_report(pre_report, q_seqs, seqs_per_branch, guide):
         seq_indexes, seq_loc, seq_counts = np.unique(rk_prereport.index.values, return_index=True, return_counts=True)
         single = seq_counts == 1 # get sequences with a single classification, those are assigned directly
         single_idxs = seq_indexes[single]
-        conclusion[single_idxs] = rk_prereport.tax.loc[single_idxs]
+        conclusion[single_idxs] = rk_prereport.tax_id.loc[single_idxs]
         
         # get winning classifications for each sequence with support for multiple taxa
         tax_array = rk_prereport.tax_id.values
@@ -91,14 +93,14 @@ def build_report(pre_report, q_seqs, seqs_per_branch, guide):
     
     # merge all abreviation reports
     abv_reports = np.concatenate(abv_reports, axis=0)
-    header = pd.MultiIndex.from_product((pre_report.keys(), ['Taxon', 'LinCode', 'support']))
+    header = pd.MultiIndex.from_product((pre_report.keys(), ['Taxon', 'support']))
     report = pd.DataFrame(abv_reports.T, columns=header) # columns: (rk, (taxon, support))
     
     # replace tax_ids with tax names
-    for rk in report.columns.get_level_values(0):
-        tax_codes = report.loc[:, (rk, 'Taxon')].values
+    for rk in report.columns.levels[0]:
+        tax_codes = report.loc[:, (rk, 'Taxon')].copy().values
         report.loc[:, (rk, 'Taxon')] = guide.loc[tax_codes, 'SciName'].values
-        report.loc[:, (rk, 'LinCode')] = guide.loc[tax_codes, 'LinCode'].values
+        # report.loc[:, (rk, 'LinCode')] = guide.loc[tax_codes, 'LinCode'].values
         
     # add sequence counts
     report[('n_seqs', 'n_seqs')] = seqs_per_branch

@@ -302,6 +302,7 @@ class ClassifierBase:
         self.__auto_n = None
         self.__auto_k = None
         self.__auto_mth = None
+        self.__active_calibration = None
         
         # self.out_dir = None
         # self.calibration_dir = None
@@ -350,7 +351,8 @@ class ClassifierBase:
                 'auto_end':self.auto_end,
                 'auto_n':self.auto_n,
                 'auto_k':self.auto_k,
-                'auto_mth':self.auto_mth}
+                'auto_mth':self.auto_mth,
+                'active_calibration':self.active_calibration}
     
     @property
     def db(self):
@@ -391,7 +393,14 @@ class ClassifierBase:
     def last_calibration(self, last_calibration):
         self.__last_calibration = last_calibration
         self.update_meta()
-    
+    @property
+    def active_calibration(self):
+        return self.__active_calibration
+    @active_calibration.setter
+    def active_calibration(self, active):
+        self.__active_calibration = active
+        self.update_meta()
+        
     @property
     def transition(self):
         return self.__transition

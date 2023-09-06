@@ -413,6 +413,7 @@ class Calibrator:
                     collapse_hm=True,
                     threads=1):
         
+        t0 = time.time()
         # prepare n, k ranges
         n_range = np.arange(min_n, max_n + 1, step_n)
         k_range = np.arange(min_k, max_k + 1, step_k)
@@ -442,13 +443,15 @@ class Calibrator:
             win_taxa[str(win_idx)] = self.tax_ext.loc[window.taxonomy].fillna(-1).to_numpy().astype(int)
         np.savez(self.out_dir + '/win_taxa.npz', **win_taxa)
         t_collapse_1 = time.time()
-        logger.info(f'Collapsed {len(win_list)} of {len(self.windows)} windows in {t_collapse_1 - t_collapse_0:.3f} seconds')
+        logger.info(f'Collapsed {len(win_list)} of {len(self.windows)} windows in {t_collapse_1 - t_collapse_0:.2f} seconds')
         
         # abort calibration if no collapsed windows are generated
         if len(win_list) == 0:
             logger.info('No windows passed the collapsing filters. Ending calibration')
             return
         
+        # save parameters, used for reportting calibration metrics for classification parameters
+        np.savez(self.out_dir + '/params.npz', n = n_range, k = k_range, windows = np.array(win_idx))
         # select sites
         logger.info('Selecting informative sites...')
         t_sselection_0 = time.time()
@@ -456,7 +459,7 @@ class Calibrator:
         report_sites_ext(win_indexes, win_list, windows_sites, n_range, ext_site_report)
         report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_file)
         t_sselection_1 = time.time()
-        logger.info(f'Site selection finished in {t_sselection_1 - t_sselection_0:.3f} seconds')
+        logger.info(f'Site selection finished in {t_sselection_1 - t_sselection_0:.2f} seconds')
         
         # calculate distances
         logger.info('Calculating paired distances...')
@@ -465,14 +468,14 @@ class Calibrator:
         for window, win_sites in zip(win_list, windows_sites):
             all_distances.append(cal_dists.get_distances(window, win_sites, cost_mat))
         t_distance_1 = time.time()
-        logger.info(f'Distance calculation finished in {t_distance_1 - t_distance_0:.3f} seconds')
+        logger.info(f'Distance calculation finished in {t_distance_1 - t_distance_0:.2f} seconds')
         
         # classify
         logger.info('Classifying...')
         t_classification_0 = time.time()
         classify(all_distances, win_list, win_indexes, self.tax_ext, n_range, k_range, self.classif_dir, criterion, threads)
         t_classification_1 = time.time()
-        logger.info(f'Finished classifications in {t_classification_1 - t_classification_0:.3f} seconds')
+        logger.info(f'Finished classifications in {t_classification_1 - t_classification_0:.2f} seconds')
         
         # get metrics
         logger.info('Calculating metrics...')
@@ -491,7 +494,7 @@ class Calibrator:
         rec_full_report.to_csv(self.out_dir + '/report_recall.csv')
         f1_full_report.to_csv(self.out_dir + '/report_f1.csv')
         t_metrics_1 = time.time()
-        logger.info(f'Calculated metrics in {t_metrics_1 - t_metrics_0:.3f} seconds')
+        logger.info(f'Calculated metrics in {t_metrics_1 - t_metrics_0:.2f} seconds')
         
         # report
         logger.info('Building report...')
@@ -504,7 +507,7 @@ class Calibrator:
         summ_ce = build_CE_summary(CE_full_report, out_file = self.out_dir + '/summary__cross_entropy.csv')
         final_recount(summ_f1, taxa_counts, out_dir = self.out_dir)
         t_report_1 = time.time()
-        logger.info(f'Finished building reports in {t_report_1 - t_report_0:.3f} seconds')
+        logger.info(f'Finished building reports in {t_report_1 - t_report_0:.2f} seconds')
         
         # # plot results
         logger.info('Plotting results...')
@@ -520,5 +523,7 @@ class Calibrator:
         # plot ce
         cal_plot.plot_CE(summ_ce, win_tab, self.plots_dir)
         t_plots_1 = time.time()
-        logger.info(f'Finished plotting in {t_plots_1 - t_plots_0:.3f} seconds')
+        logger.info(f'Finished plotting in {t_plots_1 - t_plots_0:.2f} seconds')
+        t1 = time.time()
+        logger.info(f'Finished calibration in {t1 - t0:.2f} seconds')
         return

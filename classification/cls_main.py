@@ -9,7 +9,7 @@ Classifier class, handles steps: database loading, query blasting, custom calibr
 """
 
 #%% libraries
-from datetime import datetime
+import datetime
 import json
 import logging
 import numpy as np
@@ -241,145 +241,102 @@ def build_param_confusion(work_dir, params, guide):
     confusion.columns = pd.MultiIndex.from_frame(guide.loc[confusion.columns, ['Rank', 'SciName']], names = ['Rank', 'Taxon'])
     
     return confusion
-#%% parameter selection
-# def get_params_ce(report, ranks):
-#     """
-#     Select the best parameter combination for each taxonomic rank using the
-#     cross entropy metric.
-#     Cross entropy ranges from 0 to 10. Lower values are better.
 
-#     Parameters
-#     ----------
-#     report : pandas.DataFrame
-#         Cross Entropy report. Columns: window, w_start, w_end, n, k, method, rank0, rank1, ...
-#     ranks : list
-#         List of ranks. Must match the ranks present in the report columns
-
-#     Yields
-#     ------
-#     best_params : pandas.DataFrame
-#         Best parameters report. Columns: rank, window, w_start, w_end, n, k, method, cross_entropy
-#     []
-#         Empty list, kept for compatibility with get_params_met.
-
-#     """ 
+def summary_report(date,
+                   run_time,
+                   database,
+                   w_start,
+                   w_end,
+                   n,
+                   sites,
+                   k,
+                   mth,
+                   criterion,
+                   row_thresh,
+                   col_thresh,
+                   min_seqs,
+                   rank,
+                   ref_seqs,
+                   ref_taxa,
+                   qry_branches,
+                   report,
+                   designation,
+                   ranks,
+                   files_pre,
+                   file_classif,
+                   file_chara,
+                   file_assign,
+                   file_parammetric,
+                   file_paramconf):
+    sep = '#' * 40
     
-#     selected_params = []
-#     for rk in ranks:
-#         # get the best (minimum) score for rk, retrieve parameter combinations that yield it
-#         min_ce = report[rk].min()
-#         params_subtab = report.loc[report[rk] == min_ce, ['window', 'w_start', 'w_end', 'n', 'k', 'method', rk]].copy()
-#         params_subtab.rename(columns={rk:'cross_entropy'}, inplace=True)
-#         params_subtab['rank'] = rk
-#         selected_params.append(params_subtab)
+    # get reference taxa per rank
+    taxa_per_rk = pd.Series(index=ref_taxa.columns, dtype=int)
+    for rk, col in ref_taxa.T.iterrows():
+        taxa_per_rk[rk] = len(col.unique())
     
-#     selected_params = pd.concat(selected_params).reset_index(drop=True)
+    # get assigned branches per rank
+    branches = len(qry_branches)
+    qry_seqs = len(np.concatenate(qry_branches))
+    seqs_p_branch = designation.branch.value_counts()
     
-#     # filter params
-#     # the basal rank will usually score 0 loss for all param combinations, select only combinations that yield good scores in lower ranks
-#     score0_tab = selected_params.loc[selected_params.cross_entropy == 0].reset_index().set_index(['window', 'n', 'k', 'method']) # all combinations with 0 entropy
-#     next_best_tab = selected_params.loc[selected_params.cross_entropy > 0] # all parameter combinations with cross entropy greater than 0
+    assigned = pd.DataFrame(index = ranks, columns=['Branches', '% branches', 'Sequences', '% sequences'])
+    for rk in ranks:
+        nnull_support = ~report[(rk, 'support')].isna()
+        nnull_support = nnull_support[nnull_support] # get only branches with non null support
+        assigned.loc[rk, 'Branches'] = nnull_support.sum()
+        assigned.loc[rk, 'Sequences'] = seqs_p_branch[nnull_support.index].sum()
+    assigned['% branches'] = ((1 - ((branches - assigned['Branches']) / branches)) * 100).apply(lambda x: round(x, 3))
+    assigned['% sequences'] = ((1 - ((qry_seqs - assigned['Sequences']) / qry_seqs)) * 100).apply(lambda x: round(x, 3))
     
-#     filtered_idxs = []
-#     for params, params_subtab in next_best_tab.groupby(['window', 'n', 'k', 'method']):
-#         try:
-#             filtered_idxs.append(score0_tab.loc[params, 'index'])
-#         except KeyError:
-#             continue
-        
-#     best_params = pd.concat((selected_params.loc[filtered_idxs], next_best_tab))[['rank', 'window', 'w_start', 'w_end', 'n', 'k', 'method', 'cross_entropy']] # reorganize columns
-#     return best_params, [] # empty list used for compatibility with get_params_met
-
-# def get_params_met(taxa, report):
-#     """
-#     Select the best parameter combinations for each taxon in taxa using the
-#     given metric report.
-#     Scores range from 0 to 1. Higher values are better.
-
-#     Parameters
-#     ----------
-#     taxa : list
-#         List of taxa to search for.
-#     report : pandas.DataFrame
-#         Metric report. Columns: rank, taxon, taxID, window, w_start, w_end, n, k, method, score
-
-#     Returns
-#     -------
-#     best_params : pandas.DataFrame
-#         Best parameters report. Columns: taxon, window, w_start, w_end, n, k, method, score
-#     warnings : list
-#         List of generated warnings.
-
-#     """
-    
-#     best_params = []
-#     warnings = []
-    
-#     for tax in taxa:
-#         # locate occurrences of tax in the report. Generate a warning if tax is absent or its best score is 0
-#         tax_subtab = report.loc[report.taxon == tax]
-#         if tax_subtab.shape[0] == 0:
-#             warnings.append(f'{tax} not found in the given report')
-#             continue
-#         best_score = tax_subtab.score.max()
-#         if best_score == 0:
-#             warnings.append(f'{tax} had a null score. Cannot be detected in the current window.')
-#             continue
-#         best_params.append(tax_subtab.loc[tax_subtab.score == best_score, ['taxon', 'window', 'w_start', 'w_end', 'n', 'k', 'method', 'score']])
-    
-#     best_params = pd.concat(best_params)
-#     return best_params, warnings
-
-# def report_params(params, warnings, report_file, metric, *taxa):
-#     # build parameter report
-#     met_names = {'acc' : 'accuracy',
-#                  'prc' : 'precision',
-#                  'rec' : 'recall',
-#                  'f1' : 'F1 score',
-#                  'ce' : 'Cross entropy'}
-#     metric = met_names[metric]
-#     header = f'Best parameter combinations determined by {metric}'
-#     if len(taxa) > 0:
-#         header += '\nAnalyzed taxa: ' + ', '.join(taxa)
-#     header += '\n\n'
-    
-#     params = params.rename(columns = {'score':metric}).set_index(params.columns[0])
-    
-#     with open(report_file, 'a') as handle:
-#         handle.write(header)
-#         handle.write(repr(params))
-#         handle.write('\n\n')
-#         if len(warnings) > 0:
-#             handle.write('Warnings:\n')
-#             for warn in warnings.values():
-#                 handle.write(warn + '\n')
-#             handle.write('\n')
-#         handle.write('#' * 40 + '\n\n')
-#     return
-
-# def collapse_params(params):
-#     """
-#     Select unique parameter combinations
-
-#     Parameters
-#     ----------
-#     params : pandas.DataFrame
-#         DataFrame generated using either get_params_ce or get_params_met.
-
-#     Returns
-#     -------
-#     collapsed_params : dict
-#         Dictionary of key:values -> (window start, window end, n, k, m):[taxa/ranks].
-
-#     """
-    
-#     params = params.rename(columns={'taxon':'name', 'rank':'name'})
-#     collapsed_params = {}
-#     for (w, n, k, m), param_subtab in params.groupby(['window', 'n', 'k', 'method']):
-#         ws = param_subtab.w_start.values[0]
-#         we = param_subtab.w_end.values[0]
-#         collapsed_params[(ws, we, n, k, m)] = param_subtab.name.values.tolist()
-#     return collapsed_params
+    lines = ['Classification summary',
+             sep,
+             f'Date: {date}',
+             f'Run time: {run_time:.2f} seconds',
+             '',
+             sep,
+             'Parameters\n',
+             f'Database: {database}',
+             '',
+             f'Window start: {w_start}',
+             f'Window end: {w_end}',
+             '',
+             f'n sites: {n}',
+             f'Selected sites: {sites}',
+             f'k neighbours: {k}',
+             f'Weighting method: {mth}',
+             f'Neighbour criterion: {criterion}',
+             '',
+             f'Max unknowns per sequence: {row_thresh * 100} %',
+             f'Max unknowns per site: {col_thresh * 100} %',
+             f'Min non-redundant sequences: {min_seqs}',
+             f'Rank used for site selection: {rank}',
+             '',
+             sep,
+             'Sequences:\n',
+             'Reference',
+             f'Reference sequences: {ref_seqs}',
+             'Reference taxa per rank in window:',
+             repr(taxa_per_rk.to_frame(name='Taxa')),
+             '',
+             'Query',
+             f'Query_sequences: {qry_seqs}',
+             f'Total branches: {branches}',
+             '',
+             sep,
+             'Results:\n',
+             'Assigned branches:',
+             repr(assigned),
+             '',
+             'Result files:',
+             'Pre reports:',
+             '\n'.join([f'\t{pre}' for pre in files_pre]),
+             f'Classification report: {file_classif}',
+             f'Characterization report: {file_chara}',
+             f'Branch designation report: {file_assign}',
+             f'Parameter calibration report: {file_parammetric}',
+             f'Parameter confusion matrix: {file_paramconf}']
+    return '\n'.join(lines)
 
 #%% classes
 class ClassifierBase:
@@ -574,6 +531,12 @@ class Classifier(ClassifierBase):
                         self.query_file = meta['query_file']
                         self.query_map_file = meta['query_map_file']
                         self.query_acc_file = meta['query_acc_file']
+                        self.auto_start = meta['auto_start']
+                        self.auto_end = meta['auto_end']
+                        self.auto_n = meta['auto_n']
+                        self.auto_k = meta['auto_k']
+                        self.auto_mth = meta['auto_mth']
+                        self.active_calibration = meta['active_calibration']
                         self.load_query()
                 except FileNotFoundError:
                     raise Exception('Specified output directory exists but cannot be verified as a Graboid classification directory. Recommend overwrtiting it or using a different name')
@@ -717,7 +680,7 @@ class Classifier(ClassifierBase):
         try:
             cal_dir = kwargs['cal_dir']
         except KeyError:
-            cal_dir = datetime.now().strftime("%Y%m%d_%H%M%S")
+            cal_dir = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         calibrator.set_outdir(self.calibration_dir + '/' + cal_dir)
         
         calibrator.grid_search(max_n,
@@ -924,11 +887,11 @@ class Classifier(ClassifierBase):
             rep['tax'] = self.guide.loc[rep.tax_id.values, 'SciName'].values
         t_reports_1 = time.time()
         logger.info(f'Finished building reports in {t_reports_1 - t_reports_0:.2f} seconds')
-        
+                
         if save:
             # save results to files
             # generate output directory
-            out_dir = self.classif_dir + '/' + datetime.now().strftime("%Y%m%d_%H%M%S") if save_dir == '' else save_dir
+            out_dir = self.classif_dir + '/' + datetime.datetime.now().strftime("%Y%m%d_%H%M%S") if save_dir == '' else save_dir
             os.mkdir(out_dir)
             # save pre reports
             for rk, rk_prereport in pre_report.items():
@@ -952,9 +915,36 @@ class Classifier(ClassifierBase):
                 # TODO: tell the user how to generate the calibration reports
             except Exception as excp:
                 logger.warning(excp)
-            t1 = time.time()
-            logger.info(f'Finished classification in {t1 - t0:.2f} seconds')
-        else:
-            t1 = time.time()
-            logger.info(f'Finished classification in {t1 - t0:.2f} seconds')
-            return pre_report, report, characterization, designation
+        t1 = time.time()
+        logger.info(f'Finished classification in {t1 - t0:.2f} seconds')
+        # write summary
+        date = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+        summ_report = summary_report(date,
+                                     run_time = t1 - t0,
+                                     database = self.db,
+                                     w_start = w_start,
+                                     w_end = w_end,
+                                     n = n,
+                                     sites = sites,
+                                     k = k,
+                                     mth = method,
+                                     criterion = criterion,
+                                     row_thresh = row_thresh,
+                                     col_thresh = col_thresh,
+                                     min_seqs = min_seqs,
+                                     rank = rank,
+                                     ref_seqs = ref_window.window.shape[0],
+                                     ref_taxa = self.tax_ext.loc[ref_window.taxonomy],
+                                     qry_branches = qry_branches,
+                                     report = report,
+                                     designation = designation,
+                                     ranks = self.ranks,
+                                     files_pre = [out_dir + f'/pre_report_{rk}.csv' for rk in pre_report.keys()],
+                                     file_classif = out_dir + '/report.csv',
+                                     file_chara = out_dir + '/sample_characterization.csv',
+                                     file_assign = out_dir + '/sequence_designation.csv',
+                                     file_parammetric = out_dir + '/calibration_metrics.csv',
+                                     file_paramconf = out_dir + '/confusion.csv')
+        with open(out_dir + '/classification_summary.txt', 'w') as handle:
+            handle.write(summ_report)
+        return pre_report, report, characterization, designation

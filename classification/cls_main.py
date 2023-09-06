@@ -762,7 +762,7 @@ class Classifier(ClassifierBase):
                     print('\t' + cdir)
                 raise Exception('No calibration directory')
             calibration_dir = self.calibration_dir + '/' + calibration_dir
-                    
+        self.active_calibration = calibration_dir
         # get report files
         reports = {'A': cal_metrics.read_full_report_tab(calibration_dir + '/report_accuracy.csv'),
                    'P': cal_metrics.read_full_report_tab(calibration_dir + '/report_precision.csv'),
@@ -897,8 +897,8 @@ class Classifier(ClassifierBase):
         else:
             k_nearest = cls_neighbours.get_knn_neigh(compressed, k)
         k_dists = np.array([row[0] for row in k_nearest])
-        k_positions = np.concatenate([row[1] for row in k_nearest])
         k_counts = np.array([row[2] for row in k_nearest])
+        k_positions = k_counts.sum(1)
         t_neighbours_1 = time.time()
         logger.info(f'Finished sorting neighbours in {t_neighbours_1 - t_neighbours_0:.2f} seconds')
         

@@ -15,6 +15,7 @@ import numpy as np
 import os
 import pandas as pd
 import re
+import shutil
 import sys
 import time
 
@@ -294,6 +295,21 @@ def get_metrics(win_list, win_indexes, classif_dir, out_dir, taxonomy):
         win_tax = taxonomy.loc[window.taxonomy].to_numpy()
         aprf_metrics, cross_entropy = cal_metrics.get_metrics(classif_results, win_tax)
         np.savez(out_dir + '/' + re.sub('.npz', '_metrics.npz', res_file), metrics = aprf_metrics, cross_entropy = cross_entropy, params = classif_results['params'])
+
+def save_classifications(cls_dir, out_dir):
+    """Save classification results to a single npz file"""
+    
+    cls_files = os.listdir(cls_dir)
+    cls_tabs = {}
+    
+    # extract classification results for the three methods from each file
+    for file in cls_files:
+        npz = np.load(cls_dir + '/' + file)
+        for idx, mth in enumerate('uwd'):
+            key = re.sub('.npz', f'_{idx}', file)
+            cls_tabs[key] = npz[f'predicted_{mth}']
+    
+    np.savez(out_dir + '/classifs.npz', **cls_tabs)
 #%% classes
 class Calibrator:
     def __init__(self, out_dir=None):
@@ -411,7 +427,8 @@ class Calibrator:
                     min_k=3,
                     criterion='orbit',
                     collapse_hm=True,
-                    threads=1):
+                    threads=1,
+                    clear_tmp=True):
         
         t0 = time.time()
         # prepare n, k ranges
@@ -474,6 +491,7 @@ class Calibrator:
         logger.info('Classifying...')
         t_classification_0 = time.time()
         classify(all_distances, win_list, win_indexes, self.tax_ext, n_range, k_range, self.classif_dir, criterion, threads)
+        save_classifications(self.classif_dir, self.out_dir)
         t_classification_1 = time.time()
         logger.info(f'Finished classifications in {t_classification_1 - t_classification_0:.2f} seconds')
         
@@ -524,6 +542,11 @@ class Calibrator:
         cal_plot.plot_CE(summ_ce, win_tab, self.plots_dir)
         t_plots_1 = time.time()
         logger.info(f'Finished plotting in {t_plots_1 - t_plots_0:.2f} seconds')
+        
+        # clear temporal files
+        if clear_tmp:
+            logger.info('Removing temporal files')
+            shutil.rmtree(self.tmp_dir)
         t1 = time.time()
         logger.info(f'Finished calibration in {t1 - t0:.2f} seconds')
         return

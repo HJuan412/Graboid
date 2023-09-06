@@ -17,6 +17,7 @@ import os
 import pandas as pd
 import re
 import shutil
+import time
 # Graboid libraries
 from calibration import cal_main
 from calibration import cal_metrics
@@ -34,6 +35,9 @@ from mapping import director as mp
 #%% set logger
 logger = logging.getLogger('Graboid.Classification')
 logger.setLevel(logging.DEBUG)
+sh = logging.StreamHandler()
+sh.setLevel(logging.DEBUG)
+logger.addHandler(sh)
 
 #%% functions
 def map_query(out_dir,
@@ -580,6 +584,9 @@ class Classifier(ClassifierBase):
         os.makedirs(self.query_dir, exist_ok=True)
         os.makedirs(self.warn_dir, exist_ok=True)
         
+        fh = logging.FileHandler(self.out_dir + '/classification.log')
+        fh.setLevel(logging.INFO)
+        logger.addHandler(fh)
         warn_handler = logging.FileHandler(self.warn_dir + '/warnings.log')
         warn_handler.setLevel(logging.WARNING)
         logger.addHandler(warn_handler)
@@ -840,6 +847,8 @@ class Classifier(ClassifierBase):
                  method='wknn',
                  save=True,
                  save_dir=''):
+        # mark intial time
+        t0 = time.time()
         method = method.lower()
         methods = {'unweighted':cls_classify.unweighted,
                    'wknn':cls_classify.wknn,
@@ -852,6 +861,8 @@ class Classifier(ClassifierBase):
         except KeyError:
             raise Exception(f'Invalid method: {method}. Must be one of: "unweighted", "wknn", "dwknn"')
         # collapse reference and query matrices for the given window coordinates w_start & w_end, selecting the n most informative sites for the given rank
+        logger.info('Collapsing sequences...')
+        t_collapse_0 = time.time()
         ref_window, qry_window, qry_branches, win_tax, sites = cls_preprocess.collapse(self,
                                                                                        w_start = w_start,
                                                                                        w_end = w_end,
@@ -864,11 +875,19 @@ class Classifier(ClassifierBase):
         seqs_per_branch = np.array([len(br) for br in qry_branches])
         ref_mat = ref_window.window[:, sites]
         window_tax = self.tax_ext.loc[win_tax.index]
+        t_collapse_1 = time.time()
+        logger.info(f'Finished collapsing in {t_collapse_1 - t_collapse_0:.2f} seconds')
         
         # calculate distances
+        logger.info('Calculating distances...')
+        t_distances_0 = time.time()
         distances = cls_distance.get_distances(qry_window, ref_mat, self.cost_matrix)
+        t_distances_1 = time.time()
+        logger.info(f'Finished calculating distances in {t_distances_1 - t_distances_0:.2f} seconds')
         
         # sort distances and get k nearest neighbours
+        logger.info('Sorting and counting neighbours...')
+        t_neighbours_0 = time.time()
         sorted_idxs = np.argsort(distances, axis=1)
         sorted_dists = np.sort(distances, axis=1)
         compressed = [np.unique(dist, return_index=True, return_counts = True) for dist in sorted_dists] # for each qry_sequence, get distance groups, as well as the index where each group begins and the count for each group
@@ -880,13 +899,21 @@ class Classifier(ClassifierBase):
         k_dists = np.array([row[0] for row in k_nearest])
         k_positions = np.concatenate([row[1] for row in k_nearest])
         k_counts = np.array([row[2] for row in k_nearest])
+        t_neighbours_1 = time.time()
+        logger.info(f'Finished sorting neighbours in {t_neighbours_1 - t_neighbours_0:.2f} seconds')
         
         # assign classifications
         # clasif_id is a 2d array containing columns: query_idx, rank_idx, tax_id
         # classif_data is a 2d array containing columns: total_neighbours, mean_distances, std_distances, total_support and softmax_support
+        logger.info('Classifying...')
+        t_classif_0 = time.time()
         classif_id, classif_data = cls_classify.classify_V(k_dists, k_positions, k_counts, sorted_idxs, window_tax.to_numpy(), classif_method)
+        t_classif_1 = time.time()
+        logger.info(f'Finished classsifying sequences in {t_classif_1 - t_classif_0:.2f} seconds')
         
         #build reports
+        logger.info('Building reports...')
+        t_reports_0 = time.time()
         pre_report = cls_report.build_prereport_V(classif_id, classif_data, seqs_per_branch, self.ranks)
         report = cls_report.build_report(pre_report, q_seqs, seqs_per_branch, self.guide)
         characterization = cls_report.characterize_sample(report)
@@ -895,6 +922,8 @@ class Classifier(ClassifierBase):
         # replace tax codes in pre report for their real names
         for rep in pre_report.values():
             rep['tax'] = self.guide.loc[rep.tax_id.values, 'SciName'].values
+        t_reports_1 = time.time()
+        logger.info(f'Finished building reports in {t_reports_1 - t_reports_0:.2f} seconds')
         
         if save:
             # save results to files
@@ -910,14 +939,22 @@ class Classifier(ClassifierBase):
             
             # report param metrics
             try:
+                logger.info('Attempting to retrieve metrics for the used parameters...')
+                t_metrics_0 = time.time()
                 params = build_params_tuple(self.active_calibration, w_start, w_end, n, k, method)
                 param_metrics = report_param_metrics(self.active_calibration, params)
                 param_confusion = build_param_confusion(self.active_calibration, params, self.guide)
                 
                 param_metrics.to_csv(out_dir + '/calibration_metrics.csv', sep='\t')
                 param_confusion.to_csv(out_dir + '/confusion.csv')
+                t_metrics_1 = time.time()
+                logger.info(f'Finished retrieving metrics in {t_metrics_1 - t_metrics_0:.2f} seconds')
                 # TODO: tell the user how to generate the calibration reports
             except Exception as excp:
                 logger.warning(excp)
+            t1 = time.time()
+            logger.info(f'Finished classification in {t1 - t0:.2f} seconds')
         else:
+            t1 = time.time()
+            logger.info(f'Finished classification in {t1 - t0:.2f} seconds')
             return pre_report, report, characterization, designation

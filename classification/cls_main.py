@@ -147,145 +147,235 @@ def get_mesas_overlap(ref_mesas, qry_mesas, min_width=10):
         mesas_overlap.append(q_overlap[q_overlap[:,2] >= min_width]) # append only overlaps over the specified minimum width
     return np.concatenate(mesas_overlap, 0)
 
-## parameter selection
-def get_params_ce(report, ranks):
-    """
-    Select the best parameter combination for each taxonomic rank using the
-    cross entropy metric.
-    Cross entropy ranges from 0 to 10. Lower values are better.
-
-    Parameters
-    ----------
-    report : pandas.DataFrame
-        Cross Entropy report. Columns: window, w_start, w_end, n, k, method, rank0, rank1, ...
-    ranks : list
-        List of ranks. Must match the ranks present in the report columns
-
-    Yields
-    ------
-    best_params : pandas.DataFrame
-        Best parameters report. Columns: rank, window, w_start, w_end, n, k, method, cross_entropy
-    []
-        Empty list, kept for compatibility with get_params_met.
-
-    """ 
+# get param metrics (report calibration metrics and confusion matrix for the utilize dparameters)
+def build_params_tuple(work_dir, w_start, w_end, n, k, method):
+    # retrieve window data from the calibration directory
+    if work_dir is None:
+        raise Exception('No parameter selection was made, cannot report calibration metrics for used parameters')
+    params_dict = np.load(work_dir + '/params.npz')
     
-    selected_params = []
-    for rk in ranks:
-        # get the best (minimum) score for rk, retrieve parameter combinations that yield it
-        min_ce = report[rk].min()
-        params_subtab = report.loc[report[rk] == min_ce, ['window', 'w_start', 'w_end', 'n', 'k', 'method', rk]].copy()
-        params_subtab.rename(columns={rk:'cross_entropy'}, inplace=True)
-        params_subtab['rank'] = rk
-        selected_params.append(params_subtab)
+    missing_params = []
+    # check that used parameters exist in the calibration run
+    if not n in params_dict['n']:
+        missing_params.append(f'n value {n} not present in calibration reports (existing values{params_dict["n"]})')
+    if not k in params_dict['k']:
+        missing_params.append(f'n value {n} not present in calibration reports (existing values{params_dict["n"]})')
     
-    selected_params = pd.concat(selected_params).reset_index(drop=True)
+    # check that selected window exists in the calibration run
+    win_tab = pd.read_csv(work_dir + '/windows.csv', index_col=0)
+    window_idx = win_tab.loc[(win_tab.Start == w_start) & (win_tab.End == w_end)].index.values
+    if len(window_idx) == 0:
+        # given coordinates don't match the calibration windows # maybe could do a quick calib, user shouldn't use an uncalibrated window
+        missing_params.append(f'Used window coordinates (w_start: {w_start}, w_end: {w_end}) not found in calibration')
     
-    # filter params
-    # the basal rank will usually score 0 loss for all param combinations, select only combinations that yield good scores in lower ranks
-    score0_tab = selected_params.loc[selected_params.cross_entropy == 0].reset_index().set_index(['window', 'n', 'k', 'method']) # all combinations with 0 entropy
-    next_best_tab = selected_params.loc[selected_params.cross_entropy > 0] # all parameter combinations with cross entropy greater than 0
-    
-    filtered_idxs = []
-    for params, params_subtab in next_best_tab.groupby(['window', 'n', 'k', 'method']):
-        try:
-            filtered_idxs.append(score0_tab.loc[params, 'index'])
-        except KeyError:
-            continue
+    # any params are missing from calibration
+    if len(missing_params) > 0:
+        raise Exception('\n'.join(missing_params))
         
-    best_params = pd.concat((selected_params.loc[filtered_idxs], next_best_tab))[['rank', 'window', 'w_start', 'w_end', 'n', 'k', 'method', 'cross_entropy']] # reorganize columns
-    return best_params, [] # empty list used for compatibility with get_params_met
+    window_idx = window_idx[0]
+    # build parameters tuple
+    mth_idxs = {'u':0, 'w':1, 'd':2} # method indexes, used to turn method name to numeric value
+    return (window_idx, n, k, mth_idxs[method[0]])
 
-def get_params_met(taxa, report):
-    """
-    Select the best parameter combinations for each taxon in taxa using the
-    given metric report.
-    Scores range from 0 to 1. Higher values are better.
-
-    Parameters
-    ----------
-    taxa : list
-        List of taxa to search for.
-    report : pandas.DataFrame
-        Metric report. Columns: rank, taxon, taxID, window, w_start, w_end, n, k, method, score
-
-    Returns
-    -------
-    best_params : pandas.DataFrame
-        Best parameters report. Columns: taxon, window, w_start, w_end, n, k, method, score
-    warnings : list
-        List of generated warnings.
-
-    """
+def report_param_metrics(work_dir, params):
+    """Build metrics report for the used parameters"""
+    # returns a pandas dataframe with index (Rank, Taxon) and columns Accuracy, Precision, Recall, f1, Cross_entropy
     
-    best_params = []
-    warnings = []
+    # load calibration reports
+    reports = {'Accuracy': cal_metrics.read_full_report_tab(work_dir + '/report_accuracy.csv'),
+               'Precision': cal_metrics.read_full_report_tab(work_dir + '/report_precision.csv'),
+               'Recall': cal_metrics.read_full_report_tab(work_dir + '/report_recall.csv'),
+               'f1': cal_metrics.read_full_report_tab(work_dir + '/report_f1.csv'),
+               'Cross_entropy': cal_metrics.read_full_report_tab(work_dir + '/report__cross_entropy.csv')}
     
-    for tax in taxa:
-        # locate occurrences of tax in the report. Generate a warning if tax is absent or its best score is 0
-        tax_subtab = report.loc[report.taxon == tax]
-        if tax_subtab.shape[0] == 0:
-            warnings.append(f'{tax} not found in the given report')
-            continue
-        best_score = tax_subtab.score.max()
-        if best_score == 0:
-            warnings.append(f'{tax} had a null score. Cannot be detected in the current window.')
-            continue
-        best_params.append(tax_subtab.loc[tax_subtab.score == best_score, ['taxon', 'window', 'w_start', 'w_end', 'n', 'k', 'method', 'score']])
+    # build and populate results table
+    param_metrics = pd.DataFrame(index=reports['Accuracy'].index, columns = reports.keys())
+    for metric, tab in reports.items():
+        met_scores = cls_parameters.get_params_scores(tab, params)[0]
+        param_metrics[metric] = met_scores
+    return param_metrics
+
+def build_param_confusion(work_dir, params, guide):
+    """Build the confusion matrix for the used parameters. Rows: real values, columns: predicted values"""
     
-    best_params = pd.concat(best_params)
-    return best_params, warnings
-
-def report_params(params, warnings, report_file, metric, *taxa):
-    # build parameter report
-    met_names = {'acc' : 'accuracy',
-                 'prc' : 'precision',
-                 'rec' : 'recall',
-                 'f1' : 'F1 score',
-                 'ce' : 'Cross entropy'}
-    metric = met_names[metric]
-    header = f'Best parameter combinations determined by {metric}'
-    if len(taxa) > 0:
-        header += '\nAnalyzed taxa: ' + ', '.join(taxa)
-    header += '\n\n'
+    def get_total(matrix, index):
+        """Get sum of real/predicted values"""
+        results = pd.Series(0, index=index, dtype=int)
+        for rk in matrix.T:
+            taxa, counts = np.unique(rk[rk >= 0], return_counts=True)
+            results.loc[taxa] = counts
+        return results
     
-    params = params.rename(columns = {'score':metric}).set_index(params.columns[0])
+    # retrieve real and predicted taxa for the utilized parameters
+    classifs_file = work_dir + '/classifs.npz'
+    win_taxa = np.load(work_dir + '/win_taxa.npz')
+    key = '_'.join(np.array(params).astype(str))
+    try:
+        pred = np.load(classifs_file)[key]
+        real = win_taxa[key[0]]
+    except KeyError:
+        raise Exception(f'Parameters {key} not found among the calibration predictions')
     
-    with open(report_file, 'a') as handle:
-        handle.write(header)
-        handle.write(repr(params))
-        handle.write('\n\n')
-        if len(warnings) > 0:
-            handle.write('Warnings:\n')
-            for warn in warnings.values():
-                handle.write(warn + '\n')
-            handle.write('\n')
-        handle.write('#' * 40 + '\n\n')
-    return
-
-def collapse_params(params):
-    """
-    Select unique parameter combinations
-
-    Parameters
-    ----------
-    params : pandas.DataFrame
-        DataFrame generated using either get_params_ce or get_params_met.
-
-    Returns
-    -------
-    collapsed_params : dict
-        Dictionary of key:values -> (window start, window end, n, k, m):[taxa/ranks].
-
-    """
+    # build confusion matrix
+    confusion = cal_metrics.build_confusion(pred, real)
+    # add total roes
+    total_real = get_total(real, confusion.index)
+    total_missed = total_real - confusion.sum(1)
+    total_pred = get_total(pred, confusion.index)
+    total_pred['Total_real'] = total_pred.sum()
+    total_pred['Missed'] = total_missed.sum()
+    confusion['Total_real'] = total_real
+    confusion['Missed'] = total_missed
+    confusion.loc['Total_pred'] = total_pred
     
-    params = params.rename(columns={'taxon':'name', 'rank':'name'})
-    collapsed_params = {}
-    for (w, n, k, m), param_subtab in params.groupby(['window', 'n', 'k', 'method']):
-        ws = param_subtab.w_start.values[0]
-        we = param_subtab.w_end.values[0]
-        collapsed_params[(ws, we, n, k, m)] = param_subtab.name.values.tolist()
-    return collapsed_params
+    # update indexes
+    guide = guide.copy()
+    guide.loc['Total_real', 'Rank'] = 'Total_real'
+    guide.loc['Missed', 'Rank'] = 'Missed'
+    guide.loc['Total_pred', 'Rank'] = 'Total_pred'
+    confusion.index = pd.MultiIndex.from_frame(guide.loc[confusion.index, ['Rank', 'SciName']], names = ['Rank', 'Taxon'])
+    confusion.columns = pd.MultiIndex.from_frame(guide.loc[confusion.columns, ['Rank', 'SciName']], names = ['Rank', 'Taxon'])
+    
+    return confusion
+#%% parameter selection
+# def get_params_ce(report, ranks):
+#     """
+#     Select the best parameter combination for each taxonomic rank using the
+#     cross entropy metric.
+#     Cross entropy ranges from 0 to 10. Lower values are better.
+
+#     Parameters
+#     ----------
+#     report : pandas.DataFrame
+#         Cross Entropy report. Columns: window, w_start, w_end, n, k, method, rank0, rank1, ...
+#     ranks : list
+#         List of ranks. Must match the ranks present in the report columns
+
+#     Yields
+#     ------
+#     best_params : pandas.DataFrame
+#         Best parameters report. Columns: rank, window, w_start, w_end, n, k, method, cross_entropy
+#     []
+#         Empty list, kept for compatibility with get_params_met.
+
+#     """ 
+    
+#     selected_params = []
+#     for rk in ranks:
+#         # get the best (minimum) score for rk, retrieve parameter combinations that yield it
+#         min_ce = report[rk].min()
+#         params_subtab = report.loc[report[rk] == min_ce, ['window', 'w_start', 'w_end', 'n', 'k', 'method', rk]].copy()
+#         params_subtab.rename(columns={rk:'cross_entropy'}, inplace=True)
+#         params_subtab['rank'] = rk
+#         selected_params.append(params_subtab)
+    
+#     selected_params = pd.concat(selected_params).reset_index(drop=True)
+    
+#     # filter params
+#     # the basal rank will usually score 0 loss for all param combinations, select only combinations that yield good scores in lower ranks
+#     score0_tab = selected_params.loc[selected_params.cross_entropy == 0].reset_index().set_index(['window', 'n', 'k', 'method']) # all combinations with 0 entropy
+#     next_best_tab = selected_params.loc[selected_params.cross_entropy > 0] # all parameter combinations with cross entropy greater than 0
+    
+#     filtered_idxs = []
+#     for params, params_subtab in next_best_tab.groupby(['window', 'n', 'k', 'method']):
+#         try:
+#             filtered_idxs.append(score0_tab.loc[params, 'index'])
+#         except KeyError:
+#             continue
+        
+#     best_params = pd.concat((selected_params.loc[filtered_idxs], next_best_tab))[['rank', 'window', 'w_start', 'w_end', 'n', 'k', 'method', 'cross_entropy']] # reorganize columns
+#     return best_params, [] # empty list used for compatibility with get_params_met
+
+# def get_params_met(taxa, report):
+#     """
+#     Select the best parameter combinations for each taxon in taxa using the
+#     given metric report.
+#     Scores range from 0 to 1. Higher values are better.
+
+#     Parameters
+#     ----------
+#     taxa : list
+#         List of taxa to search for.
+#     report : pandas.DataFrame
+#         Metric report. Columns: rank, taxon, taxID, window, w_start, w_end, n, k, method, score
+
+#     Returns
+#     -------
+#     best_params : pandas.DataFrame
+#         Best parameters report. Columns: taxon, window, w_start, w_end, n, k, method, score
+#     warnings : list
+#         List of generated warnings.
+
+#     """
+    
+#     best_params = []
+#     warnings = []
+    
+#     for tax in taxa:
+#         # locate occurrences of tax in the report. Generate a warning if tax is absent or its best score is 0
+#         tax_subtab = report.loc[report.taxon == tax]
+#         if tax_subtab.shape[0] == 0:
+#             warnings.append(f'{tax} not found in the given report')
+#             continue
+#         best_score = tax_subtab.score.max()
+#         if best_score == 0:
+#             warnings.append(f'{tax} had a null score. Cannot be detected in the current window.')
+#             continue
+#         best_params.append(tax_subtab.loc[tax_subtab.score == best_score, ['taxon', 'window', 'w_start', 'w_end', 'n', 'k', 'method', 'score']])
+    
+#     best_params = pd.concat(best_params)
+#     return best_params, warnings
+
+# def report_params(params, warnings, report_file, metric, *taxa):
+#     # build parameter report
+#     met_names = {'acc' : 'accuracy',
+#                  'prc' : 'precision',
+#                  'rec' : 'recall',
+#                  'f1' : 'F1 score',
+#                  'ce' : 'Cross entropy'}
+#     metric = met_names[metric]
+#     header = f'Best parameter combinations determined by {metric}'
+#     if len(taxa) > 0:
+#         header += '\nAnalyzed taxa: ' + ', '.join(taxa)
+#     header += '\n\n'
+    
+#     params = params.rename(columns = {'score':metric}).set_index(params.columns[0])
+    
+#     with open(report_file, 'a') as handle:
+#         handle.write(header)
+#         handle.write(repr(params))
+#         handle.write('\n\n')
+#         if len(warnings) > 0:
+#             handle.write('Warnings:\n')
+#             for warn in warnings.values():
+#                 handle.write(warn + '\n')
+#             handle.write('\n')
+#         handle.write('#' * 40 + '\n\n')
+#     return
+
+# def collapse_params(params):
+#     """
+#     Select unique parameter combinations
+
+#     Parameters
+#     ----------
+#     params : pandas.DataFrame
+#         DataFrame generated using either get_params_ce or get_params_met.
+
+#     Returns
+#     -------
+#     collapsed_params : dict
+#         Dictionary of key:values -> (window start, window end, n, k, m):[taxa/ranks].
+
+#     """
+    
+#     params = params.rename(columns={'taxon':'name', 'rank':'name'})
+#     collapsed_params = {}
+#     for (w, n, k, m), param_subtab in params.groupby(['window', 'n', 'k', 'method']):
+#         ws = param_subtab.w_start.values[0]
+#         we = param_subtab.w_end.values[0]
+#         collapsed_params[(ws, we, n, k, m)] = param_subtab.name.values.tolist()
+#     return collapsed_params
 
 #%% classes
 class ClassifierBase:
@@ -817,5 +907,17 @@ class Classifier(ClassifierBase):
             report.to_csv(out_dir + '/report.csv')
             characterization.to_csv(out_dir + '/sample_characterization.csv')
             designation.to_csv(out_dir + '/sequence_designation.csv')
+            
+            # report param metrics
+            try:
+                params = build_params_tuple(self.active_calibration, w_start, w_end, n, k, method)
+                param_metrics = report_param_metrics(self.active_calibration, params)
+                param_confusion = build_param_confusion(self.active_calibration, params, self.guide)
+                
+                param_metrics.to_csv(out_dir + '/calibration_metrics.csv', sep='\t')
+                param_confusion.to_csv(out_dir + '/confusion.csv')
+                # TODO: tell the user how to generate the calibration reports
+            except Exception as excp:
+                logger.warning(excp)
         else:
             return pre_report, report, characterization, designation

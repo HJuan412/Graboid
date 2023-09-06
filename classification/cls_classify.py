@@ -138,7 +138,7 @@ def get_tax_supports_V(idx, taxa, supports, distances):
 def classify_V(distances, positions, counts, neigh_idxs, tax_tab, weight_func):
     """Calculates mean distances, support and normalized support for each candidate taxon for each sequence"""
     # dists contains the orbital distances of each query seq
-    # positions contains the start and end positions of each orbital for each query seq
+    # positions contains the end position the last selected orbital for each query seq
     # counts contains the number of sequences in each orbital for each query seq
     # neigh_idxs contains the sorted indexes of the neighbouring sequences for each query seq
     # tax_tab is an extended taxonomy numpy array for the reference sequences
@@ -157,7 +157,8 @@ def classify_V(distances, positions, counts, neigh_idxs, tax_tab, weight_func):
         support_arrays.append(np.concatenate([[spp]*cnt for spp, cnt in zip(supp, cnts)])) # extend supports to fit the number of neighbours per orbital
         dist_arrays.append(np.concatenate([[dst]*cnt for dst, cnt in zip(dists, cnts)]))
     # get the neighbour indexes for each sequence
-    neigh_arrays = [neigh_idxs[sq_idx, :max_loc] for sq_idx, max_loc in enumerate(np.max(positions, 1))]
+    # neigh_arrays = [neigh_idxs[sq_idx, :max_loc] for sq_idx, max_loc in enumerate(np.max(positions, 1))]
+    neigh_arrays = [neighs[:end_idx] for neighs, end_idx in zip(neigh_idxs, positions)]
     
     # get supports for each sequence
     id_arrays = []

@@ -474,36 +474,51 @@ class ClassifierBase:
         return self.__auto_start
     @auto_start.setter
     def auto_start(self, start):
-        self.__auto_start = int(start)
-        self.update_meta()
+        try:
+            self.__auto_start = int(start)
+            self.update_meta()
+        except TypeError:
+            pass
     @property
     def auto_end(self):
         return self.__auto_end
     @auto_end.setter
     def auto_end(self, end):
-        self.__auto_end = int(end)
-        self.update_meta()
+        try:
+            self.__auto_end = int(end)
+            self.update_meta()
+        except TypeError:
+            pass
     @property
     def auto_n(self):
         return self.__auto_n
     @auto_n.setter
     def auto_n(self, n):
-        self.__auto_n = int(n)
-        self.update_meta()
+        try:
+            self.__auto_n = int(n)
+            self.update_meta()
+        except TypeError:
+            pass
     @property
     def auto_k(self):
         return self.__auto_k
     @auto_k.setter
     def auto_k(self, k):
-        self.__auto_k = int(k)
-        self.update_meta()
+        try:
+            self.__auto_k = int(k)
+            self.update_meta()
+        except TypeError:
+            pass
     @property
     def auto_mth(self):
         return self.__auto_mth
     @auto_mth.setter
     def auto_mth(self, mth):
-        self.__auto_mth = mth
-        self.update_meta()
+        try:
+            self.__auto_mth = mth
+            self.update_meta()
+        except TypeError:
+            pass
     
     def update_meta(self):
         with open(self.out_dir + '/meta.json', 'w') as handle:

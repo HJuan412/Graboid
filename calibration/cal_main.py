@@ -535,7 +535,7 @@ class Calibrator:
         lincode_guide = lincode_guide.LinCode + ' ' +lincode_guide.SciName
         
         for report_tab, metric in zip((summ_acc, summ_prc, summ_rec, summ_f1),
-                                       ('Accuracy', 'Precision', 'Recall', 'F1 score')):
+                                       ('Accuracy', 'Precision', 'Recall', 'F1_score')):
             cal_plot.plot_APRF(report_tab, metric, win_tab, self.plots_dir, lincode_guide, collapse_hm, custom=True)
         
         # plot ce

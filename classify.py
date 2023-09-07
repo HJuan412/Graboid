@@ -33,7 +33,7 @@ from classification import cls_main, cls_parameters, cls_plots
 
 def is_graboid_dir(path):
     # proposed directory must contain only the expected contents (or be empty)
-    exp_contents = {'calibration', 'classification', 'query', 'meta.json', 'warnings'}
+    exp_contents = {'calibration', 'classification', 'query', 'meta.json', 'warnings', 'classification.log'}
     dir_contents = set(os.listdir(path))
     if len(dir_contents) == 0:
         # directory exists but it's empty

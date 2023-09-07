@@ -73,7 +73,7 @@ def preparation(out_dir,
         try:
             is_graboid_dir(out_dir)
         except Exception as excp:
-            raise 'Proposed directory cannot be assertained as a graboid directory\n' + excp
+            raise Exception('Proposed directory cannot be assertained as a graboid directory\n' + str(excp))
         
         if overwrite:
             shutil.rmtree(out_dir, ignore_errors=True)

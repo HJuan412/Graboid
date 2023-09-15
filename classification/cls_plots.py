@@ -12,7 +12,9 @@ from matplotlib import cm
 import matplotlib.patches as ptch
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import re
+import seaborn as sns
 
 #%% functions
 def plot_ref_v_qry(ref_coverage, ref_mesas, qry_coverage, qry_mesas, overlaps, figsize=(12,7), **kwargs):
@@ -92,6 +94,7 @@ def plot_sample_report(report, figsize=10):
     for rk, rk_report in rk_arrays.items():
         plot_result(rk_report, figsize)
     
+# TODO: this function is old and busted, get rid of it
 def plot_result(report, confidence_threshold=0.5, figsize=10):
     # make a pie chart of sample characterization
         # each slice is a taxon
@@ -187,3 +190,50 @@ def plot_result(report, confidence_threshold=0.5, figsize=10):
     # TODO: add title
     # TODO: save figures
     return
+
+# TODO: this function is new and sexy
+def plot_pre_report(file, rank, fig_width=10, tax_height=0.3):
+    """Generates a violin plot for a pre-report file
+    y-axis: rank taxa
+    x-axis: log(# seqs)
+    violin width: support"""
+    # file: pre report file
+    # rank: tax rank of pre-report (used for figure title)
+    # fig_width: width of figure (inches)
+    # tax_height: used to calculate figure height (= tax_height * # taxa)
+    report = pd.read_csv(file)
+    
+    # cluster by support
+    supp_clustered = []
+    for (supp, tax), subtab in report.groupby(['softmax_support', 'tax']):
+        supp_clustered.append(pd.Series({'support':supp, 'n_seqs':subtab.n_seqs.sum(), 'tax':tax}))
+    supp_clustered = pd.DataFrame(supp_clustered).sort_values(['tax', 'support'], ascending=[True, False])
+    supp_clustered['log_nseqs'] = np.log(supp_clustered.n_seqs)
+    
+    # expand support
+    supp_expanded = []
+    for tax, subtab in supp_clustered.groupby('tax'):
+        obs = (1000 * subtab['support']).values.astype(int)
+        supp_counts = np.concatenate([np.full(ob, n) for ob,n in zip(obs, subtab.log_nseqs.values)])
+        supp_expanded.append(pd.DataFrame({'log_nseqs':supp_counts, 'tax':tax}))
+    supp_expanded = pd.concat(supp_expanded)
+    
+    # build plot
+    fig_height = tax_height * len(report.tax.unique())
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=300)
+
+    sns.violinplot(data=supp_expanded, y = 'tax', x = 'log_nseqs', inner = None, linewidth=.7, bw=.05, scale='width')
+    
+    # postprocess
+    ax.set_xlim(-.5, supp_expanded.log_nseqs.max() + 0.5)
+    xticks = np.linspace(supp_expanded.log_nseqs.min(),
+                         supp_expanded.log_nseqs.max(),
+                         5)
+    xtick_labels = np.exp(xticks).astype(int)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xtick_labels, rotation=-60)
+    ax.set_xlim(0, supp_expanded.log_nseqs.max()+.5)
+    ax.set_ylabel('Taxon')
+    ax.set_xlabel('# Sequences')
+    ax.set_title(f'Classification supports for rank: {rank}')
+    return fig

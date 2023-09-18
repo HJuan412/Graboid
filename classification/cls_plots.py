@@ -192,16 +192,19 @@ def plot_result(report, confidence_threshold=0.5, figsize=10):
     return
 
 # TODO: this function is new and sexy
-def plot_pre_report(file, rank, fig_width=10, tax_height=0.3):
-    """Generates a violin plot for a pre-report file
+def plot_pre_report(report, rank, fig_width=10, tax_height=0.3):
+    """Generates a violin plot for a pre-report file or dataframe
     y-axis: rank taxa
     x-axis: log(# seqs)
     violin width: support"""
-    # file: pre report file
+    # report: either a pre-report dataframe or csv file
     # rank: tax rank of pre-report (used for figure title)
     # fig_width: width of figure (inches)
     # tax_height: used to calculate figure height (= tax_height * # taxa)
-    report = pd.read_csv(file)
+    
+    # if report is not a dataframe, attempt to open it as a csv file
+    if not type(report) is pd.DataFrame:
+        report = pd.read_csv(report)
     
     # cluster by support
     supp_clustered = []

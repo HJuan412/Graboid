@@ -26,6 +26,7 @@ from classification import cls_classify
 from classification import cls_distance
 from classification import cls_neighbours
 from classification import cls_parameters
+from classification import cls_plots
 from classification import cls_preprocess
 from classification import cls_report
 
@@ -911,6 +912,8 @@ class Classifier(ClassifierBase):
             # save pre reports
             for rk, rk_prereport in pre_report.items():
                 rk_prereport.to_csv(out_dir + f'/pre_report_{rk}.csv')
+                rk_figure = cls_plots.plot_pre_report(rk_prereport, rk) # Remember that fig_width and tax_height are adjustable
+                rk_figure.savefig(out_dir + f'results_{rk}.png')
             report.to_csv(out_dir + '/report.csv')
             characterization.to_csv(out_dir + '/sample_characterization.csv')
             designation.to_csv(out_dir + '/sequence_designation.csv')

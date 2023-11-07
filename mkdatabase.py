@@ -8,7 +8,6 @@ Director for database creation and updating
 """
 
 #%% libraries
-import argparse
 import json
 import logging
 import os
@@ -20,6 +19,7 @@ from Bio import Entrez
 from DATA import DATA
 from database import director as db
 from mapping import director as mp
+from parsers import gdb_parser as parser
 from preprocess import feature_selection as fsele
 
 #%% set logger
@@ -38,78 +38,153 @@ def set_entrez(email, apikey):
     Entrez.email = email
     Entrez.api_key = apikey
 
-#%% main function
-def main(db_name,
-         ref_seq,
-         taxon=None,
-         marker=None,
-         fasta=None,
-         description='',
-         ranks=None,
-         bold=True,
-         chunksize=500,
-         max_attempts=3,
-         evalue=0.005,
-         dropoff=0.05,
-         min_height=0.1,
-         min_width=2,
-         threads=1,
-         keep=False,
-         clear=False,
-         email='',
-         apikey=''):
-    # Arguments:
-    # required:
-    #     db_name : name for the generated database
-    #     ref_seq : reference sequence to build the alignment upon
-    #     taxon & marker or fasta : search criteria or sequence file
-    # optional:
-    #   # data
-    #     ranks : taxonomic ranks to be used. Default: Phylum, Class, Order, Family, Genus, Species
-    #     bold : Search BOLD database. Valid when fasta = None
-    #   # ncbi
-    #     chunksize : Number of sequences to retrieve each pass
-    #     max_attempts : Number of retries for failed passes
-    #   # mapping
-    #     evalue : evalue threshold when building the alignment
-    #     # mesas
-    #       dropoff : percentage of mesa height drop to determine a border
-    #       min_height : minimum sequence coverage to consider for a mesa candidate
-    #       min_width : minimum weight needed for a candidate to register
-    #     threads : threads to use when building the alignment
-    #   # cleanup
-    #     keep : keep the temporal files
-    #     clear : clear the db_name directory (if it exists)
-    
-    # set entrez api key
-    set_entrez(email, apikey)
-    # check sequences in ref_seq
-    n_refseqs = mp.check_fasta(ref_seq)
-    if n_refseqs != 1:
-        logger.error(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
-        return
-        
-    # prepare output directories
-    # check db_name (if it exists, check clear (if true, overwrite, else interrupt))
-    db_dir = DATA.DATAPATH + '/' + db_name
-    if db_name in DATA.DBASES:
-        logger.info(f'A database with the name {db_name} already exists...')
-        if not clear:
-            logger.warning('Choose a diferent name or set "clear" as True')
-            return
-        logger.info(f'Removing existing database: {db_name}...')
-        shutil.rmtree(db_dir)
-    
-    # create directories
+def make_db_dir(db_name):
+    db_dir = f'{DATA.DATAPATH}/{db_name}'
     tmp_dir = db_dir + '/tmp'
     warn_dir = db_dir + '/warning'
     ref_dir = db_dir + '/ref'
-    ref_file = ref_dir + '/ref.fasta'
     os.makedirs(tmp_dir)
     os.makedirs(warn_dir)
     os.makedirs(ref_dir)
+    return db_dir, tmp_dir, warn_dir, ref_dir
+
+def build_summary(db_dir,
+                  db_name,
+                  ref_seq,
+                  marker_len,
+                  nseqs,
+                  aln_seqs,
+                  ranks,
+                  mesas):
+    summ_file = db_dir + '/summary'
+    with open(summ_file, 'w') as summary:
+        summary.write(f'Database name: {db_name}\n')
+        summary.write(f'Database location: {db_dir}\n')
+        summary.write(f'Reference sequence (length): {ref_seq} ({marker_len})\n')
+        summary.write(f'N sequences: {nseqs}\n')
+        summary.write(f'Sequences in alignment: {aln_seqs}\n')
+        summary.write('Taxa:\n')
+        summary.write('Rank (N taxa):\n')
+        summary.write('\n'.join([f'\t{rk} ({count})' for rk, count in ranks]))
+        summary.write('\nAlignment mesas:\n')
+    # mesas summary
+    mesa_tab = pd.DataFrame(mesas, columns = 'start end bases average_cov'.split())
+    mesa_tab.index.name = 'Mesa'
+    mesa_tab = mesa_tab.astype({'Start':int, 'End':int, 'Bases':int})
+    mesa_tab['Average_cov'] = mesa_tab.average_cov.round(2)
+    mesa_tab.to_csv(summ_file, sep='\t', mode='a')
+
+#%% make functions
+def make_main(db_name,
+              ref_seq,
+              ranks,
+              bold=False,
+              keep=False,
+              taxon=None,
+              marker=None,
+              fasta=None,
+              description='',
+              chunksize=500,
+              max_attempts=3,
+              evalue=0.005,
+              dropoff=0.05,
+              min_height=0.1,
+              min_width=2,
+              threads=1,
+              email='',
+              apikey=''):
+    # Arguments:
+    # required:
+    #     db_name : 
+    #     ref_seq : 
+    #     taxon & marker or fasta : 
+    # optional:
+    #   # data
+    #     ranks : 
+    #     bold : 
+    #   # ncbi
+    #     chunksize : 
+    #     max_attempts : 
+    #   # mapping
+    #     evalue : 
+    #     # mesas
+    #       dropoff : 
+    #       min_height : 
+    #       min_width : 
+    #     threads : 
+    #   # cleanup
+    #     keep : keep the temporal files
+    #     clear : clear the db_name directory (if it exists)
+    """
+    
+
+    Parameters
+    ----------
+    db_name : str
+        Name for the generated database.
+    ref_seq : str
+        Reference sequence to build the alignment upon.
+    ranks : list
+        Taxonomic ranks to be used. Default: Phylum, Class, Order, Family, Genus, Species.
+    bold : Bool, optional
+        Search BOLD database. The default is False.
+    keep : TYPE, optional
+        DESCRIPTION. The default is False.
+    taxon : TYPE, optional
+        DESCRIPTION. The default is None.
+    marker : TYPE, optional
+        DESCRIPTION. The default is None.
+    fasta : TYPE, optional
+        DESCRIPTION. The default is None.
+    description : TYPE, optional
+        DESCRIPTION. The default is ''.
+    chunksize : int, optional
+        Number of sequences to retrieve each pass. The default is 500.
+    max_attempts : int, optional
+        Number of retries for failed passes. The default is 3.
+    evalue : float, optional
+        evalue threshold when building the alignment. The default is 0.005.
+    dropoff : float, optional
+        Percentage of mesa height drop to determine a border. The default is 0.05.
+    min_height : float, optional
+        Minimum sequence coverage to consider for a mesa candidate. The default is 0.1.
+    min_width : int, optional
+        Minimum weight needed for a candidate to register. The default is 2.
+    threads : int, optional
+        Threads to use when building the alignment. The default is 1.
+    email : str, optional
+        Valid email to be paired with an NCBI API key.
+    apikey : str, optional
+        NCBI API key.
+
+    Raises
+    ------
+    Exception
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    # set entrez api key
+    set_entrez(email, apikey)
+    
+    # check sequences in ref_seq
+    n_refseqs = mp.check_fasta(ref_seq)
+    if n_refseqs != 1:
+        raise Exception(f'Reference file must contain ONE sequence. File {ref_seq} contains {n_refseqs}')
+    
+    # check that the database name is available
+    if DATA.database_exists(db_name):
+        raise Exception(f'A database with the name {db_name} already exists')
+    
+    # make database directory tree, copy reference file
+    db_dir, tmp_dir, warn_dir, ref_dir = make_db_dir(db_name)
+    ref_file = ref_dir + '/ref.fasta'
     shutil.copyfile(ref_seq, ref_file)
-    # add file handler
+    
+    # add file handler for logger
     fh = logging.FileHandler(db_dir + '/database.log')
     fh.setLevel(logging.INFO)
     fh.setFormatter(formatter)
@@ -154,8 +229,15 @@ def main(db_name,
                         db_director.tax_tab,
                         db_director.ext_guide)
     print('Calculations are done!')
+    print('Finished building database!')
     
     # assemble meta file
+    # generate db description
+    if description == '':
+        if fasta is None:
+            description = f'Database built from search terms: {taxon} + {marker}. {db_director.nseqs} sequences.'
+        else:
+            description = f'Database built from file: {fasta}. {db_director.nseqs} sequences.'
     meta_dict = {'seq_file':db_director.seq_file,
                  'tax_file':db_director.tax_file,
                  'guide_file':db_director.guide_file,
@@ -170,135 +252,63 @@ def main(db_name,
                  'ref_file':ref_file,
                  'acc_file':map_director.acc_file,
                  'order_file':selector.order_file,
-                 'diff_file':selector.diff_file}
+                 'diff_file':selector.diff_file,
+                 'description': description}
     with open(db_dir + '/meta.json', 'w') as meta_handle:
         json.dump(meta_dict, meta_handle)
     
-    # generate db description
-    if description == '':
-        if fasta is None:
-            description = f'Database built from search terms: {taxon} + {marker}. {db_director.nseqs} sequences.'
-        else:
-            description = f'Database built from file: {fasta}. {db_director.nseqs} sequences.'
-    with open(db_dir + '/desc.json', 'w') as handle:
-        json.dump(description, handle)
-    
-    print('Finished building database!')
     # write summaries
-    # Database summary
-    summ_file = db_dir + '/summary'
-    with open(summ_file, 'w') as summary:
-        summary.write(f'Database name: {db_name}\n')
-        summary.write(f'Database location: {db_dir}\n')
-        summary.write(f'Reference sequence (length): {ref_seq} ({marker_len})\n')
-        summary.write(f'N sequences: {db_director.nseqs}\n')
-        summary.write(f'Sequences in alignment: {map_director.matrix.shape[0]}\n')
-        summary.write('Taxa:\n')
-        summary.write('Rank (N taxa):\n')
-        summary.write('\n'.join([f'\t{rk} ({count})' for rk, count in db_director.rank_counts.items()]))
-        summary.write('\nAlignment mesas:\n')
-    # mesas summary
-    mesa_tab = pd.DataFrame(map_director.mesas, columns = 'start end bases average_cov'.split())
-    mesa_tab.index.name = 'Mesa'
-    mesa_tab = mesa_tab.astype({'Start':int, 'End':int, 'Bases':int})
-    mesa_tab['Average_cov'] = mesa_tab.average_cov.round(2)
-    mesa_tab.to_csv(summ_file, sep='\t', mode='a')
+    build_summary(db_dir,
+                  db_name,
+                  ref_seq,
+                  marker_len,
+                  db_director.nseqs,
+                  map_director.matrix.shape[0],
+                  db_director.rank_counts.items(),
+                  map_director.mesas)
 
 #%% main execution
-parser = argparse.ArgumentParser(prog='Graboid DATABASE',
-                                 usage='%(prog)s MODE_ARGS [-h]',
-                                 description='Graboid DATABASE downloads records from the specified taxon/marker pair from the NCBI and BOLD databases')
-parser.add_argument('db',
-                    help='Name for the generated database',
-                    type=str)
-parser.add_argument('ref',
-                    help='Reference sequence for the selected molecular marker. Must be a fasta file with one (1) sequence',
-                    type=str)
-parser.add_argument('-T', '--taxon',
-                    help='Taxon to search for (use this along with --marker in place of --fasta)',
-                    type=str)
-parser.add_argument('-M', '--marker',
-                    help='Marker sequence to search for (use this along with --taxon in place of --fasta)',
-                    type=str)
-parser.add_argument('-F', '--fasta',
-                    help='Pre-constructed fasta file (use this in place of --taxon and --marker)',
-                    type=str)
-parser.add_argument('--desc',
-                    help='Database description text. Optional',
-                    type=str,
-                    default='')
-parser.add_argument('-r', '--ranks',
-                    help='Set taxonomic ranks to include in the taxonomy table. Default: Phylum Class Order Family Genus Species. Case insensitive',
-                    nargs='*')
-parser.add_argument('--bold',
-                    help='Include the BOLD database in the search',
-                    action='store_true')
-parser.add_argument('--chunk',
-                    help='Number of records to download per pass. Default: 500',
-                    type=int,
-                    default=500)
-parser.add_argument('--attempts',
-                    help='Max number of attempts to download a chunk of records. Default: 3',
-                    type=int,
-                    default=3)
-parser.add_argument('--evalue',
-                    help='E-value threshold for the BLAST matches. Default: 0.005',
-                    type=float,
-                    default=0.005)
-parser.add_argument('--dropoff',
-                    help='Percentage of mesa height drop to determine a border. Default: 0.05',
-                    type=float,
-                    default=0.05)
-parser.add_argument('--min_height',
-                    help='Minimum sequence coverage to consider for a mesa candidate (percentage of maximum coverage). Default: 0.1',
-                    type=float,
-                    default=0.1)
-parser.add_argument('--min_width',
-                    help='Minimum width needed for a mesa candidate to register. Default: 2',
-                    type=int,
-                    default=2)
-parser.add_argument('--threads',
-                    help='Threads to use when building the alignment. Default: 1',
-                    type=int,
-                    default=1)
-parser.add_argument('--keep',
-                    help='Keep the temporal files',
-                    action='store_true')
-parser.add_argument('--clear',
-                    help='Overwrite existing database of the same name (if it exists)',
-                    action='store_true')
-parser.add_argument('--email',
-                    help='Use this in conjunction with --apikey to enable parallel downloads from NCBI (must provide a valid NCBI API key)',
-                    type=str)
-parser.add_argument('--apikey',
-                    help='Use this in conjunction with --email to enable parallel downloads from NCBI (must provide a valid NCBI API key)',
-                    type=str)
-
 if __name__ == '__main__':
     args = parser.parse_args()
-    # check sequences in ref_seq
-    n_refseqs = mp.check_fasta(args.ref)
-    if n_refseqs != 1:
-        print(f'Reference file must contain ONE sequence. File {args.ref_seq} contains {n_refseqs}')
+    
+    # I wish I were using python 10 so I could use match-case
+    if args.mode == 'rep':
+        make_main(db_name = args.db,
+                  ref_seq = args.ref,
+                  ranks = args.rank,
+                  bold = args.bold,
+                  keep = args.keep,
+                  taxon = args.taxon,
+                  marker = args.marker,
+                  description = args.description,
+                  chunksize = args.chunksize,
+                  max_attempts = args.attempts,
+                  evalue = args.evalue,
+                  dropoff = args.dropoff,
+                  min_height = args.min_height,
+                  min_width = args.min_width,
+                  threads = args.threads,
+                  email = args.email,
+                  apikey = args.apikey)
+    if args.mode == 'fst':
+        make_main(db_name = args.db,
+                  ref_seq = args.ref,
+                  ranks = args.rank,
+                  keep = args.keep,
+                  fasta=args.fasta,
+                  description = args.description,
+                  chunksize = args.chunksize,
+                  max_attempts = args.attempts,
+                  evalue = args.evalue,
+                  dropoff = args.dropoff,
+                  min_height = args.min_height,
+                  min_width = args.min_width,
+                  threads = args.threads,
+                  email = args.email,
+                  apikey = args.apikey)
+    if args.mode == 'list':
         pass
-    
-    main(db_name = args.db,
-         ref_seq = args.ref,
-         taxon = args.taxon,
-         marker = args.marker,
-         fasta = args.fasta,
-         description = args.desc,
-         ranks = args.ranks,
-         bold = args.bold,
-         chunksize = args.chunk,
-         max_attempts = args.attempts,
-         evalue = args.evalue,
-         dropoff = args.dropoff,
-         min_height = args.min_height,
-         min_width = args.min_width,
-         threads = args.threads,
-         keep = args.keep,
-         clear = args.clear,
-         email = args.email,
-         apikey = args.apikey)
-    
+    if args.mode == 'delete':
+        pass
+    if args.mode == 'export':
+        pass

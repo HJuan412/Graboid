@@ -383,6 +383,8 @@ class Calibrator:
     def set_sliding_windows(self, size, step):
         if size >= self.max_pos:
             raise Exception(f'Given window size: {size} is equal or greater than the total length of the alignment {self.max_pos}, please use a smaller window size.')
+        if step > size:
+            raise Exception(f'Window displacement rate ({step}) must be lower or equal to the window size ({size})')
         
         # adjust window size to get uniform distribution (avoid having to use a "tail" window)
         last_position = self.max_pos - size
@@ -393,19 +395,30 @@ class Calibrator:
         logger.info(f'Set {n_windows} windows of size {size} at intervals of {w_start[1] - w_start[0]}')
     
     def set_custom_windows(self, starts, ends):
-        # check that given values are valid: same length, starts < ends, within alignment bounds
-        try:
-            raw_coords = np.array([starts, ends], dtype=np.int).T
-            raw_coords = np.reshape(raw_coords, (-1, 2))
-        except ValueError:
-            raise Exception(f'Given starts and ends lengths do not match: {len(starts)} starts, {len(ends)} ends')
+        # ensure arguments are lists
+        if isinstance(starts, int):
+            starts = [starts]
+        if isinstance(ends, int):
+            ends = [ends]
+        
+        # ensure start and end lengths match
+        if len(starts) != len(ends):
+            raise Exception(f'Error: start and end coordinates do not match ({len(starts)} starts, {len(ends)} ends)')
+        
+        raw_coords = np.array([starts, ends], dtype=np.int).T
+        
+        # ensure all coordinate pairs are valid
         invalid = raw_coords[:, 0] >= raw_coords[:, 1]
         if invalid.sum() > 0:
             raise Exception(f'At least one pair of coordinates is invalid: {[list(i) for i in raw_coords[invalid]]}')
+        
+        # ensure all cordinates are within bounds
         out_of_bounds = ((raw_coords < 0) | (raw_coords >= self.max_pos))
         out_of_bounds = out_of_bounds[:,0] | out_of_bounds[:,1]
         if out_of_bounds.sum() > 0:
             raise Exception(f'At least one pair of coordinates is out of bounds [0 {self.max_pos}]: {[list(i) for i in raw_coords[out_of_bounds]]}')
+        
+        # set custom window values
         self.windows = raw_coords
         self.custom = True
         logger.info(f'Set {raw_coords.shape[0]} custom windows at positions:')

@@ -74,6 +74,29 @@ def build_summary(db_dir,
     mesa_tab['Average_cov'] = mesa_tab.average_cov.round(2)
     mesa_tab.to_csv(summ_file, sep='\t', mode='a')
 
+def list_dbases():
+    for dbase, dbase_info in DATA.DBASES.items():
+        print(dbase)
+        print(f"\t{dbase_info['description']}")
+        print(f"\tSequences: {dbase_info['mat_shape'][0]} Sites: {dbase_info['mat_shape'][1]}")
+
+def remove_dbases(database):
+    if DATA.database_exists(database):
+        shutil.rmtree(f'{DATA.DATAPATH}/{database}')
+    print(f'Removed database {database}')
+
+def export_database(database, out_dir):
+    if not os.path.isdir(out_dir):
+        print(f'Specified destination folder {out_dir} does not exist')
+        return
+    if not DATA.database_exists(database):
+        print(f'Specified database {database} does not exist')
+        print('Available databases:')
+        for dbase in DATA.DBASES.keys():
+            print('\t' + dbase)
+        return
+    shutil.copytree(f'{DATA.DATAPATH}/{database}', f'{out_dir}/{database}')
+    
 #%% make functions
 def make_main(db_name,
               ref_seq,
@@ -93,30 +116,9 @@ def make_main(db_name,
               threads=1,
               email='',
               apikey=''):
-    # Arguments:
-    # required:
-    #     db_name : 
-    #     ref_seq : 
-    #     taxon & marker or fasta : 
-    # optional:
-    #   # data
-    #     ranks : 
-    #     bold : 
-    #   # ncbi
-    #     chunksize : 
-    #     max_attempts : 
-    #   # mapping
-    #     evalue : 
-    #     # mesas
-    #       dropoff : 
-    #       min_height : 
-    #       min_width : 
-    #     threads : 
-    #   # cleanup
-    #     keep : keep the temporal files
-    #     clear : clear the db_name directory (if it exists)
-    """
     
+    """
+    Build a graboid database using either online repositories or a local fasta file
 
     Parameters
     ----------
@@ -128,14 +130,14 @@ def make_main(db_name,
         Taxonomic ranks to be used. Default: Phylum, Class, Order, Family, Genus, Species.
     bold : Bool, optional
         Search BOLD database. The default is False.
-    keep : TYPE, optional
-        DESCRIPTION. The default is False.
-    taxon : TYPE, optional
-        DESCRIPTION. The default is None.
-    marker : TYPE, optional
-        DESCRIPTION. The default is None.
-    fasta : TYPE, optional
-        DESCRIPTION. The default is None.
+    keep : bool, optional
+        Keep temporal files. The default is False.
+    taxon : str, optional
+        Taxon to look for in the online repositories. The default is None.
+    marker : str, optional
+        Marker to look for in the online repositories. The default is None.
+    fasta : str, optional
+        Path to local fasta file. The default is None.
     description : TYPE, optional
         DESCRIPTION. The default is ''.
     chunksize : int, optional
@@ -157,16 +159,8 @@ def make_main(db_name,
     apikey : str, optional
         NCBI API key.
 
-    Raises
-    ------
-    Exception
-        DESCRIPTION.
-
-    Returns
-    -------
-    None.
-
     """
+    
     # set entrez api key
     set_entrez(email, apikey)
     
@@ -269,10 +263,10 @@ def make_main(db_name,
 
 #%% main execution
 if __name__ == '__main__':
-    args = parser.parse_args()
+    args, unk = parser.parse_known_args()
     
     # I wish I were using python 10 so I could use match-case
-    if args.mode == 'rep':
+    if args.mode in ('rep', 'repo', 'repository'):
         make_main(db_name = args.db,
                   ref_seq = args.ref,
                   ranks = args.rank,
@@ -290,7 +284,7 @@ if __name__ == '__main__':
                   threads = args.threads,
                   email = args.email,
                   apikey = args.apikey)
-    if args.mode == 'fst':
+    if args.mode in ('fst', 'fasta'):
         make_main(db_name = args.db,
                   ref_seq = args.ref,
                   ranks = args.rank,
@@ -307,8 +301,8 @@ if __name__ == '__main__':
                   email = args.email,
                   apikey = args.apikey)
     if args.mode == 'list':
-        pass
+        list_dbases()
     if args.mode == 'delete':
-        pass
+        remove_dbases(args.database)
     if args.mode == 'export':
-        pass
+        export_database(args.database, args.out_dir)

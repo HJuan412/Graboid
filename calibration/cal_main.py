@@ -357,8 +357,7 @@ class Calibrator:
         except Exception:
             raise
         # use meta file from database to locate necessary files
-        with open(self.db_dir + '/meta.json', 'r') as meta_handle:
-            db_meta = json.load(meta_handle)
+        db_meta = DATA.DBASE_INFO[database]
         
         # load taxonomy guides
         self.guide = pd.read_csv(db_meta['guide_file'], index_col=0)

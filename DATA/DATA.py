@@ -23,7 +23,7 @@ DATAPATH = os.path.dirname(__file__)
 DBASES = [db_dir for db_dir in os.listdir(DATAPATH) if (os.path.isdir(DATAPATH + '/' + db_dir) and db_dir != '__pycache__')]
 DBASE_INFO = {}
 for dbase in DBASES:
-    with open(DATAPATH + '/' + dbase, 'r') as handle:
+    with open(f'{DATAPATH}/{dbase}/meta.json', 'r') as handle:
         DBASE_INFO[dbase] = json.load(handle)
 
 def database_exists(database):

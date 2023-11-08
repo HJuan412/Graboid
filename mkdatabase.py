@@ -261,10 +261,7 @@ def make_main(db_name,
                   db_director.rank_counts.items(),
                   map_director.mesas)
 
-#%% main execution
-if __name__ == '__main__':
-    args, unk = parser.parse_known_args()
-    
+def main(args):
     # I wish I were using python 10 so I could use match-case
     if args.mode in ('rep', 'repo', 'repository'):
         make_main(db_name = args.db,
@@ -306,3 +303,9 @@ if __name__ == '__main__':
         remove_dbases(args.database)
     if args.mode == 'export':
         export_database(args.database, args.out_dir)
+
+#%% main execution
+if __name__ == '__main__':
+    args, unk = parser.parse_known_args()
+    
+    main(args)

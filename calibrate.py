@@ -33,24 +33,6 @@ def main(database,
          w_step=None,
          w_start=None,
          w_end=None):
-         # out_dir,
-         # database,
-         # max_n,
-         # step_n,
-         # max_k,
-         # step_k,
-         # mat_code,
-         # row_thresh,
-         # col_thresh,
-         # min_seqs,
-         # rank,
-         # min_n,
-         # min_k,
-         # threads,
-         # clear,
-         # criterion,
-         # collapse_hm=True,
-         # **kwargs):
     
     # initialize calibrator and set database
     calibrator = cal_main.Calibrator()

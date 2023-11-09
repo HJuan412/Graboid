@@ -10,12 +10,9 @@ Usage:
 generates:
     DATA.DATAPATH : contains the path to the DATA directory
     DATA.DBASES : contains a list of all training databases
-    DATA.DBASE_LIST : contains a dictionary with the description of each database
-    DATA.MAPS : contains previously generated maps, {db:{fasta_file:{map:map_file,
-                                                                     acc:acc_file}}}
+    DATA.DBASE_INFO : dictionary containing metadata of all existing databases
 """
 
-import copy
 import json
 import os
 

@@ -232,7 +232,8 @@ def make_main(db_name,
             description = f'Database built from search terms: {taxon} + {marker}. {db_director.nseqs} sequences.'
         else:
             description = f'Database built from file: {fasta}. {db_director.nseqs} sequences.'
-    meta_dict = {'seq_file':db_director.seq_file,
+    meta_dict = {'name':db_name,
+                 'seq_file':db_director.seq_file,
                  'tax_file':db_director.tax_file,
                  'guide_file':db_director.guide_file,
                  'expguide_file':db_director.expguide_file,

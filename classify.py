@@ -8,22 +8,23 @@ Classification director. Handles custom calibration and classification of query 
 """
 
 #%% libraries
-import argparse
+import Bio
 import os
 import shutil
+
+
 # graboid libraries
+from DATA import DATA
 from classification import cls_main, cls_parameters, cls_plots
+from mapping import director as mp
+from parsers import cls_parser as parser
 
 #%%
-### classification steps
-## preparations
-# set working directory
-# set database
-# set query
-## operations
-# custom calibration
-#   get overlapping regions
-# classification
+### classification operations
+# preparations
+# query calibration
+# parameter selection
+# classification run
 
 # initialize classifier, set working directory
 # set database (if not already set, else skip this step): NOTE. For simplicity, database cannot be changed for a working directory
@@ -108,218 +109,54 @@ def preparation(out_dir,
                              out_file = classifier.query_dir + '/coverage.png')
 
 #%%
-parser = argparse.ArgumentParser(prog='Graboid CLASSIFY',
-                                 description='Common parameters for GRABOID CLASSIFY operations:')
-
-subparsers = parser.add_subparsers(title='Operations')
-prp_parser = subparsers.add_parser('prep',
-                                   help='Prepare graboid working directory',
-                                   description='Set up working directory, select graboid database, load and map query file',
-                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-cal_parser = subparsers.add_parser('calibrate',
-                                   prog='graboid CLASSIFY [common options]',
-                                   help='Perform a custom calibration operation',
-                                   description='Parameters specific to the calibration operation',
-                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-par_parser = subparsers.add_parser('params',
-                                   prog='graboid CLASSIFY [common options]',
-                                   help='Select classification parameters',
-                                   description='Parameters specific to the parameter selection operation',
-                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-cls_parser = subparsers.add_parser('classify',
-                                   prog='graboid CLASSIFY [common options]',
-                                   help='Classify the provided query',
-                                   description='Parameters specific to the classification operation',
-                                   formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-
-# preparation arguments
-prp_parser.set_defaults(mode='prep')
-prp_parser.add_argument('out_dir',
-                        help='Working directory',
-                        type=str)
-prp_parser.add_argument('database',
-                        help='Database to be used in the classification',
-                        type=str)
-prp_parser.add_argument('query',
-                        help='Query file in FASTA format',
-                        type=str)
-prp_parser.add_argument('-s', '--transition',
-                        default=1,
-                        help='Cost for transition-type substitutions (A <-> T, C <-> G)',
-                        type=float)
-prp_parser.add_argument('-v', '--transversion',
-                        default=1,
-                        help='Cost for transversion-type substitutions (A/T <-> C/G)',
-                        type=float)
-prp_parser.add_argument('--evalue',
-                        default=0.005,
-                        help='E-value threshold for the BLAST matches when mapping the query file',
-                        type=float)
-prp_parser.add_argument('--dropoff',
-                        help='Maximum coverage drop threshold for mesa candidates (percentage of maximum coverage)',
-                        type=float,
-                        default=0.05)
-prp_parser.add_argument('--min_height',
-                        help='Minimum coverage threshold for mesa candidates (percentage of maximum coverage)',
-                        type=float,
-                        default=0.1)
-prp_parser.add_argument('--min_width',
-                        help='Minimum width threshold for mesa candidates',
-                        type=int,
-                        default=2)
-prp_parser.add_argument('--min_overlap_width',
-                        default=10,
-                        help='Minimum overlap width betwen reference and query mesas',
-                        type=int)
-prp_parser.add_argument('--overwrite',
-                        help='Overwrite provided working directory (if present). WARNING: All existing calibration and classification data will be lost',
-                        action='store_true')
-prp_parser.add_argument('--threads',
-                        help='Threads to use when building the alignment',
-                        type=int,
-                        default=1)
-
-# calibration arguments
-cal_parser.set_defaults(mode='calibrate')
-cal_parser.add_argument('out_dir',
-                        help='Working directory',
-                        type=str)
-cal_parser.add_argument('-ow', '--min_overlap_width',
-                        default=10,
-                        help='Minimum overlap width betwen reference and query mesas',
-                        type=int)
-cal_parser.add_argument('-mn', '--max_n',
-                        default=30,
-                        help='Max value of n',
-                        type=int)
-cal_parser.add_argument('-sn', '--step_n',
-                        default=5,
-                        help='Rate of increase of n',
-                        type=int)
-cal_parser.add_argument('-mk', '--max_k',
-                        default=15,
-                        help='Max value of K',
-                        type=int)
-cal_parser.add_argument('-sk', '--step_k',
-                        default=2,
-                        help='Rate of increase of K',
-                        type=int)
-cal_parser.add_argument('-rt', '--row_thresh',
-                        default=0.1,
-                        help='Maximum empty row threshold',
-                        type=float)
-cal_parser.add_argument('-ct', '--col_thresh',
-                        default=0.1,
-                        help='Maximum empty column threshold',
-                        type=float)
-cal_parser.add_argument('-ms', '--min_seqs',
-                        default=10,
-                        help='Minimum number of sequences allowed per taxon',
-                        type=int)
-cal_parser.add_argument('-rk', '--rank',
-                        default='genus',
-                        help='Taxonomic rank to be used for feature selection',
-                        type=str)
-cal_parser.add_argument('-nk', '--min_k',
-                        default=1,
-                        help='Min value of K',
-                        type=int)
-cal_parser.add_argument('-nn', '--min_n',
-                        default=5,
-                        help='Min value of n',
-                        type=int)
-cal_parser.add_argument('--criterion',
-                        choices=['orbit', 'neighbour'],
-                        help='Criterion for neighbour sampling',
-                        type=str,
-                        default='orbit')
-cal_parser.add_argument('--threads',
-                        help='Threads to use when performing the calibration',
-                        type=int,
-                        default=1)
-
-# param selection arguments
-par_parser.set_defaults(mode='params')
-par_parser.add_argument('out_dir',
-                        help='Working directory',
-                        type=str)
-par_parser.add_argument('window',
-                        help='Calibration window index',
-                        type=int)
-par_parser.add_argument('--metric',
-                        help='Calibration metric used for parameter selection',
-                        choices=['acc', 'prc', 'rec', 'f1', 'ce'],
-                        default='f1')
-par_parser.add_argument('--cal_dir',
-                        help='Calibration directory to be used in parameter selection. If none is provided the latest run will be used',
-                        type=str)
-par_parser.add_argument('--taxa',
-                        help='Select parameters that optimize selection for the given taxa',
-                        type=str,
-                        nargs='*')
-
-# classification arguments
-cls_parser.set_defaults(mode='classify')
-cls_parser.add_argument('out_dir',
-                        help='Working directory',
-                        type=str)
-# automatic parameter selection
-cls_parser.add_argument('--auto',
-                        help='Automatically select parameters',
-                        action='store_true')
-cls_parser.add_argument('-w', '--win_idx',
-                        help='Window index, use alternatively to w_start and w_end',
-                        type=int)
-cls_parser.add_argument('--metric',
-                        help='Calibration metric used for parameter selection',
-                        choices=['acc', 'prc', 'rec', 'f1', 'ce'])
-cls_parser.add_argument('--cal_dir',
-                        help='Calibration directory to be used in parameter selection. If none is provided the latest run will be used',
-                        type=str)
-cls_parser.add_argument('--taxa',
-                        help='Select parameters that optimize selection for the given taxa',
-                        type=str,
-                        nargs='*')
-# classification parameters
-cls_parser.add_argument('-ws', '--w_start',
-                        help='Start coordinate for the classification window',
-                        type=int)
-cls_parser.add_argument('-we', '--w_end',
-                        help='End coordinate for the classification window',
-                        type=int)
-cls_parser.add_argument('-n',
-                        help='Number of informative sites to be used in the classification',
-                        type=int)
-cls_parser.add_argument('-k',
-                        help='Number of neighbours to include in the classification',
-                        type=int)
-cls_parser.add_argument('-rk', '--rank',
-                        default='genus',
-                        help='Taxonomic rank to be used for feature selection',
-                        type=str)
-cls_parser.add_argument('-rt', '--row_thresh',
-                        default=0.1,
-                        help='Maximum empty row threshold',
-                        type=float)
-cls_parser.add_argument('-ct', '--col_thresh',
-                        default=0.1,
-                        help='Maximum empty column threshold',
-                        type=float)
-cls_parser.add_argument('-ms', '--min_seqs',
-                        default=10,
-                        help='Minimum number of sequences allowed per taxon',
-                        type=int)
-cls_parser.add_argument('--criterion',
-                        choices=['orbit', 'neighbour'],
-                        help='Criterion for neighbour sampling',
-                        type=str,
-                        default='orbit')
-cls_parser.add_argument('--method',
-                        choices=['unweighted', 'wknn', 'dwknn'],
-                        help='Weighting method',
-                        type=str,
-                        default='unweighted')
-
+def preparation_2(out_dir,
+                  database,
+                  query_file,
+                  transition,
+                  transversion,
+                  criterion,
+                  evalue=0.005,
+                  dropoff=0.05,
+                  min_height=0.1,
+                  min_width=2,
+                  min_overlap_width=10,
+                  threads=1):
+    
+    # check out_dir is available
+    if os.path.isdir(out_dir):
+        print(f'Error: Selected working directory {out_dir} already exists')
+        return
+    # check database exists
+    if not DATA.database_exists(database):
+        print(f'Error: Database {database} not found among [{" ".join(DATA.DBASES)}]')
+        return
+    # check query file is valid
+    if mp.check_fasta(query_file) == 0:
+        print(f'Error: Query file {query_file} is not a valid fasta file')
+        return
+    
+    # set working directory, database and query file
+    classifier = cls_main.Classifier(work_dir = out_dir,
+                                     database = database,
+                                     query = query_file,
+                                     qry_evalue = evalue,
+                                     qry_droppoff = dropoff,
+                                     qry_min_height = min_height,
+                                     qry_min_width = min_width,
+                                     transition = transition,
+                                     transversion = transversion)
+    
+    return
+    
+def main(args):
+    if args.operation in ('pre', 'prep', 'preparation'):
+        pass
+    elif args.operation in ('cal', 'calibrate', 'calibration'):
+        pass
+    elif args.operation in ('par', 'params', 'parameters'):
+        pass
+    elif args.operation == 'run':
+        pass
 #%% classify
 if __name__ == '__main__':
     args, unk = parser.parse_known_args()

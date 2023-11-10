@@ -244,12 +244,13 @@ def make_main(db_name,
                  'mat_file':map_director.mat_file,
                  'reference':re.sub('.*/', '', ref_seq),
                  'ref_file':ref_file,
+                 'blast_db':ref_dir + '/db',
                  'acc_file':map_director.acc_file,
                  'order_file':selector.order_file,
                  'diff_file':selector.diff_file,
                  'description': description}
     with open(db_dir + '/meta.json', 'w') as meta_handle:
-        json.dump(meta_dict, meta_handle)
+        json.dump(meta_dict, meta_handle, indent=2)
     
     # write summaries
     build_summary(db_dir,

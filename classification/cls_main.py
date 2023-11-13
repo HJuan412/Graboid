@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -1158,21 +1159,22 @@ def get_mesas_overlap(ref_map, qry_map, min_width=10):
 'transition':None,
 'transversion':None}
 
-class Classifier:
+class Classifier2:
     def __init__(self,
                  work_dir,
                  database=None,
                  query=None,
-                 qry_evalue=None,
-                 qry_dropoff=None, 
-                 qry_min_height=None,
-                 qry_min_width=None,
+                 qry_evalue=0.005,
+                 qry_dropoff=0.05, 
+                 qry_min_height=0.1,
+                 qry_min_width=2,
                  transition=1,
                  transversion=1,
                  threads=1):
 
         self.set_work_dir(work_dir)
         self.set_database(database)
+        self.set_query(query, qry_evalue, qry_dropoff, qry_min_height, qry_min_width, threads)
         if self.transition is None:
             self.transition = transition
         if self.transversion is None:
@@ -1214,9 +1216,11 @@ class Classifier:
             # no database given
             return
         if not self.db is None:
-             # database is already set
-             logger.warning('Attempted to set a graboid database when one is already set')
-             return
+            # database is already set
+            logger.warning('Attempted to set a graboid database when one is already set')
+            return
+        if not DATA.database_exists(database):
+            raise Exception(f'Error: Database {database} not found among [{" ".join(DATA.DBASES)}]')
         self.db = DATA.DBASE_INFO[database]
     
     # load and map query file
@@ -1228,6 +1232,8 @@ class Classifier:
         if not self.query is None:
             logger.warning('Attempted to set a query file when one is already set')
             return
+        if mp.check_fasta(query_file) == 0:
+            raise Exception(f'Error: Query file {query_file} is not a valid fasta file')
         
         # map query to the same reference sequence of the database
         self.query = map_query(self.query_dir,

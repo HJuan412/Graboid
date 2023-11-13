@@ -8,15 +8,12 @@ Classification director. Handles custom calibration and classification of query 
 """
 
 #%% libraries
-import Bio
 import os
 import shutil
 
 
 # graboid libraries
-from DATA import DATA
-from classification import cls_main, cls_parameters, cls_plots
-from mapping import director as mp
+from classification import cls_main, cls_plots
 from parsers import cls_parser as parser
 
 #%%
@@ -109,54 +106,56 @@ def preparation(out_dir,
                              out_file = classifier.query_dir + '/coverage.png')
 
 #%%
-def preparation_2(out_dir,
-                  database,
-                  query_file,
-                  transition,
-                  transversion,
-                  criterion,
-                  evalue=0.005,
-                  dropoff=0.05,
-                  min_height=0.1,
-                  min_width=2,
-                  min_overlap_width=10,
-                  threads=1):
-    
-    # check out_dir is available
-    if os.path.isdir(out_dir):
-        print(f'Error: Selected working directory {out_dir} already exists')
-        return
-    # check database exists
-    if not DATA.database_exists(database):
-        print(f'Error: Database {database} not found among [{" ".join(DATA.DBASES)}]')
-        return
-    # check query file is valid
-    if mp.check_fasta(query_file) == 0:
-        print(f'Error: Query file {query_file} is not a valid fasta file')
-        return
-    
-    # set working directory, database and query file
-    classifier = cls_main.Classifier(work_dir = out_dir,
-                                     database = database,
-                                     query = query_file,
-                                     qry_evalue = evalue,
-                                     qry_droppoff = dropoff,
-                                     qry_min_height = min_height,
-                                     qry_min_width = min_width,
-                                     transition = transition,
-                                     transversion = transversion)
-    
-    return
-    
 def main(args):
     if args.operation in ('pre', 'prep', 'preparation'):
-        pass
-    elif args.operation in ('cal', 'calibrate', 'calibration'):
-        pass
+        # check out_dir is available
+        if os.path.isdir(args.out_dir):
+            print(f'Error: Selected working directory {args.out_dir} already exists')
+            return
+        try:
+            # set working directory, database and query file
+            cls_main.Classifier2(work_dir = args.out_dir,
+                                 database = args.database,
+                                 query = args.query,
+                                 qry_evalue = args.evalue,
+                                 qry_droppoff = args.dropoff,
+                                 qry_min_height = args.min_height,
+                                 qry_min_width = args.min_width,
+                                 transition = args.transition,
+                                 transversion = args.transversion,
+                                 threads = args.threads)
+        except Exception as excp:
+            print(excp)
+        return
+    
+    classifier = cls_main.Classifier2(work_dir = args.out_dir)
+    if args.operation in ('cal', 'calibrate', 'calibration'):
+        classifier.custom_calibrate(max_n = args.max_n,
+                                    step_n = args.step_n,
+                                    max_k = args.max_k,
+                                    step_k = args.step_k,
+                                    row_thresh = args.row_thresh,
+                                    col_thresh = args.col_thresh,
+                                    min_seqs = args.min_seqs,
+                                    rank = args.rank,
+                                    min_n = args.min_n,
+                                    min_k = args.min_k,
+                                    criterion = args.criterion,
+                                    threads = args.threads,
+                                    w_starts = args.w_start,
+                                    w_ends = args.w_end)
     elif args.operation in ('par', 'params', 'parameters'):
-        pass
+        # TODO: fix param selection: each calibration run performed on a single window has its own calibration directory in the work_dir, parameters should then be: calibration_dir, metric, taxa (and show)
+        classifier.select_parameters(calibration_dir, w_idx, w_start, w_end, metric, show, taxa)
     elif args.operation == 'run':
-        pass
+        classifier.classify(w_start = args.w_start,
+                            w_end = args.w_end,
+                            n = args.n,
+                            k = args.k,
+                            rank = args.rank,
+                            row_thresh = args.row_thresh,
+                            col_thresh = args.col_thresh,
+                            min_seqs = args.min_seqs)
 #%% classify
 if __name__ == '__main__':
     args, unk = parser.parse_known_args()

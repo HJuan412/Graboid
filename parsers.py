@@ -47,63 +47,63 @@ gdb_mke_parser.add_argument('ref',
                             type=str)
 
 # make parser: data source arguments
-repo_group = gdb_mke_parser.add_argument_group('Repository arguments',
-                                               'Retrieve data from online repositories. Use these arguments to set search parameters')
-repo_group.add_argument('--taxon',
-                        help='Taxon to search for',
-                        type=str)
-repo_group.add_argument('--marker',
-                        help='Marker sequence to search for',
-                        type=str)
-repo_group.add_argument('--bold',
-                        help='Include the BOLD database in the search',
-                        action='store_true')
-fasta_group = gdb_mke_parser.add_argument_group('Local file arguments',
-                                                'Build the database from a local fasta file. If used, overwrites repository arguments')
-fasta_group.add_argument('--fasta',
-                         help='Pre-constructed fasta file',
-                         type=str)
+gdb_mke_repo = gdb_mke_parser.add_argument_group('Repository arguments',
+                                                 'Retrieve data from online repositories. Use these arguments to set search parameters')
+gdb_mke_repo.add_argument('--taxon',
+                          help='Taxon to search for',
+                          type=str)
+gdb_mke_repo.add_argument('--marker',
+                          help='Marker sequence to search for',
+                          type=str)
+gdb_mke_repo.add_argument('--bold',
+                          help='Include the BOLD database in the search',
+                          action='store_true')
+gdb_mke_fasta = gdb_mke_parser.add_argument_group('Local file arguments',
+                                                  'Build the database from a local fasta file. If used, overwrites repository arguments')
+gdb_mke_fasta.add_argument('--fasta',
+                           help='Pre-constructed fasta file',
+                           type=str)
 
 # make parser: download arguments
-dl_group = gdb_mke_parser.add_argument_group('Download arguments',
-                                             'Set data retrieval options')
-dl_group.add_argument('--chunk',
-                      help='Number of records to download per pass (default: 500)',
-                      type=int,
-                      default=500)
-dl_group.add_argument('--attempts',
-                      help='Max number of attempts to download a chunk of records (default: 3)',
-                      type=int,
-                      default=3)
-dl_group.add_argument('--email',
-                      help='Use this in conjunction with --apikey to enable parallel downloads from NCBI (must provide a valid NCBI API key)',
-                      type=str)
-dl_group.add_argument('--apikey',
-                      help='Use this in conjunction with --email to enable parallel downloads from NCBI (must provide a valid NCBI API key)',
-                      type=str)
-dl_group.add_argument('-r', '--ranks',
-                      help='Set taxonomic ranks to include in the taxonomy table (case insensitive) (default: Phylum Class Order Family Genus Species)',
-                      nargs='*')
+gdb_mke_dl = gdb_mke_parser.add_argument_group('Download arguments',
+                                               'Set data retrieval options')
+gdb_mke_dl.add_argument('--chunk',
+                        help='Number of records to download per pass (default: 500)',
+                        type=int,
+                        default=500)
+gdb_mke_dl.add_argument('--attempts',
+                        help='Max number of attempts to download a chunk of records (default: 3)',
+                        type=int,
+                        default=3)
+gdb_mke_dl.add_argument('--email',
+                        help='Use this in conjunction with --apikey to enable parallel downloads from NCBI (must provide a valid NCBI API key)',
+                        type=str)
+gdb_mke_dl.add_argument('--apikey',
+                        help='Use this in conjunction with --email to enable parallel downloads from NCBI (must provide a valid NCBI API key)',
+                        type=str)
+gdb_mke_dl.add_argument('-r', '--ranks',
+                        help='Set taxonomic ranks to include in the taxonomy table (case insensitive) (default: Phylum Class Order Family Genus Species)',
+                        nargs='*')
 
 # make parser: alignment arguments
-mke_aln_group = gdb_mke_parser.add_argument_group('Alignment arguments',
-                                              'Configure reference sequence alignment')
-mke_aln_group.add_argument('--evalue',
-                        help='E-value threshold for the BLAST matches (default: 0.005)',
-                        type=float,
-                        default=0.005)
-mke_aln_group.add_argument('--dropoff',
-                        help='Percentage of mesa height drop to determine a border (default: 0.05)',
-                        type=float,
-                        default=0.05)
-mke_aln_group.add_argument('--min_height',
-                        help='Minimum sequence coverage to consider for a mesa candidate (percentage of maximum coverage) (default: 0.1)',
-                        type=float,
-                        default=0.1)
-mke_aln_group.add_argument('--min_width',
-                        help='Minimum width needed for a mesa candidate to register (default: 2)',
-                        type=int,
-                        default=2)
+gdb_mke_aln = gdb_mke_parser.add_argument_group('Alignment arguments',
+                                                'Configure reference sequence alignment')
+gdb_mke_aln.add_argument('--evalue',
+                         help='E-value threshold for the BLAST matches (default: 0.005)',
+                         type=float,
+                         default=0.005)
+gdb_mke_aln.add_argument('--dropoff',
+                         help='Percentage of mesa height drop to determine a border (default: 0.05)',
+                         type=float,
+                         default=0.05)
+gdb_mke_aln.add_argument('--min_height',
+                         help='Minimum sequence coverage to consider for a mesa candidate (percentage of maximum coverage) (default: 0.1)',
+                         type=float,
+                         default=0.1)
+gdb_mke_aln.add_argument('--min_width',
+                         help='Minimum width needed for a mesa candidate to register (default: 2)',
+                         type=int,
+                         default=2)
 
 # make parser: optional arguments
 gdb_mke_parser.add_argument('--desc',
@@ -120,7 +120,6 @@ gdb_mke_parser.add_argument('--keep',
 gdb_mke_parser.add_argument('--clear',
                             help='Overwrite existing database of the same name (if it exists)',
                             action='store_true')
-    
 
 # deletion parser
 gdb_del_parser.add_argument('database',
@@ -151,92 +150,92 @@ cal_parser.add_argument('out_dir',
                         type=str)
 
 # calibration parser: filtering arguments
-cal_filter_group = cal_parser.add_argument_group('Filtering arguments',
-                                                 'Arguments used to filter the training set')
-cal_filter_group.add_argument('-rt', '--row_thresh',
-                              default=0.2,
-                              help='Empty row threshold',
-                              type=float)
-cal_filter_group.add_argument('-ct', '--col_thresh',
-                              default=0.2,
-                              help='Empty column threshold',
-                              type=float)
-cal_filter_group.add_argument('-ms', '--min_seqs',
-                              default=10,
-                              help='Minimum number of sequences allowed per taxon',
-                              type=int)
-cal_filter_group.add_argument('-rk', '--rank',
-                              default='genus',
-                              help='Rank to be used for feature selection',
-                              type=str)
+cal_flt = cal_parser.add_argument_group('Filtering arguments',
+                                        'Arguments used to filter the training set')
+cal_flt.add_argument('-rt', '--row_thresh',
+                     default=0.2,
+                     help='Empty row threshold',
+                     type=float)
+cal_flt.add_argument('-ct', '--col_thresh',
+                     default=0.2,
+                     help='Empty column threshold',
+                     type=float)
+cal_flt.add_argument('-ms', '--min_seqs',
+                     default=10,
+                     help='Minimum number of sequences allowed per taxon',
+                     type=int)
+cal_flt.add_argument('-rk', '--rank',
+                     default='genus',
+                     help='Rank to be used for feature selection',
+                     type=str)
 
 # calibration parser: sliding window arguments
-win_group = cal_parser.add_argument_group('Sliding window arguments',
-                                          'Arguments needed for using a sliding calibration window. Specify the size of the window and its rate of displacement (step)')
-win_group.add_argument('--w_size',
-                       default=200,
-                       help='Sliding window size',
-                       type=int)
-win_group.add_argument('--w_step',
-                       default=30,
-                       help='Sliding window displacement',
-                       type=int)
+cal_win_slid = cal_parser.add_argument_group('Sliding window arguments',
+                                             'Arguments needed for using a sliding calibration window. Specify the size of the window and its rate of displacement (step)')
+cal_win_slid.add_argument('--w_size',
+                          default=200,
+                          help='Sliding window size',
+                          type=int)
+cal_win_slid.add_argument('--w_step',
+                          default=30,
+                          help='Sliding window displacement',
+                          type=int)
 
 # calibration parser: specific window arguments
-spec_group = cal_parser.add_argument_group('Specific window(s) arguments',
-                                           'Select one or more regions of the alignment to perform the calibration on. Use in place of --w_size and --w_step. Each region is presented as a pair of values given in --w_start and --w_end')
-spec_group.add_argument('--w_start',
-                        nargs='*',
-                        help='Start coordinates for one or more regions of the alignment',
-                        type=int)
-spec_group.add_argument('--w_end', 
-                        nargs='*',
-                        help='End coordinates for one or more regions of the alignment',
-                        type=int)
+cal_win_spec = cal_parser.add_argument_group('Specific window(s) arguments',
+                                             'Select one or more regions of the alignment to perform the calibration on. Use in place of --w_size and --w_step. Each region is presented as a pair of values given in --w_start and --w_end')
+cal_win_spec.add_argument('--w_start',
+                          nargs='*',
+                          help='Start coordinates for one or more regions of the alignment',
+                          type=int)
+cal_win_spec.add_argument('--w_end', 
+                          nargs='*',
+                          help='End coordinates for one or more regions of the alignment',
+                          type=int)
 
 # calibration parser: grid arguments
-cal_grid_group = cal_parser.add_argument_group('Parameter grid arguments',
-                                               'Configure the parameter space to be explored in the grid search')
-cal_grid_group.add_argument('-mk', '--max_k',
-                            default=15,
-                            help='Max value of K',
-                            type=int)
-cal_grid_group.add_argument('-sk', '--step_k',
-                            default=2,
-                            help='Rate of increase of K',
-                            type=int)
-cal_grid_group.add_argument('-mn', '--max_n',
-                            default=30,
-                            help='Max value of n',
-                            type=int)
-cal_grid_group.add_argument('-sn', '--step_n',
-                            default=5,
-                            help='Rate of increase of n',
-                            type=int)
-cal_grid_group.add_argument('-nk', '--min_k',
-                            default=1,
-                            help='Min value of K',
-                            type=int)
-cal_grid_group.add_argument('-nn', '--min_n',
-                            default=5,
-                            help='Min value of n',
-                            type=int)
+cal_grid = cal_parser.add_argument_group('Parameter grid arguments',
+                                         'Configure the parameter space to be explored in the grid search')
+cal_grid.add_argument('-mk', '--max_k',
+                      default=15,
+                      help='Max value of K',
+                      type=int)
+cal_grid.add_argument('-sk', '--step_k',
+                      default=2,
+                      help='Rate of increase of K',
+                      type=int)
+cal_grid.add_argument('-mn', '--max_n',
+                      default=30,
+                      help='Max value of n',
+                      type=int)
+cal_grid.add_argument('-sn', '--step_n',
+                      default=5,
+                      help='Rate of increase of n',
+                      type=int)
+cal_grid.add_argument('-nk', '--min_k',
+                      default=1,
+                      help='Min value of K',
+                      type=int)
+cal_grid.add_argument('-nn', '--min_n',
+                      default=5,
+                      help='Min value of n',
+                      type=int)
 
 # # calibration parser: classification arguments
-cal_class_group = cal_parser.add_argument_group('Classification arguments',
-                                                'Configure the behaviour of the classifier')
-cal_class_group.add_argument('-s', '--transition',
-                             default=1,
-                             help='Cost for transition-type substitutions (A <-> T, C <-> G)',
-                             type=float)
-cal_class_group.add_argument('-v', '--transversion',
-                             default=1,
-                             help='Cost for transversion-type substitutions (A/T <-> C/G)',
-                             type=float)
-cal_class_group.add_argument('-c', '--criterion',
-                             default = 'orbit',
-                             help='Neighbour selection criterion. Orbit: Select all neighbours within K orbitals of the query sequence. Neighbour: Select neighbours from orbits up to the one containing the K nearest neighbour',
-                             choices=['orbit', 'neighbour'])
+cal_cls = cal_parser.add_argument_group('Classification arguments',
+                                        'Configure the behaviour of the classifier')
+cal_cls.add_argument('-s', '--transition',
+                     default=1,
+                     help='Cost for transition-type substitutions (A <-> T, C <-> G)',
+                     type=float)
+cal_cls.add_argument('-v', '--transversion',
+                     default=1,
+                     help='Cost for transversion-type substitutions (A/T <-> C/G)',
+                     type=float)
+cal_cls.add_argument('-c', '--criterion',
+                     default = 'orbit',
+                     help='Neighbour selection criterion. Orbit: Select all neighbours within K orbitals of the query sequence. Neighbour: Select neighbours from orbits up to the one containing the K nearest neighbour',
+                     choices=['orbit', 'neighbour'])
 
 # calibration parser: optional arguments
 cal_parser.add_argument('-t', '--threads',
@@ -293,45 +292,41 @@ cls_pre_parser.add_argument('query',
                             type=str)
 
 # preparation parser: classification arguments
-cls_class_group = cls_pre_parser.add_argument_group('Classification arguments',
-                                                    'Configure the behaviour of the classifier')
-cls_class_group.add_argument('-s', '--transition',
-                             default=1,
-                             help='Cost for transition-type substitutions (A <-> T, C <-> G)',
-                             type=float)
-cls_class_group.add_argument('-v', '--transversion',
-                             default=1,
-                             help='Cost for transversion-type substitutions (A/T <-> C/G)',
-                             type=float)
-cls_class_group.add_argument('-c', '--criterion',
-                             default = 'orbit',
-                             help='Neighbour selection criterion. Orbit: Select all neighbours within K orbitals of the query sequence. Neighbour: Select neighbours from orbits up to the one containing the K nearest neighbour',
-                             choices=['orbit', 'neighbour'])
+cls_pre_class = cls_pre_parser.add_argument_group('Classification arguments',
+                                                  'Configure the behaviour of the classifier')
+cls_pre_class.add_argument('-s', '--transition',
+                           default=1,
+                           help='Cost for transition-type substitutions (A <-> T, C <-> G)',
+                           type=float)
+cls_pre_class.add_argument('-v', '--transversion',
+                           default=1,
+                           help='Cost for transversion-type substitutions (A/T <-> C/G)',
+                           type=float)
 
 # preparation parser: alignment arguments
 # make parser: alignment arguments
-cls_aln_group = cls_pre_parser.add_argument_group('Alignment arguments',
-                                                  'Configure query sequence alignment')
-cls_aln_group.add_argument('--evalue',
-                           help='E-value threshold for the BLAST matches (default: 0.005)',
-                           type=float,
-                           default=0.005)
-cls_aln_group.add_argument('--dropoff',
-                           help='Percentage of mesa height drop to determine a border (default: 0.05)',
-                           type=float,
-                           default=0.05)
-cls_aln_group.add_argument('--min_height',
-                           help='Minimum sequence coverage to consider for a mesa candidate (percentage of maximum coverage) (default: 0.1)',
-                           type=float,
-                           default=0.1)
-cls_aln_group.add_argument('--min_width',
-                           help='Minimum width needed for a mesa candidate to register (default: 2)',
-                           type=int,
-                           default=2)
-cls_aln_group.add_argument('--min_overlap_width',
-                           default=10,
-                           help='Minimum overlap width betwen reference and query mesas',
-                           type=int)
+cls_pre_aln = cls_pre_parser.add_argument_group('Alignment arguments',
+                                                'Configure query sequence alignment')
+cls_pre_aln.add_argument('--evalue',
+                         help='E-value threshold for the BLAST matches (default: 0.005)',
+                         type=float,
+                         default=0.005)
+cls_pre_aln.add_argument('--dropoff',
+                         help='Percentage of mesa height drop to determine a border (default: 0.05)',
+                         type=float,
+                         default=0.05)
+cls_pre_aln.add_argument('--min_height',
+                         help='Minimum sequence coverage to consider for a mesa candidate (percentage of maximum coverage) (default: 0.1)',
+                         type=float,
+                         default=0.1)
+cls_pre_aln.add_argument('--min_width',
+                         help='Minimum width needed for a mesa candidate to register (default: 2)',
+                         type=int,
+                         default=2)
+cls_pre_aln.add_argument('--min_overlap_width',
+                         default=10,
+                         help='Minimum overlap width betwen reference and query mesas',
+                         type=int)
 
 # preparation parser: optional arguments
 cls_pre_parser.add_argument('--threads',
@@ -340,55 +335,69 @@ cls_pre_parser.add_argument('--threads',
                             default=1)
 
 # query calibration parser
+# query calibration parser: window arguments
+cls_cal_win = cls_cal_parser.add_argument_group('Calibration window arguments',
+                                                'Sepecify the portion of the reference alignment to calibrate for')
+cls_cal_win.add_argument('--w_start',
+                         help='Start coordinates for one or more regions of the alignment',
+                         type=int)
+cls_cal_win.add_argument('--w_end',
+                         help='End coordinates for one or more regions of the alignment',
+                         type=int)
+
 # query calibration parser: filtering arguments
-cls_filter_group = cls_cal_parser.add_argument_group('Filtering arguments',
-                                                     'Arguments used to filter the training set')
-cls_filter_group.add_argument('-rt', '--row_thresh',
-                              default=0.2,
-                              help='Empty row threshold',
-                              type=float)
-cls_filter_group.add_argument('-ct', '--col_thresh',
-                              default=0.2,
-                              help='Empty column threshold',
-                              type=float)
-cls_filter_group.add_argument('-ms', '--min_seqs',
-                              default=10,
-                              help='Minimum number of sequences allowed per taxon',
-                              type=int)
-cls_filter_group.add_argument('-rk', '--rank',
-                              default='genus',
-                              help='Rank to be used for feature selection',
-                              type=str)
+cls_cal_flt = cls_cal_parser.add_argument_group('Filtering arguments',
+                                                'Arguments used to filter the training set')
+cls_cal_flt.add_argument('-rt', '--row_thresh',
+                         default=0.2,
+                         help='Empty row threshold',
+                         type=float)
+cls_cal_flt.add_argument('-ct', '--col_thresh',
+                         default=0.2,
+                         help='Empty column threshold',
+                         type=float)
+cls_cal_flt.add_argument('-ms', '--min_seqs',
+                         default=10,
+                         help='Minimum number of sequences allowed per taxon',
+                         type=int)
+cls_cal_flt.add_argument('-rk', '--rank',
+                         default='genus',
+                         help='Rank to be used for feature selection',
+                         type=str)
 
 # query calibration parser: grid arguments
-cls_grid_group = cls_cal_parser.add_argument_group('Parameter grid arguments',
-                                                   'Configure the parameter space to be explored in the grid search')
-cls_grid_group.add_argument('-mk', '--max_k',
-                            default=15,
-                            help='Max value of K',
-                            type=int)
-cls_grid_group.add_argument('-sk', '--step_k',
-                            default=2,
-                            help='Rate of increase of K',
-                            type=int)
-cls_grid_group.add_argument('-mn', '--max_n',
-                            default=30,
-                            help='Max value of n',
-                            type=int)
-cls_grid_group.add_argument('-sn', '--step_n',
-                            default=5,
-                            help='Rate of increase of n',
-                            type=int)
-cls_grid_group.add_argument('-nk', '--min_k',
-                            default=1,
-                            help='Min value of K',
-                            type=int)
-cls_grid_group.add_argument('-nn', '--min_n',
-                            default=5,
-                            help='Min value of n',
-                            type=int)
+cls_cal_grid = cls_cal_parser.add_argument_group('Parameter grid arguments',
+                                                 'Configure the parameter space to be explored in the grid search')
+cls_cal_grid.add_argument('-mk', '--max_k',
+                          default=15,
+                          help='Max value of K',
+                          type=int)
+cls_cal_grid.add_argument('-sk', '--step_k',
+                          default=2,
+                          help='Rate of increase of K',
+                          type=int)
+cls_cal_grid.add_argument('-mn', '--max_n',
+                          default=30,
+                          help='Max value of n',
+                          type=int)
+cls_cal_grid.add_argument('-sn', '--step_n',
+                          default=5,
+                          help='Rate of increase of n',
+                          type=int)
+cls_cal_grid.add_argument('-nk', '--min_k',
+                          default=1,
+                          help='Min value of K',
+                          type=int)
+cls_cal_grid.add_argument('-nn', '--min_n',
+                          default=5,
+                          help='Min value of n',
+                          type=int)
 
 # query calibration parser: optional arguments
+cls_cal_parser.add_argument('-c', '--criterion',
+                            default = 'orbit',
+                            help='Neighbour selection criterion. Orbit: Select all neighbours within K orbitals of the query sequence. Neighbour: Select neighbours from orbits up to the one containing the K nearest neighbour',
+                            choices=['orbit', 'neighbour'])
 cls_cal_parser.add_argument('--threads',
                             help='Threads to use when performing the calibration',
                             type=int,
@@ -412,44 +421,44 @@ cls_par_parser.add_argument('--taxa',
 
 # classification parser
 # classification parser: filtering parameters
-run_filter_group = cls_run_parser.add_argument_group('Filtering arguments',
-                                                     'Arguments used to filter the query set')
-run_filter_group.add_argument('-rk', '--rank',
-                              default='genus',
-                              help='Taxonomic rank to be used for feature selection',
-                              type=str)
-run_filter_group.add_argument('-rt', '--row_thresh',
-                              default=0.1,
-                              help='Maximum empty row threshold',
-                              type=float)
-run_filter_group.add_argument('-ct', '--col_thresh',
-                              default=0.1,
-                              help='Maximum empty column threshold',
-                              type=float)
-run_filter_group.add_argument('-ms', '--min_seqs',
-                              default=10,
-                              help='Minimum number of sequences allowed per taxon',
-                              type=int)
+cls_run_flt = cls_run_parser.add_argument_group('Filtering arguments',
+                                                'Arguments used to filter the query set')
+cls_run_flt.add_argument('-rk', '--rank',
+                         default='genus',
+                         help='Taxonomic rank to be used for feature selection',
+                         type=str)
+cls_run_flt.add_argument('-rt', '--row_thresh',
+                         default=0.1,
+                         help='Maximum empty row threshold',
+                         type=float)
+cls_run_flt.add_argument('-ct', '--col_thresh',
+                         default=0.1,
+                         help='Maximum empty column threshold',
+                         type=float)
+cls_run_flt.add_argument('-ms', '--min_seqs',
+                         default=10,
+                         help='Minimum number of sequences allowed per taxon',
+                         type=int)
 
 # classification parser: classification arguments
-run_classif_group = cls_run_parser.add_argument_group('Classification parameters')
-run_classif_group.add_argument('-ws', '--w_start',
-                               help='Start coordinate for the classification window',
-                               type=int)
-run_classif_group.add_argument('-we', '--w_end',
-                               help='End coordinate for the classification window',
-                               type=int)
-run_classif_group.add_argument('-n',
-                               help='Number of informative sites to be used in the classification',
-                               type=int)
-run_classif_group.add_argument('-k',
-                               help='Number of neighbours to include in the classification',
-                               type=int)
-run_classif_group.add_argument('--method',
-                               choices=['unweighted', 'wknn', 'dwknn'],
-                               help='Weighting method',
-                               type=str,
-                               default='unweighted')
+cls_run_cls = cls_run_parser.add_argument_group('Classification parameters')
+cls_run_cls.add_argument('-ws', '--w_start',
+                         help='Start coordinate for the classification window',
+                         type=int)
+cls_run_cls.add_argument('-we', '--w_end',
+                         help='End coordinate for the classification window',
+                         type=int)
+cls_run_cls.add_argument('-n',
+                         help='Number of informative sites to be used in the classification',
+                         type=int)
+cls_run_cls.add_argument('-k',
+                         help='Number of neighbours to include in the classification',
+                         type=int)
+cls_run_cls.add_argument('--method',
+                         choices=['unweighted', 'wknn', 'dwknn'],
+                         help='Weighting method',
+                         type=str,
+                         default='unweighted')
 
 if __name__ == '__main__':
     args, unk = parser.parse_known_args()

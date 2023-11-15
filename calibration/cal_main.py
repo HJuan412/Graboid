@@ -35,98 +35,30 @@ sh = logging.StreamHandler()
 sh.setLevel(logging.DEBUG)
 logger.addHandler(sh)
 
-def set_options():
-    # Set display options to show all rows and columns (used for report construction)
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_columns', None)
-    # Set the option to prevent expanding DataFrame repr
-    pd.set_option('display.expand_frame_repr', False)
-
-def reset_options():
-    pd.reset_option('display.max_rows')
-    pd.reset_option('display.max_columns')
-    pd.reset_option('display.expand_frame_repr')
 #%% functions
-# report functions
-def report_params(date, database, n_range, k_range, criterion, row_thresh, col_thresh, min_seqs, rank, threads, report_file):
-    sep = '#' * 40 + '\n'
-    with open(report_file, 'w') as handle:
-        handle.write('Grid search report\n')
-        handle.write(sep + '\n')
-        handle.write('Parameters\n')
-        handle.write(sep)
-        handle.write(f'Date: {date}\n')
-        handle.write(f'Database: {database}\n')
-        handle.write(f'n sites: {n_range}\n')
-        handle.write(f'k neighbours: {k_range}\n')
-        handle.write(f'Classification criterion: {criterion}\n')
-        handle.write(f'Max unknowns per sequence: {row_thresh * 100} %\n')
-        handle.write(f'Max unknowns per site: {col_thresh * 100} %\n')
-        handle.write(f'Min non-redundant sequences: {min_seqs}\n')
-        handle.write(f'Rank used for site selection: {rank}\n')
-        handle.write(f'Threads: {threads}\n')
-        handle.write('\n')
+def set_options(on=True):
+    # Set display options to show all rows and columns (used for report construction)
+    options = ['max_rows', 'max_columns', 'expand_frame_repr']
+    values = [None, None, False]
+    if on:
+        for opt, val in zip(options, values):
+            pd.set_option(f'display.{opt}', val)
+    else:
+        for opt in options:
+            pd.reset_option(f'display.{opt}')
 
-def report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file):
-    sep = '#' * 40 + '\n'
-    collapsed_tab = []
-    for win_idx, win in zip(win_indexes, win_list):
-        collapsed_tab.append([win_idx, win.start, win.end, win.window.shape[1], win.window.shape[0]])
-    collapsed_tab = pd.DataFrame(collapsed_tab, columns='Window Start End Length Effective_sequences'.split()).set_index('Window', drop=True)
-    
-    rejected_tab = []
-    for rej_idx, rej in zip(rej_indexes, rej_list):
-        rejected_tab.append([f'Window {rej_idx}', rej])
-    rejected_tab = pd.DataFrame(rejected_tab)
-    
+def header(text):
+    text = f'### {text} '
+    text += '#' * (80 - len(text))
+    return '\n' + text + '\n'
+
+def print_table(tab):
     set_options()
-    with open(report_file, 'a') as handle:
-        handle.write('Windows\n')
-        handle.write(sep)
-        handle.write('Collapsed windows:\n')
-        handle.write(repr(collapsed_tab))
-        handle.write('\n')
-        if len(rejected_tab) > 0:
-            handle.write('\nRejected windows:\n')
-            rejected_tab.to_csv(handle, sep='\t', header=None, index=None)
-        else:
-            handle.write('No windows were rejected\n')
-        handle.write('\n')
-    reset_options()
+    tab = repr(tab)
+    set_options(False)
+    return tab + '\n'
 
-def report_sites_ext(win_indexes, win_list, windows_sites, n_range, ext_site_report):
-    site_tabs = []
-    for win_idx, win, win_sites in zip(win_indexes, win_list, windows_sites):
-        total_sites = np.sum([len(n) for n in win_sites])
-        site_array = np.full((len(n_range), total_sites), np.nan)
-        n_idx = 0
-        for n, n_sites in enumerate(win_sites):
-            n_end = n_idx + len(n_sites)
-            site_array[n:, n_idx:n_end] = win.cols[n_sites] + win.start
-            n_idx = n_end
-        site_tabs.append(pd.DataFrame(site_array, index = pd.MultiIndex.from_product(([win_idx], n_range), names = ['Window', 'n'])))
-    
-    site_report = pd.concat(site_tabs).fillna(-1).astype(np.int16)
-    site_report.to_csv(ext_site_report, sep='\t')
-    
-def report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_file):
-    sep = '#' * 40 + '\n'
-    sites_tab = []
-    for win, sites in zip(win_indexes, windows_sites):
-        site_counts = np.cumsum([len(n) for n in sites]).tolist()
-        sites_tab.append([win] + site_counts)
-    sites_tab = pd.DataFrame(sites_tab, columns=['Window'] + [n for n in n_range]).set_index('Window', drop=True)
-    
-    set_options()
-    with open(report_file, 'a') as handle:
-        handle.write('Sites\n')
-        handle.write(sep)
-        handle.write('Non redundant sites selected for each value of n:\n')
-        handle.write(repr(sites_tab))
-        handle.write(f'\nExtended site report: {ext_site_report}\n')
-    reset_options()
-
-def report_taxa(windows, win_indexes, guide, guide_ext, tax_report_file, report_file):
+def count_taxa(windows, win_indexes, guide, guide_ext):
     # Count the number of instances of each taxon per window
     
     # get taxids for each window
@@ -146,26 +78,7 @@ def report_taxa(windows, win_indexes, guide, guide_ext, tax_report_file, report_
     # update index
     index = pd.MultiIndex.from_frame(guide.loc[count_tab.index, ['Rank', 'SciName']].rename(columns={'SciName':'Taxon'}))
     count_tab.index = index
-    
-    with open(tax_report_file, 'w') as handle:
-        handle.write('# Effective sequences for each taxa found in collapsed calibration windows:\n')
-        for win_idx, window in zip(win_indexes, windows):
-            handle.write(f'# Window {win_idx}: [{window.start} - {window.end}]\n')
-    # save report
-    count_tab.to_csv(tax_report_file, sep='\t', mode='a')
-    
-    # summary tax report, write n tax per rank for each window
-    summary_report = pd.DataFrame(index = count_tab.columns, columns = merged_guides.columns)
-    for rk, rk_tab in count_tab.groupby(level=0):
-        summary_report.loc[:, rk] = (rk_tab > 0).sum(0)
-        
-    set_options()
-    with open(report_file, 'a') as handle:
-        handle.write('Taxa per rank per window:\n')
-        handle.write(repr(summary_report))
-        handle.write('\n\n')
-    reset_options()
-    return count_tab
+    return count_tab, merged_guides
 
 def build_CE_summary(ce_table, out_file=None):
     ce_summary = []
@@ -448,11 +361,7 @@ class Calibrator:
         k_range = np.arange(min_k, max_k + 1, step_k)
         
         # initialize grid search report report
-        date = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
-        report_file = self.out_dir + '/GS_report.txt'
-        ext_site_report = self.out_dir + '/sites_report.csv'
-        tax_report = self.out_dir + '/taxa_report.csv'
-        report_params(date, self.db, n_range, k_range, criterion, row_thresh, col_thresh, min_seqs, rank, threads, report_file)
+        reporter = RunReporter(self.out_dir, self.db)
         
         logger.info('Beginning calibration...')
         t_collapse_0 = time.time()
@@ -460,8 +369,8 @@ class Calibrator:
         # collapse windows
         logger.info('Collapsing windows...')
         win_indexes, win_list, rej_indexes, rej_list = cal_preprocess.collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
-        report_windows(win_indexes, win_list, rej_indexes, rej_list, report_file)
-        taxa_counts = report_taxa(win_list, win_indexes, self.guide, self.tax_ext, tax_report, report_file) # keep the number of taxa per window
+        taxa_counts, merged_guides = count_taxa(win_list, win_indexes, self.guide, self.tax_ext)  # keep the number of taxa per window
+
         # build windows tab
         win_tab = pd.DataFrame(self.windows, columns = ['Start', 'End'])
         win_tab.index.name = 'Window'
@@ -479,16 +388,31 @@ class Calibrator:
             logger.info('No windows passed the collapsing filters. Ending calibration')
             return
         
-        # save parameters, used for reportting calibration metrics for classification parameters
+        # save parameters, used for reporting calibration metrics for classification parameters
         np.savez(self.out_dir + '/params.npz', n = n_range, k = k_range, windows = np.array(win_idx))
         # select sites
         logger.info('Selecting informative sites...')
         t_sselection_0 = time.time()
         windows_sites = cal_preprocess.select_sites(win_list, self.tax_ext, rank, min_n, max_n, step_n)
-        report_sites_ext(win_indexes, win_list, windows_sites, n_range, ext_site_report)
-        report_sites(win_indexes, windows_sites, n_range, ext_site_report, report_file)
         t_sselection_1 = time.time()
         logger.info(f'Site selection finished in {t_sselection_1 - t_sselection_0:.2f} seconds')
+        
+        # report parameters
+        reporter.build_report(n_range,
+                              k_range,
+                              criterion,
+                              row_thresh,
+                              col_thresh,
+                              min_seqs,
+                              rank,
+                              threads,
+                              win_indexes,
+                              win_list,
+                              rej_indexes,
+                              rej_list,
+                              windows_sites,
+                              taxa_counts,
+                              merged_guides)
         
         # calculate distances
         logger.info('Calculating paired distances...')
@@ -518,7 +442,6 @@ class Calibrator:
         f1_full_report = cal_metrics.aprf_full_report(self.metrics_dir, 'f', self.guide)
         # save full_reports
         CE_full_report.to_csv(self.out_dir + '/report__cross_entropy.csv') # double underscore so CE doesn't mix with APRF
-        # CE_counts.to_csv(self.out_dir + '/full_report__counts.csv') # this information is already given in taxa_report
         acc_full_report.to_csv(self.out_dir + '/report_accuracy.csv')
         prc_full_report.to_csv(self.out_dir + '/report_precision.csv')
         rec_full_report.to_csv(self.out_dir + '/report_recall.csv')
@@ -526,8 +449,8 @@ class Calibrator:
         t_metrics_1 = time.time()
         logger.info(f'Calculated metrics in {t_metrics_1 - t_metrics_0:.2f} seconds')
         
-        # report
-        logger.info('Building report...')
+        # metric summaries
+        logger.info('Building metric summaries...')
         t_report_0 = time.time()
         # ce_file, acc_file, prc_file, rec_file, f1_file = cal_report.build_reports(win_indexes, self.metrics_dir, self.out_dir, self.ranks, self.guide)
         summ_acc = build_APRF_summary(acc_full_report, out_file = self.out_dir + '/summary_accuracy.csv')
@@ -562,3 +485,111 @@ class Calibrator:
         t1 = time.time()
         logger.info(f'Finished calibration in {t1 - t0:.2f} seconds')
         return
+
+class RunReporter:
+    def __init__(self,
+                 out_dir,
+                 db):
+        
+        self.out_dir = out_dir
+        self.report = self.out_dir + '/GS_report.txt'
+        self.sites_report = self.out_dir + '/sites_report.csv'
+        self.tax_report = self.out_dir + '/taxa_report.csv'
+        self.date = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+        self.db = db
+        
+    def build_windows_report(self, win_idxs, win_list, rej_idxs, rej_list):
+        collapsed_tab = []
+        for win_idx, win in zip(win_idxs, win_list):
+            collapsed_tab.append([win_idx, win.start, win.end, win.window.shape[1], win.window.shape[0]])
+        self.collapsed_tab = pd.DataFrame(collapsed_tab, columns='Window Start End Length Effective_sequences'.split()).set_index('Window', drop=True)
+        
+        rejected_tab = []
+        for rej_idx, rej in zip(rej_idxs, rej_list):
+            rejected_tab.append([rej_idx, rej])
+        self.rejected_tab = pd.DataFrame(rejected_tab, columns='Window Reason'.split())
+    
+    def build_sites_report(self, n_range, win_idxs, win_list, win_sites):
+        sites_summary = []
+        sites_report = []
+        for win_idx, win, win_sites in zip(win_idxs, win_list, win_sites):
+            site_counts = np.cumsum([len(n) for n in win_sites]).tolist()
+            sites_summary.append([win_idx] + site_counts)
+            total_sites = site_counts[-1]
+            site_array = np.full((len(n_range), total_sites), -1, dtype=np.int16)
+            n_idx = 0
+            for n, n_sites in enumerate(win_sites):
+                n_end = n_idx + len(n_sites)
+                site_array[n:, n_idx:n_end] = win.cols[n_sites] + win.start
+                n_idx = n_end
+            win_sites_report = pd.DataFrame(site_array, index = pd.MultiIndex.from_product(([win_idx], n_range), names = ['Window', 'n']))
+            win_sites_report['Total_sites'] = site_counts
+            sites_report.append(win_sites_report)
+            
+        self.sites_summary = pd.DataFrame(sites_summary, columns=['Window'] + [n for n in n_range]).set_index('Window', drop=True)
+        with open(self.sites_report, 'w') as handle:
+            handle.write('# Selected site indexes for each value of n\n')
+            handle.write('# Null values = -1')
+        sites_report.to_csv(self.sites_report, sep='\t', mode='a')
+        
+    def build_tax_report(self, count_tab, merged_guides, win_idxs, win_list):
+        with open(self.tax_report, 'w') as handle:
+            handle.write('# Effective sequences for each taxa found in collapsed calibration windows:\n')
+            for win_idx, window in zip(win_idxs, win_list):
+                handle.write(f'# Window {win_idx}: [{window.start} - {window.end}]\n')
+        # save report
+        count_tab.to_csv(self.tax_report, sep='\t', mode='a')
+        
+        # summary tax report, write n tax per rank for each window
+        tax_summary = pd.DataFrame(index = count_tab.columns, columns = merged_guides.columns)
+        for rk, rk_tab in self.count_tab.groupby(level=0):
+            tax_summary.loc[:, rk] = (rk_tab > 0).sum(0)
+        self.tax_summary = tax_summary
+    
+    def build_report(self,
+                     n_range,
+                     k_range,
+                     criterion,
+                     row_thresh,
+                     col_thresh,
+                     min_seqs,
+                     rank,
+                     threads,
+                     win_idxs,
+                     win_list,
+                     rej_idxs,
+                     rej_list,
+                     win_sites,
+                     count_tab,
+                     merged_guides):
+        self.build_windows_report(win_idxs, win_list, rej_idxs, rej_list)
+        self.build_sites_report(n_range, win_idxs, win_list, win_sites)
+        self.build_tax_report(count_tab, merged_guides, win_idxs, win_list)
+        
+        lines = ['Graboid Calibration report',
+                 'Date: ' + self.date, '',
+                 header('Parameters'),
+                 f'Database: {self.db}',
+                 f'n sites: {n_range}',
+                 f'k neighbours: {k_range}',
+                 f'Classification criterion: {criterion}',
+                 f'Max unknowns per sequence: {row_thresh * 100} %',
+                 f'Max unknowns per site: {col_thresh * 100} %',
+                 f'Min non-redundant sequences: {min_seqs}',
+                 f'Rank used for site selection: {rank}',
+                 f'Threads: {threads}', '',
+                 header('Windows'),
+                 'Collapsed windows:',
+                 print_table(self.collapsed_tab),
+                 'Rejected windows:',
+                 print_table(self.rejected_tab),
+                 header('Taxa'),
+                 'Taxa per rank per window:',
+                 print_table(self.tax_summary),
+                 f'Extended taxonomy report: {self.tax_report}',
+                 header('Sites'),
+                 'Selected sites per n per window:',
+                 print_table(self.sites_summary),
+                 f'Extended sites report: {self.sites_report}']
+        with open(self.report, 'w') as handle:
+            handle.write('\n'.join(lines))

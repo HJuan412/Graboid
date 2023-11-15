@@ -39,12 +39,5 @@ if __name__ == '__main__':
                        threads = args.threads,
                        keep = args.keep)
     elif args.task in ('cls', 'classify', 'classification'):
-        if args.operation == 'preparation':
-            pass
-        elif args.operation == 'calibration':
-            pass
-        elif args.operation == 'params':
-            pass
-        elif args.operation == 'classify':
-            pass
+        classify.main(args)
         

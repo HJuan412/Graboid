@@ -43,7 +43,6 @@ logger.addHandler(sh)
 
 #%% functions
 def make_working_dir(work_dir):
-    work_dir = work_dir
     calibration_dir = work_dir + '/calibration'
     classif_dir = work_dir + '/classification'
     query_dir = work_dir + '/query'
@@ -54,19 +53,8 @@ def make_working_dir(work_dir):
     os.makedirs(classif_dir)
     os.makedirs(query_dir)
     os.makedirs(warn_dir)
-    
-    meta = {'db':None,
-            'query_file':None,
-            'query_map_file':None,
-            'query_acc_file':None,
-            'last_calibration':None,
-            'transition':None,
-            'transversion':None}
-    
-    with open(metadata, 'w') as handle:
-        json.dump(meta, handle)
         
-    return work_dir, calibration_dir, classif_dir, query_dir, warn_dir, metadata
+    return calibration_dir, classif_dir, query_dir, warn_dir, metadata
 
 def check_work_dir(work_dir):
     # proposed directory must contain only the expected contents (or be empty)
@@ -146,22 +134,19 @@ def map_query(out_dir,
                         min_width = min_width,
                         threads = threads,
                         keep = True)
-    query_meta = {'map_file':os.path.abspath(map_director.mat_file),
+    query_meta = {'query_file':fasta_file,
+                  'mat_file':os.path.abspath(map_director.mat_file),
                   'acc_file':os.path.abspath(map_director.acc_file),
                   'blast_report':os.path.abspath(map_director.blast_report),
                   'bounds':map_director.bounds,
-                  'mesas':map_director.mesas}
-    map_file = os.path.abspath(map_director.mat_file)
-    acc_file = os.path.abspath(map_director.acc_file)
-    blast_report = os.path.abspath(map_director.blast_report)
-    acc_list = map_director.accs
-    bounds = map_director.bounds
-    matrix = map_director.matrix
-    coverage = map_director.coverage
-    mesas = map_director.mesas
-    return map_file, acc_file, blast_report, acc_list, bounds, matrix, coverage, mesas
+                  'mesas':map_director.mesas,
+                  'evalue':evalue,
+                  'dropoff':dropoff,
+                  'min_height':min_height,
+                  'min_width':min_width}
+    return query_meta
 
-def get_mesas_overlap(ref_mesas, qry_mesas, min_width=10):
+def get_mesas_overlap(ref_map, qry_map, min_width=10):
     """
     Locate the overlapping regions between the query and reference alignments
 
@@ -181,7 +166,12 @@ def get_mesas_overlap(ref_mesas, qry_mesas, min_width=10):
         Each row represent a distinct overlapping region
 
     """
-
+    
+    ref_npz = np.load(ref_map)
+    ref_mesas = ref_npz['mesas']
+    qry_npz = np.load(qry_map)
+    qry_mesas = qry_npz['mesas']
+    
     mesas_overlap = []
     for q_mesa in qry_mesas:
         # get reference mesas that overlap with the current query mesa: (ref mesa start < qry mesa end) & (ref mesa end > qry mesa start)
@@ -1035,124 +1025,6 @@ class Classifier(ClassifierBase):
         return pre_report, report, characterization, designation
 
 #%%
-def map_query(out_dir,
-              warn_dir,
-              fasta_file,
-              db_dir,
-              evalue=0.005,
-              dropoff=0.05,
-              min_height=0.1,
-              min_width=2,
-              threads=1):
-    """
-    Map the query file against the database reference sequence and define
-    mesas.
-
-    Parameters
-    ----------
-    out_dir : str
-        Output directory.
-    warn_dir : str
-        Warnings directory.
-    fasta_file : str
-        Query sequence file.
-    db_dir : str
-        Graboid database director.
-    evalue : float, optional
-        Evalue threshold for the BLAST alignment. The default is 0.005.
-    dropoff : float, optional
-        Coverage dropoff threshold used to detect the edge of a mesa. The default is 0.05.
-    min_height : float, optional
-        Minimum fraction of the max coverage for a region of the alignment to be included in a mesa. The default is 0.1.
-    min_width : int, optional
-        Minimum amount of sites for a region of the alignment to be included in a mesa. The default is 2.
-    threads : int, optional
-        Number of processors to use. The default is 1.
-
-    Returns
-    -------
-    map_file : str
-        Path to the resulting map file.
-    acc_file : str
-        Path to the file of accepted accession codes.
-    blast_report : str
-        Path to the generated blast report.
-    acc_list : list
-        list of accepted accesion codes.
-    bounds : tuple
-        Edge coordinates of the query alignment over the reference sequence.
-    matrix : numpy.array
-        Generated alignment in the form of a 2d numpy array.
-    coverage : numpy.array
-        Coverage of the generated alignment.
-    mesas : numpy.array
-        Information about the generated coverage mesas.
-        
-    """
-    
-    map_director = mp.Director(out_dir, warn_dir, logger)
-    map_director.direct(fasta_file = fasta_file,
-                        db_dir = db_dir,
-                        evalue = evalue,
-                        dropoff = dropoff,
-                        min_height = min_height,
-                        min_width = min_width,
-                        threads = threads,
-                        keep = True)
-    query_meta = {'query_file':fasta_file,
-                  'mat_file':os.path.abspath(map_director.mat_file),
-                  'acc_file':os.path.abspath(map_director.acc_file),
-                  'blast_report':os.path.abspath(map_director.blast_report),
-                  'bounds':map_director.bounds,
-                  'mesas':map_director.mesas,
-                  'evalue':evalue,
-                  'dropoff':dropoff,
-                  'min_height':min_height,
-                  'min_width':min_width}
-    return query_meta
-
-def get_mesas_overlap(ref_map, qry_map, min_width=10):
-    """
-    Locate the overlapping regions between the query and reference alignments
-
-    Parameters
-    ----------
-    ref_mesas : numpy.array
-        Information matrix for the reference mesas.
-    qry_mesas : numpy.array
-        Information matrix for the query mesas.
-    min_width : int, optional
-        Minimum overlap threshold. The default is 10.
-
-    Returns
-    -------
-    numpy.array
-        2d Array with columns: overlap_start, overlap_end, overlap_width, ref_coverage, qry_coverage.
-        Each row represent a distinct overlapping region
-
-    """
-    
-    ref_npz = np.load(ref_map)
-    ref_mesas = ref_npz['mesas']
-    qry_npz = np.load(qry_map)
-    qry_mesas = qry_npz['mesas']
-    
-    mesas_overlap = []
-    for q_mesa in qry_mesas:
-        # get reference mesas that overlap with the current query mesa: (ref mesa start < qry mesa end) & (ref mesa end > qry mesa start)
-        overlap_idxs = (ref_mesas[:,0] <= q_mesa[1]) & (ref_mesas[:,1] >= q_mesa[0])
-        overlapping_mesas = np.clip(ref_mesas[overlap_idxs, :2], q_mesa[0], q_mesa[1])
-        overlapping_widths = overlapping_mesas[:,1] - overlapping_mesas[:,0]
-        # build overlapping matrix for current q_mesa
-        q_overlap = np.zeros((len(overlapping_mesas), 5))
-        q_overlap[:, :2] = overlapping_mesas
-        q_overlap[:, 2] = overlapping_widths
-        q_overlap[:, 3] = ref_mesas[overlap_idxs, 3]
-        q_overlap[:, 4] = q_mesa[3]
-        
-        mesas_overlap.append(q_overlap[q_overlap[:,2] >= min_width]) # append only overlaps over the specified minimum width
-    return np.concatenate(mesas_overlap, 0)
-#%%
 {'db':None,
 'query':None,
 'last_calibration':None,
@@ -1160,6 +1032,14 @@ def get_mesas_overlap(ref_map, qry_map, min_width=10):
 'transversion':None}
 
 class Classifier2:
+    @property
+    def meta(self):
+        return {'db':self.db,
+                'query':self.query,
+                'transition':self.transition,
+                'transversion':self.transversion,
+                'calibrations':self.calibrations}
+    
     def __init__(self,
                  work_dir,
                  database=None,
@@ -1171,7 +1051,7 @@ class Classifier2:
                  transition=1,
                  transversion=1,
                  threads=1):
-
+        
         self.set_work_dir(work_dir)
         self.set_database(database)
         self.set_query(query, qry_evalue, qry_dropoff, qry_min_height, qry_min_width, threads)
@@ -1179,15 +1059,30 @@ class Classifier2:
             self.transition = transition
         if self.transversion is None:
             self.transversion = transversion
+        self.update_meta()
     
+    def update_meta(self):
+        with open(self.meta_file, 'w') as handle:
+            json.dump(self.meta, handle, indent=2)
+            
     def set_work_dir(self, work_dir):
         # if work dir doesn't exist, create it, else check that existing dir is valid
         if not os.path.isdir(work_dir):
-            work_dir, calibration_dir, classif_dir, query_dir, warn_dir, metadata = make_working_dir(work_dir)
+            calibration_dir, classif_dir, query_dir, warn_dir, metadata = make_working_dir(work_dir)
+            self.db = None
+            self.query = None
+            self.transition = None
+            self.transversion = None
+            self.calibrations = []
         else:
             # verify that given_work dir is valid, raise exception if it isn't
             try:
                 calibration_dir, classification_dir, query_dir, warnings_dir, metadata = check_work_dir(work_dir)
+                # update parameters
+                with open(metadata, 'r') as handle:
+                    meta = json.load(handle)
+                    for attr, val in meta.items():
+                        setattr(self, attr, val)
             except:
                 raise
         self.work_dir = work_dir
@@ -1196,12 +1091,6 @@ class Classifier2:
         self.query_dir = query_dir,
         self.warnings_dir = warnings_dir
         self.meta_file = metadata
-        
-        # update metadata
-        with open(self.meta_file, 'r') as handle:
-            self.meta = json.load(handle)
-            for attr, val in self.meta.items():
-                setattr(self, attr, val)
         
         # set logger
         fh = logging.FileHandler(self.work_dir + '/classification.log')
@@ -1215,36 +1104,39 @@ class Classifier2:
         if database is None:
             # no database given
             return
-        if not self.db is None:
-            # database is already set
-            logger.warning('Attempted to set a graboid database when one is already set')
+        if self.db is None:
+            if not DATA.database_exists(database):
+                raise Exception(f'Error: Database {database} not found among [{" ".join(DATA.DBASES)}]')
+            self.db = DATA.DBASE_INFO[database]
             return
-        if not DATA.database_exists(database):
-            raise Exception(f'Error: Database {database} not found among [{" ".join(DATA.DBASES)}]')
-        self.db = DATA.DBASE_INFO[database]
-    
+        if self.db['name'] == database:
+            # database is already set
+            logger.warning(f'Attempted to set {database} as working graboid database when {self.db["name"]} is already set')
+        return
+        
     # load and map query file
     def set_query(self, query_file, evalue=0.005, dropoff=0.05, min_height=0.1, min_width=2, threads=1):
         if query_file is None:
             return
         if self.db is None:
             raise Exception('You must set a Graboid databse before loading a query file.')
-        if not self.query is None:
-            logger.warning('Attempted to set a query file when one is already set')
-            return
         if mp.check_fasta(query_file) == 0:
             raise Exception(f'Error: Query file {query_file} is not a valid fasta file')
-        
-        # map query to the same reference sequence of the database
-        self.query = map_query(self.query_dir,
-                               self.warn_dir,
-                               query_file,
-                               self.db_refdir,
-                               evalue,
-                               dropoff,
-                               min_height,
-                               min_width,
-                               threads)
+        if self.query is None:
+            # map query to the same reference sequence of the database
+            self.query = map_query(self.query_dir,
+                                   self.warn_dir,
+                                   query_file,
+                                   self.db_refdir,
+                                   evalue,
+                                   dropoff,
+                                   min_height,
+                                   min_width,
+                                   threads)
+            return
+        if query_file == self.query['query_file']:
+            logger.warning(f'Attempted to set {query_file} as query file when {self.query["query_file"]} is already set')
+        return
     
     # locate overlapping regions between reference and query maps
     def get_overlaps(self, min_width=10):
@@ -1273,10 +1165,16 @@ class Classifier2:
         Calibration results are stored to a subfolder inside the calibration
         directory in the working dir, by default named using datetime, unless
         the user provides cal_dir kwarg as an alternative name.
-        Updates last_calibration parameter with the output directory
+        Updates calibrations attribute with the output directory
         """
+        # set calibration directory
+        try:
+            cal_dir = kwargs['cal_dir']
+        except KeyError:
+            cal_dir = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
         # set calibrator
-        calibrator = cal_main.Calibrator()
+        calibrator = cal_main.Calibrator(self.calibration_dir + '/' + cal_dir)
         calibrator.set_database(self.db['name'])
         
         if 'w_starts' in kwargs.keys() and 'w_ends' in kwargs.keys():
@@ -1285,12 +1183,6 @@ class Classifier2:
             calibrator.set_custom_windows(self.overlaps[:,0], self.overlaps[:,1])
         else:
             raise Exception('Missing parameters to set calibration windows. Run the get_overlapps method to get overlapping sections of query and reference data or provide matching sets of custom start and end positions')
-        # set calibration directory
-        try:
-            cal_dir = kwargs['cal_dir']
-        except KeyError:
-            cal_dir = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        calibrator.set_outdir(self.calibration_dir + '/' + cal_dir)
         
         # generate cost matrix
         cost_mat = cost_matrix.cost_matrix(self.transition, self.transversion)
@@ -1309,7 +1201,7 @@ class Classifier2:
                                criterion,
                                collapse_hm=True,
                                threads=threads)
-        self.last_calibration = calibrator.out_dir
+        self.calibrations.append(cal_dir)
     
     # select parameters
     def select_parameters(self, calibration_dir, w_idx, w_start, w_end, metric, show, *taxa):

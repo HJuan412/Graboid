@@ -63,6 +63,9 @@ def main(args):
                                     w_starts = args.w_start,
                                     w_ends = args.w_end)
     elif args.operation in ('par', 'params', 'parameters'):
+        if args.list:
+            classifier.list_calibrations()
+            return
         # TODO: fix param selection: each calibration run performed on a single window has its own calibration directory in the work_dir, parameters should then be: calibration_dir, metric, taxa (and show)
         classifier.select_parameters(calibration_dir = args.calibration_dir,
                                      metric = args.metric,

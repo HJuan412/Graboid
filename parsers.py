@@ -410,6 +410,9 @@ cls_cal_parser.add_argument('--threads',
 cls_par_parser.add_argument('--cal_dir',
                             help='Calibration directory to be used in parameter selection. If none is provided the latest run will be used',
                             type=str)
+cls_par_parser.add_argument('--list',
+                            help='List existing calibrations',
+                            action='store_true')
 cls_par_parser.add_argument('--metric',
                             help='Calibration metric used for parameter selection',
                             choices=['acc', 'prc', 'rec', 'f1', 'ce'],

@@ -213,4 +213,4 @@ def retrieve_data(fasta_file, taxonomy_file, out_dir, names_tab, nodes_tab, *ran
     
     # generate taxonomy files
     lineage_file, taxonomy_file, name_file = arrange_taxonomy(out_dir, taxonomy_file, names_tab, nodes_tab, ranks)
-    return
+    return out_seqs, lineage_file, taxonomy_file, name_file

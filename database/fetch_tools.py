@@ -17,6 +17,9 @@ shell_path = os.path.dirname(__file__) + '/get_taxdmp.sh'
 def get_taxdmp(out_dir):
     """Retrieve and format the NCBI taxdmp files and store them in out_file"""
     subprocess.run([shell_path, out_dir])
+    names_file = f'{out_dir}/names.tsv'
+    nodes_file = f'{out_dir}/nodes.tsv'
+    return names_file, nodes_file
 
 #%%
 def unfold_lineage(taxid, node_tab, *ranks):

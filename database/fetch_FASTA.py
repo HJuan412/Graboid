@@ -9,61 +9,40 @@ Build Graboid database from a provided fasta file.
 A taxonomy table must be provided 
 """
 
+import logging
 import numpy as np
 import os
 import pandas as pd
 import shutil
-import subprocess
+from database.fetch_tools import unfold_lineage
 
-shell_path = os.path.dirname(__file__) + '/get_taxdmp.sh'
-
-# copy or move fasta file to the graboid DATA directory
-# get NCBI taxonomy code for taxa presented in taxonomy table
-    # generate warning file if any taxa is not present in genbank
-
-# output files:
-    # fasta file
-    # Lineage table
-    # Taxonomy table
-    # names table
-
-def move_fasta(fasta_file, destination, mv=False):
-    if mv:
-        shutil.move(fasta_file, destination)
-    else:
-        shutil.copy(fasta_file, destination)
-
-def get_taxdmp(out_dir):
-    """Retrieve and format the NCBI taxdmp files and store them in out_file"""
-    subprocess.run([shell_path, out_dir])
-
-def unfold_lineage(taxid, node_tab, *ranks):
+logger = logging.getLogger('Graboid.database.FASTA')
+#%%
+def fetch(fasta_file, out_dir, mv=False):
     """
-    Get the complete lineage for the specified ranks for the given taxid
+    Move or copy the source fasta file to the database destination.
 
     Parameters
     ----------
-    taxid : int
-        Taxid for which the lineage will be unfolded.
-    node_tab : pandas.DataFrane
-        Nodes dataframe.
-    *ranks : str
-        Ranks to be included in the lineage, all lowercase.
+    fasta_file : str
+        Path to the fasta file to be used in the database.
+    out_dir : str
+        Path to destination directory for the fasta file.
+    mv : Bool, optional
+        Set True to move the fasta file into its destination location instead of copying it. The default is False.
 
     Returns
     -------
-    lineage : dict
-        Lineage of the given taxid. Dict with rank:taxid key:value pairs.
-        Missing ranks are not included
+    None.
 
     """
-    lineage = {}
-    while len(lineage) < len(ranks) and node_tab.loc[taxid, 'Parent'] != 1:
-        rk = node_tab.loc[taxid, 'Rank']
-        if rk in ranks:
-            lineage[rk] = taxid
-        taxid = node_tab.loc[taxid, 'Parent']
-    return lineage
+    os.makedirs(out_dir, exist_ok=True)
+    out_seqs = f'{out_dir}/FASTA.seqs'
+    if mv:
+        shutil.move(fasta_file, out_seqs)
+    else:
+        shutil.copy(fasta_file, out_seqs)
+    return out_seqs
 
 def retrieve_lineages(taxids, node_tab, *ranks):
     """
@@ -93,10 +72,6 @@ def retrieve_lineages(taxids, node_tab, *ranks):
     return lineages
 
 #%% load taxonomy data
-names_tab = pd.read_csv('test/names.tsv', sep='\t', header=None, index_col=0, names='sciName TaxId'.split())
-names_tab.loc[0] = 'unknown'
-nodes_tab = pd.read_csv('test/nodes.tsv', sep='\t', header=None, index_col=0, names='TaxId Parent Rank'.split())
-
 def detect_separator(line):
     """
     Detect separator characters from the source taxonomy table. Expect it to be
@@ -151,9 +126,6 @@ def get_acc_taxids(src_tax, names_tab):
     acc_taxids = names_tab.reset_index().set_index('TaxId').loc[lowest_taxa.values].set_index(src_tax.index).sciName
     return acc_taxids
 
-tax_file = '/home/hernan/PROYECTOS/Maestria/Silva/arb-silva.de_2024-01-22_id1299351/headers.csv'
-source_tax = parse_source_tax(tax_file)
-acc_taxids = get_acc_taxids(source_tax, names_tab)
 #%% build lineage table
 def build_lineage_table(taxid_tab, nodes_tab, *ranks):
     """
@@ -168,14 +140,14 @@ def build_lineage_table(taxid_tab, nodes_tab, *ranks):
         DataFrame containing each taxon's parent TaxId and rank.
     *ranks : str
         Ranks to be included in the lineage table.
-
+    
     Returns
     -------
-    lineages : TYPE
-        DESCRIPTION.
-    real_taxids : TYPE
-        DESCRIPTION.
-
+    lineages : pandas.DataFrame
+        DataFrame containing the lineages of all taxa present among the given records.
+    real_taxids : pandas.Series
+        Series containing the adjusted taxonomic Id for every record.
+    
     """
     # unfold lineages
     lineages = [unfold_lineage(taxid, nodes_tab, *ranks) for taxid in taxid_tab.unique()]
@@ -200,11 +172,45 @@ def build_lineage_table(taxid_tab, nodes_tab, *ranks):
     lineages = lineages.fillna(0).astype(int)
     return lineages, real_taxids.astype(int)
 
-ranks = 'phylum class order family genus species'.split()
-lineages, real_taxids = build_lineage_table(acc_taxids, nodes_tab, *ranks)
-
 #%% build taxonomy table
-taxonomy = real_taxids.loc[acc_taxids].astype(int)
-taxonomy.index = source_tax.index
+def build_taxonomy_table(acc_taxids, real_taxids):
+    taxonomy = real_taxids.loc[acc_taxids].astype(int)
+    taxonomy.index = acc_taxids.index
+    return taxonomy
+
 #%% build name table
-names = names_tab.loc[np.unique(lineages), 'TaxId']
+def build_name_table(lineage_tab, names_tab):
+    names = names_tab.loc[np.unique(lineage_tab), 'TaxId']
+    return names
+
+def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, *ranks):
+    # prepare output directory & files
+    os.makedirs(out_dir, exist_ok=True)
+    lineage_file=f'{out_dir}/FASTA.lineage'
+    taxonomy_file=f'{out_dir}/FASTA.taxonomy'
+    name_file=f'{out_dir}/FASTA.names'
+    
+    # parse taxonomy data
+    source_taxonomy = parse_source_tax(tax_source)
+    acc_taxids = get_acc_taxids(source_taxonomy, names_tab)
+    
+    # build taxonomy tables
+    lineages, real_taxids = build_lineage_table(acc_taxids, nodes_tab, *ranks)
+    taxonomy_table = build_taxonomy_table(acc_taxids, real_taxids)
+    name_table = build_name_table(lineages, names_tab)
+    
+    # save files
+    lineages.to_csv(lineage_file)
+    taxonomy_table.to_csv(taxonomy_file)
+    name_table.to_csv(name_file)
+    
+    return lineage_file, taxonomy_file, name_file
+
+#%%
+def retrieve_data(fasta_file, taxonomy_file, out_dir, names_tab, nodes_tab, *ranks):
+    # retrieve data
+    out_seqs = fetch(fasta_file, out_dir)
+    
+    # generate taxonomy files
+    lineage_file, taxonomy_file, name_file = arrange_taxonomy(out_dir, taxonomy_file, names_tab, nodes_tab, ranks)
+    return

@@ -1068,7 +1068,7 @@ class Classifier2:
     def set_work_dir(self, work_dir):
         # if work dir doesn't exist, create it, else check that existing dir is valid
         if not os.path.isdir(work_dir):
-            calibration_dir, classif_dir, query_dir, warn_dir, metadata = make_working_dir(work_dir)
+            calibration_dir, classification_dir, query_dir, warnings_dir, metadata = make_working_dir(work_dir)
             self.db = None
             self.query = None
             self.transition = None

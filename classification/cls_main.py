@@ -1125,7 +1125,7 @@ class Classifier2:
         if self.query is None:
             # map query to the same reference sequence of the database
             self.query = map_query(self.query_dir,
-                                   self.warn_dir,
+                                   self.warnings_dir,
                                    query_file,
                                    self.db_refdir,
                                    evalue,

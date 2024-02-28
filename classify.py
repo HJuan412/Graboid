@@ -36,7 +36,7 @@ def main(args):
                                  database = args.database,
                                  query = args.query,
                                  qry_evalue = args.evalue,
-                                 qry_droppoff = args.dropoff,
+                                 qry_dropoff = args.dropoff,
                                  qry_min_height = args.min_height,
                                  qry_min_width = args.min_width,
                                  transition = args.transition,

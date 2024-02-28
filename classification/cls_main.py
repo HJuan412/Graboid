@@ -1096,7 +1096,7 @@ class Classifier2:
         fh = logging.FileHandler(self.work_dir + '/classification.log')
         fh.setLevel(logging.INFO)
         logger.addHandler(fh)
-        warn_handler = logging.FileHandler(self.warn_dir + '/warnings.log')
+        warn_handler = logging.FileHandler(self.warnings_dir + '/warnings.log')
         warn_handler.setLevel(logging.WARNING)
         logger.addHandler(warn_handler)
     

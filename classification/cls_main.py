@@ -1127,7 +1127,7 @@ class Classifier2:
             self.query = map_query(self.query_dir,
                                    self.warnings_dir,
                                    query_file,
-                                   self.db_refdir,
+                                   self.db['blast_db'],
                                    evalue,
                                    dropoff,
                                    min_height,

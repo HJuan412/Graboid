@@ -13,12 +13,14 @@ import logging
 import numpy as np
 import os
 import pandas as pd
+import re
 import shutil
-from database.fetch_tools import unfold_lineage
+
+from . import fetch_tools
 
 logger = logging.getLogger('Graboid.database.FASTA')
-#%%
-def fetch(fasta_file, out_dir, mv=False):
+#%% Retrieve sequence data
+def fetch(fasta_file, out_dir, db_name='FASTA', mv=False):
     """
     Move or copy the source fasta file to the database destination.
 
@@ -37,41 +39,14 @@ def fetch(fasta_file, out_dir, mv=False):
 
     """
     os.makedirs(out_dir, exist_ok=True)
-    out_seqs = f'{out_dir}/FASTA.seqs'
+    out_seqs = f'{out_dir}/{db_name}.seqs'
     if mv:
         shutil.move(fasta_file, out_seqs)
     else:
         shutil.copy(fasta_file, out_seqs)
     return out_seqs
 
-def retrieve_lineages(taxids, node_tab, *ranks):
-    """
-    Retrieve the lineage for each record for the specified ranks
-
-    Parameters
-    ----------
-    taxids : pandas.Series
-        Series containing the Taxid from the lowest assigned taxon for each
-        record.
-    node_tab : pandas.DataFrane
-        Nodes dataframe.
-    *ranks : str
-        Taxonomic ranks to include in the lineage (lower case).
-
-    Returns
-    -------
-    lineages : pandas.DataFrame
-        DataFrame containing the full lineage for all unique taxa represented
-        in the records.
-
-    """
-    # for each located taxid, get the full lineage for the specified ranks
-    lineages = pd.DataFrame(index=taxids, columns=ranks)
-    for ln in lineages.index:
-        lineages.loc[ln] = unfold_lineage(ln, node_tab, *ranks)
-    return lineages
-
-#%% load taxonomy data
+#%% Process taxonomy data
 def detect_separator(line):
     """
     Detect separator characters from the source taxonomy table. Expect it to be
@@ -120,14 +95,14 @@ def parse_source_tax(tax_file):
 def get_acc_taxids(src_tax, names_tab):
     # select the lowest valid taxon for each record
     lowest_taxa = pd.Series('', index=src_tax.index)
-    for idx, col in src_tax.T.iterrows():
-        lowest_taxa.loc[col.isin(names_tab.TaxId)] = col
+    for col in src_tax.columns:
+        idxs = src_tax.loc[src_tax[col].isin(names_tab.SciName)].index
+        lowest_taxa.loc[idxs] = src_tax.loc[idxs, col]
     # assign TaxId for each record
-    acc_taxids = names_tab.reset_index().set_index('TaxId').loc[lowest_taxa.values].set_index(src_tax.index).sciName
+    acc_taxids = names_tab.reset_index().set_index('SciName').loc[lowest_taxa.values].set_index(src_tax.index).TaxId
     return acc_taxids
 
-#%% build lineage table
-def build_lineage_table(taxid_tab, nodes_tab, *ranks):
+def build_lineage_table(taxid_tab, nodes_tab, ranks):
     """
     Rebuild the lineage for each taxon present in the records.
     Include lineages of upper taxa
@@ -138,7 +113,7 @@ def build_lineage_table(taxid_tab, nodes_tab, *ranks):
         DataFrame containing the 3 last taxa for each record.
     nodes_tab : pandas.DataFrame
         DataFrame containing each taxon's parent TaxId and rank.
-    *ranks : str
+    ranks : str
         Ranks to be included in the lineage table.
     
     Returns
@@ -150,7 +125,7 @@ def build_lineage_table(taxid_tab, nodes_tab, *ranks):
     
     """
     # unfold lineages
-    lineages = [unfold_lineage(taxid, nodes_tab, *ranks) for taxid in taxid_tab.unique()]
+    lineages = [fetch_tools.unfold_lineage(taxid, nodes_tab, ranks) for taxid in taxid_tab.unique()]
     lineages = pd.DataFrame(lineages, index = taxid_tab.unique())[list(ranks)]
     
     # some records have an assigned taxonomy at a lower rank than the ones specified in ranks
@@ -172,30 +147,57 @@ def build_lineage_table(taxid_tab, nodes_tab, *ranks):
     lineages = lineages.fillna(0).astype(int)
     return lineages, real_taxids.astype(int)
 
-#%% build taxonomy table
 def build_taxonomy_table(acc_taxids, real_taxids):
     taxonomy = real_taxids.loc[acc_taxids].astype(int)
     taxonomy.index = acc_taxids.index
     return taxonomy
 
-#%% build name table
 def build_name_table(lineage_tab, names_tab):
-    names = names_tab.loc[np.unique(lineage_tab), 'TaxId']
+    names = names_tab.loc[np.unique(lineage_tab)]
     return names
 
-def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, *ranks):
+def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, ranks, db_name='FASTA'):
+    """
+    Generate the taxonomy, lineage, and names tables for the generated records.
+
+    Parameters
+    ----------
+    out_dir : str
+        Path to the directory to contain the generated files.
+    tax_source : str
+        Path to the file containing the taxonomic data.
+    names_tab : str
+        Path to the file containing the NCBI TaxId:Scientific name pairs.
+    nodes_tab : str
+        Path to the file containing the cladistic information for each taxon.
+    ranks : str
+        Ranks to be included in the lineage table.
+
+    Returns
+    -------
+    lineage_file : str
+        Path to the file containing the generated lineage table.
+    taxonomy_file : str
+        Path to the file containing the accession-TaxId mapping.
+    name_file : str
+        Path to the file containing the TaxId-Scientific name mapping.
+
+    """
     # prepare output directory & files
     os.makedirs(out_dir, exist_ok=True)
-    lineage_file=f'{out_dir}/FASTA.lineage'
-    taxonomy_file=f'{out_dir}/FASTA.taxonomy'
-    name_file=f'{out_dir}/FASTA.names'
+    lineage_file=f'{out_dir}/{db_name}.lineage'
+    taxonomy_file=f'{out_dir}/{db_name}.taxonomy'
+    name_file=f'{out_dir}/{db_name}.names'
     
+    # load names and nodes tables
+    names_tab, nodes_tab = fetch_tools.read_taxdmp(names_tab, nodes_tab)
+
     # parse taxonomy data
     source_taxonomy = parse_source_tax(tax_source)
     acc_taxids = get_acc_taxids(source_taxonomy, names_tab)
     
     # build taxonomy tables
-    lineages, real_taxids = build_lineage_table(acc_taxids, nodes_tab, *ranks)
+    lineages, real_taxids = build_lineage_table(acc_taxids, nodes_tab, ranks)
     taxonomy_table = build_taxonomy_table(acc_taxids, real_taxids)
     name_table = build_name_table(lineages, names_tab)
     
@@ -207,10 +209,56 @@ def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, *ranks):
     return lineage_file, taxonomy_file, name_file
 
 #%%
-def retrieve_data(fasta_file, taxonomy_file, out_dir, names_tab, nodes_tab, *ranks):
+def retrieve_data(fasta_file,
+                  taxonomy_file,
+                  out_dir,
+                  names_tab,
+                  nodes_tab,
+                  ranks=['phylum', 'class', 'order', 'family', 'genus', 'species'],
+                  db_name='FASTA',
+                  mv=False):
+    """
+    Retrieve sequence and taxonomy data from a fasta file and accompanying
+    taxonomy table.
+
+    Parameters
+    ----------
+    fasta_file : str
+        Path to the fasta file to be used in the database.
+    taxonomy_file : str
+        Path to the taxonomy file.
+    out_dir : str
+        Path to the directory to contain the generated files.
+    names_tab : str
+        Path to the file containing the NCBI TaxId:Scientific name pairs.
+    nodes_tab : str
+        Path to the file containing the cladistic information for each taxon.
+    ranks : str
+        Ranks to extract from the taxonomy table.
+
+    Returns
+    -------
+    out_seqs : str
+        Path to the generated sequence file.
+    out_taxs : str
+        Path to the generated taxonomy file.
+    lineage_file : str
+        Path to the file containing the generated lineage table.
+    taxonomy_file : str
+        Path to the file containing the accession-TaxId mapping.
+    name_file : str
+        Path to the file containing the TaxId-Scientific name mapping.
+    nseqs : int
+        Number of sequences located in the fasta file.
+
+    """
+    # ensure out_dir is properly formatted
+    out_dir = re.sub('/$', '', out_dir)
+    
     # retrieve data
-    out_seqs = fetch(fasta_file, out_dir)
+    out_seqs = fetch(fasta_file, out_dir, mv)
+    nseqs = fetch_tools.count_seqs(fasta_file)
     
     # generate taxonomy files
-    lineage_file, taxonomy_file, name_file = arrange_taxonomy(out_dir, taxonomy_file, names_tab, nodes_tab, ranks)
-    return out_seqs, lineage_file, taxonomy_file, name_file
+    lineage_file, taxonomy_file, name_file = arrange_taxonomy(out_dir, taxonomy_file, names_tab, nodes_tab, ranks, db_name)
+    return out_seqs, lineage_file, taxonomy_file, name_file, nseqs

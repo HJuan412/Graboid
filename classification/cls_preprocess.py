@@ -14,6 +14,10 @@ from preprocess import feature_selection as fsele
 from preprocess import sequence_collapse as sq
 from preprocess import windows as wn
 #%% functions
+def collapse0(matrix):
+    
+    
+    return
 def collapse(classifier, w_start, w_end, n, rank='genus', row_thresh=0.1, col_thresh=0.1, min_seqs=50):
     """Collapse reference and query windows"""
     # collapse reference window, use the classifier's extended taxonomy table

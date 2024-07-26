@@ -12,9 +12,12 @@ from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 from glob import glob
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 import pandas as pd
 import re
 
+# graboid modules
+from . import blast
 #%% vars
 bases = 'nacgt'
 r_bases = 'ntgca'
@@ -27,9 +30,39 @@ tr_dict.update(special)
 rc_dict = {base:idx for idx, base in enumerate(r_bases)} | {base:idx for idx, base in enumerate(r_bases.upper())}
 rc_dict.update({'u':1, 'U':1})
 rc_dict.update(special)
-
+seq2num = {1:tr_dict, -1:rc_dict}
 #%% functions
 # read blast file
+# TODO: replace read_blast with read_blast0
+def read_blast0(blast_file, evalue = 0.005):
+    # read blast file, register match orientations, flip reversed matches, sort by qseqid and qstart, subtract 1 from qstart and sstart to adjust for python indexing
+    # blast file preformatted (comma separated), contains column names and last row with qseqid = Reference, length = reference marker length
+    # returns processed blast table and used marker length
+    blast_tab = pd.read_csv(blast_file)
+    
+    # check for empty report
+    if len(blast_tab) == 0:
+        raise Exception(f'Blast report {blast_file} is empty. Verify that the blast parameters are correct.')
+    
+    ref_len = blast_tab.iloc[-1].loc['length']
+    # filter blast report for evalue
+    blast_tab = blast_tab.query('evalue <= @evalue').copy()
+    if len(blast_tab) == 0:
+        raise Exception(f'No matches in the blast report {blast_file} passed the filter (evalue <= {evalue})')
+        
+    # process match coordinates
+    # match orientations: 1 = Forward, -1 = Reverse
+    blast_tab['Orient'] = 1
+    blast_tab.loc[blast_tab.sstart > blast_tab.send, 'Orient'] = -1
+    # flip inverted matches
+    # return blast_tab
+    blast_tab[['sstart', 'send']] = np.sort(blast_tab[['sstart', 'send']], axis=1)
+    # adjust for python indexing (shift 1 position to the left)
+    blast_tab.qstart -= 1
+    blast_tab.sstart -= 1
+    blast_tab.sort_values(['qseqid', 'qstart'], ignore_index=True, inplace=True)
+    return blast_tab, ref_len
+
 def read_blast(blast_file, evalue = 0.005):
     # read blast file, register match orientations, flip reversed matches, sort by qseqid and qstart, subtract 1 from qstart and sstart to adjust for python indexing
     # blast file preformatted (comma separated), contains column names and last row with qseqid = Reference, length = reference marker length
@@ -66,16 +99,10 @@ def read_blast(blast_file, evalue = 0.005):
 def get_mat_dims(blast_tab):
     # get total dimensions for the sequence matrix
     nrows = len(blast_tab.qseqid.unique())
-    subject_coords = blast_tab[['sstart', 'send']].to_numpy().astype(int)
-    subject_coords.sort(axis=1)
-    lower = subject_coords[:,0].min()
-    upper = subject_coords[:,1].max()
-    # lower = blast_tab.sstart.min() # used to calculate the offset, most times this value is 0
-    # upper = blast_tab.send.max()
-    ncols = upper - lower
-    return nrows, ncols, lower, upper
+    lower = blast_tab.sstart.min()
+    upper = blast_tab.send.max()
+    return nrows, lower, upper
 
-# read seq_file
 def read_seqfile(seq_file):
     seq_dict = {}
     with open(seq_file, 'r') as handle:
@@ -100,7 +127,7 @@ def load_map(map_dir):
         accs = acc_handle.read().splitlines()
     
     return accs, map_npz['matrix'], map_npz['bounds'], map_npz['coverage']
-        
+
 def get_coverage(coords, ref_len):
     coverage = np.zeros(ref_len, dtype=np.int32)
     for coo in coords:
@@ -147,7 +174,7 @@ def get_mesas(coverage, dropoff=0.05, min_height=0.1, min_width=2):
     mesas = mesas[np.argsort(mesas[:,0]).flatten()]
     return mesas
 #%%
-def plot_coverage_data(blast_file, evalue = 0.005, figsize=(12,7)):
+def plot_coverage_data(blast_file, out_file=None, evalue = 0.005, figsize=(12,7)):
     # TODO: save plot to file
     # get coverage matrix
     blast_tab = read_blast(blast_file, evalue)
@@ -170,8 +197,90 @@ def plot_coverage_data(blast_file, evalue = 0.005, figsize=(12,7)):
     ax.set_xlabel('Coordinates')
     ax.set_ylabel('Sequences')
     ax.set_title(f'Sequence coverage of {blast_file}')
+    if out_file:
+        # store coverage plot
+        pass
 
 #%% classes
+def build_map(seq_file, blast_db, prefix, evalue=0.005, threads=1):    
+    """
+    Align the given sequence file against a reference file using BLAST. Output
+    alignment as a numberic matrix (npz file).
+    Translation code:
+        0 : Missing data (gaps, N values, ambiguous characters)
+        1 : A
+        2 : C
+        3 : G
+        4 : T/U
+
+    Parameters
+    ----------
+    seq_file : str
+        Sequence file to be aligned, in fasta format.
+    blast_db : str
+        Blast database to be used in the alignment (path + prefix).
+    prefix : str
+        Common name to the generated files (path + prefix).
+    evalue : float, optional
+        Evalue threshold for the blast alignment. The default is 0.005.
+    threads : TYPE, optional
+        DESCRIPTION. The default is 1.
+
+    Returns
+    -------
+    matrix_file : str
+        Generated alignment file (prefix + "__map.npz").
+        Contans 3 arrays:
+            matrix : alignment array (2D array)
+            bounds : 2 element array indicating the alignment bounds (1D array)
+            coverage : array containing sequence coverage per position of the reference sequence (1D array)
+    acc_file : str
+        Accession list of sequences included in the alignment.
+    nrows : int
+        Number of rows present in the alignment matrix.
+    ncols : int
+        Number of colmns present in the alignment matrix.
+
+    """
+    blast_out = f'{prefix}.blast'
+    matrix_file = f'{prefix}__map.npz'
+    acc_file = f'{prefix}__map.acc'
+    
+    # perform blast
+    blast.blast(seq_file, blast_db, blast_out, threads)
+    blast_tab, ref_len = read_blast0(blast_out, evalue)
+    
+    # get dimensions
+    nrows, lower, upper = get_mat_dims(blast_tab)
+    ncols = upper - lower
+    
+    print('Retrieving sequences...')
+    sequences = read_seqfile(seq_file)
+    
+    print('Building matrix...')
+    acclist = []
+    matrix = np.zeros((nrows, ref_len), dtype=np.int8)
+    
+    for idx, (acc, subtab) in enumerate(blast_tab.groupby('qseqid')):
+        acclist.append(acc)
+        seq = sequences[acc]
+        for _, match in subtab.iterrows():
+            numseq = get_numseq(seq[match.qstart:match.qend][::match.Orient], seq2num[match.Orient])
+            matrix[idx, match.sstart:match.send] = numseq
+    
+    # calculate coverage
+    coverage = (matrix > 0).sum(axis=0)
+    
+    # clip matrix
+    matrix = matrix
+    
+    # store output
+    # save the matrix along with the bounds and coverage array (coverage array done over the entire length of the marker reference)
+    np.savez_compressed(matrix_file, bounds=np.array([lower, upper]), matrix=matrix, coverage=coverage)
+    with open(acc_file, 'w') as list_handle:
+        list_handle.write('\n'.join(acclist))
+    return matrix_file, acc_file, nrows, ncols
+
 class MatBuilder:
     def __init__(self, out_dir):
         self.out_dir = out_dir

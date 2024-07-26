@@ -7,6 +7,7 @@ Created on Fri Mar 24 10:52:33 2023
 This module contains the functions used in collapsing of redundant subsequences
 """
 
+import concurrent.futures
 import logging
 import numpy as np
 from time import time
@@ -29,7 +30,13 @@ def entropy(matrix):
 def get_branches(sequences, matrix):
     # collapse the matrix into its disticnt rows, return a list of the grouped indexes
     # sequences keeps track of the indexes of the sequences as they are assigned to branches
+    
     branches = []
+    
+    # if there is a single row in the matrix, return a single branch
+    if matrix.shape[0] == 1:
+        branches.append(sequences[[0]])
+        return branches
     
     # if there is a single column remaining, split it into the corresponding branches and stop recursion
     if matrix.shape[1] == 1:
@@ -113,19 +120,32 @@ def group_tiers(tier_indexes, missing):
         grouped.append(overlaps)
     return grouped
 
-def collapse_tiers(tiers, window, missing):
+def collapse_tiers_parallel(tiers, matrix, missing, threads=1):
     # for each tier, collapse each group of fully overlapped sequences into branches
     tier_branches = []
     for tier in tiers:
-        level_collapses = []
+        tier_collapses = [] # store groups of collapsed (groups of equal sequences)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+            # select the rows corresponding to the group from the matrix, remove the unknown columns
+            futures = [executor.submit(get_branches, group,matrix[group][:, ~missing[group[0]]]) for group in tier]
+            for future in concurrent.futures.as_completed(futures):
+                tier_collapses.append(future.result()) # store the grouped indexes for this group in the level
+        tier_branches.append(tier_collapses)
+    return tier_branches
+
+def collapse_tiers(tiers, matrix, missing):
+    # for each tier, collapse each group of fully overlapped sequences into branches
+    tier_branches = []
+    for tier in tiers:
+        tier_collapses = [] # store groups of collapsed (groups of equal sequences)
         for group in tier:
             if len(group) == 1:
                 # single sequence in group, no need to collapse
-                level_collapses.append(group)
+                tier_collapses.append(group)
                 continue
-            group_matrix = window[group][:, ~missing[group[0]]] # select the rows corresponding to the group from the window matrix, remove the unknown columns
-            level_collapses += get_branches(group, group_matrix) # store the grouped indexes for this group in the level
-        tier_branches.append(level_collapses)
+            group_matrix = matrix[group][:, ~missing[group[0]]] # select the rows corresponding to the group from the matrix, remove the unknown columns
+            tier_collapses += get_branches(group, group_matrix) # store the grouped indexes for this group in the level
+        tier_branches.append(tier_collapses)
     return tier_branches
 
 def filter_branches(tier_branches, window, missing):
@@ -156,6 +176,43 @@ def filter_branches(tier_branches, window, missing):
             kept_branches.append(branch)
             kept_repr.append(rep)
     return kept_branches
+
+def sequence_collapse(matrix, max_unk_thresh=0.2):
+    #TODO: this will be the new main collapsing function, to replace collapse_window
+    # We will use set theory to cluster the collapsed sequences:
+    #     Two sequences A and B are equal (A = B) if they have the same known sites with no differing values
+    #     Two sequences A and B dont intersect (A ∩ B = Ø) when they have differing values in at least one site known to both, or they have no common known sites
+    #     Two sequences A and B intersect (A ∩ B ≠ Ø) when they have no differing values in any of their common known sites, but both have known sites that are unknown in the other
+    #     Sequence A contains B (A ⊃ B) when all of Bs known sites are known in A, A has more known sites, and no differing values are present
+    
+    # filter out rows that have more than <max_unk_thresh> unknown sites
+    max_unks = matrix.shape[1] * max_unk_thresh
+    
+    # we begin by grouping the sequence by completeness level
+    missing = matrix == 0
+    unk_count = missing.sum(1)
+    row_indexes = np.arange(matrix.shape[0])
+    unk_tiers = np.unique(unk_count)
+    unk_tiers = unk_tiers[unk_tiers <= max_unks]
+    tier_indexes = [row_indexes[unk_count == uk_tier] for uk_tier in unk_tiers]
+    
+    # if no rows passed the filter (too many unknowns), raise an exception
+    if len(tier_indexes) == 0:
+        raise Exception(f'No rows passed the max unkown filter: {max_unk_thresh}, max unknown sites: {max_unks}')
+    # group sequences with matching known sites for each completeness tier
+    # sequences in a same group are the ones that can be equal (same known places)
+    grouped_tiers = group_tiers(tier_indexes, missing)
+    
+    # generate branches for each tier
+    tier_branches = collapse_tiers(grouped_tiers, matrix, missing)
+    
+    # filter subset branches
+    kept_branches = filter_branches(tier_branches, matrix, missing)
+    
+    # build collapseed matrix
+    reprs = [r[0] for r in kept_branches]
+    collapsed_mat = matrix[reprs]
+    return collapsed_mat, kept_branches
 
 def collapse_window(window):
     # We will use set theory to cluster the collapsed sequences:

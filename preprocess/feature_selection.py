@@ -94,8 +94,10 @@ def get_nsites(sorted_sites, min_n=None, max_n=None, step_n=None, n=None):
     return site_lists
 
 @nb.njit
-def get_entropy(array):
-    valid_rows = array[array != 0]
+def get_entropy(array, omit_missing=True):
+    valid_rows = array
+    if omit_missing:
+        valid_rows = array[array != 0]
     n_rows = len(valid_rows)
     values = np.unique(valid_rows)
     counts = np.array([(valid_rows == val).sum() for val in values])
@@ -103,46 +105,57 @@ def get_entropy(array):
     return -np.sum(np.log2(freqs) * freqs, dtype=np.float32)
 
 
-def get_matrix_entropy(matrix):
+def get_matrix_entropy(matrix, omit_missing=True):
     entropy = np.zeros(matrix.shape[1], dtype=np.float32)
     for idx, col in enumerate(matrix.T):
-        entropy[idx] = get_entropy(col)
+        entropy[idx] = get_entropy(col, omit_missing)
     
     # maximum possible entropy is log2(num of classes)
     # fasta code has 15 possible classes (not counting gaps and missing values)
     # most frequently 4 clases (acgt), log2(4) = 2
     return (2-entropy) / 2 # 1 min entropy, 0 max entropy
 
-def per_tax_entropy(matrix, tax_tab, ranks):
+def build_tax_series(tax_tab, ranks):
+    # reformat taxonomy_table to facilitate per taxon entropy calculation
+    # tax_series contains the positions (row indexes) of each taxon occurrence for every rank in the alignment matrix
+    # index values are taxIds and are not unique, the number of appearances of each taxon equals the number of rows that belong to said taxon
+    # tax_series contains no rank information
+    
+    # add index positions
+    tax_tab['idx'] = np.arange(len(tax_tab))
+    tax_series = []
+    # extract index positions of each rank
+    for rk in ranks:
+        tax_series.append(tax_tab.set_index(rk)['idx'])
+    # sort series (cluster taxa occurrences together) and remove unknown values (0)
+    tax_series = pd.concat(tax_series).sort_index()
+    tax_series.drop(index=0)
+    
+    return tax_series
+    
+def per_tax_entropy(matrix, tax_tab, ranks, omit_missing=True):
+    
     # builds entropy difference tab, columns : rank_idx, TaxID, records, bases..., n (number of records)
-    bases = np.arange(matrix.shape[1])
-    sub_tabs = []
-    for rk_idx, rk in enumerate(ranks):
-        taxa = tax_tab[rk].dropna().unique()
-        ent_matrix = np.zeros((len(taxa), len(bases)))
-        n_counts = []
-        tax_sorted = []
-        for idx, (tax, tax_subtab) in enumerate(tax_tab.groupby(rk)):
-            tax_sorted.append(tax)
-            rows = tax_subtab.index.values
-            # record taxon entropy
-            rk_entropy = get_matrix_entropy(matrix[rows])
-            ent_matrix[idx] = rk_entropy
-            n_counts.append(len(rows))
-        rank_tab = pd.DataFrame(ent_matrix)
-        rank_tab['Rank'] = rk_idx
-        rank_tab['TaxID'] = tax_sorted
-        rank_tab['n'] = n_counts
-        sub_tabs.append(rank_tab)
-    entropy_tab = pd.concat(sub_tabs)
-    return entropy_tab.set_index(['Rank', 'TaxID'])
+    tax_series = build_tax_series(tax_tab, ranks)
+    
+    entropy_array = []
+    taxids = []
+    tax_counts = []
+    for tax, subseries in tax_series.groupby(level=0):
+        tax_submat = matrix[subseries.values]
+        tax_entropy = get_matrix_entropy(tax_submat, omit_missing)
+        taxids.append(tax)
+        entropy_array.append(tax_entropy)
+        tax_counts.append(len(subseries))
+    entropy_array = np.array(entropy_array)
+    return entropy_array, taxids, tax_counts
 
-def get_ent_diff(matrix, tax_tab, ranks):
-    general_entropy = get_matrix_entropy(matrix)
-    tax_entropy = per_tax_entropy(matrix, tax_tab, ranks)
-    diff_tab = tax_entropy.drop(columns='n') - general_entropy
-    # reattach the n column
-    diff_tab['n'] = tax_entropy.n.values
+def get_ent_diff(matrix, tax_tab, ranks, omit_missing=True):
+    general_entropy = get_matrix_entropy(matrix, omit_missing)
+    tax_entropy, taxids, tax_counts = per_tax_entropy(matrix, tax_tab, ranks, omit_missing)
+    entropy_difference = tax_entropy - general_entropy
+    diff_tab = pd.DataFrame(entropy_difference, index=taxids)
+    diff_tab['n_taxa'] = tax_counts
     return diff_tab
     
 def get_gain(matrix, tax_tab):
@@ -172,6 +185,53 @@ def extract_cols(matrix, cols):
         cols_submat[idx] = row[np.isin(row, cols)]
     return cols_submat
 #%%
+def build_entropy_difference_tab(matrix, accs, tax_tab, out_file, omit_missing=True, *ranks):
+    """
+    Calculate entropy difference in the alignment for each rank for each taxon
+    for each position.
+
+    Parameters
+    ----------
+    matrix : numpy.array
+        Alignment array.
+    accs : list
+        List of accession codes of the sequences present in the array.
+    tax_tab : pandas.DataFrame
+        Taxonomy table for the sequences in the alignment.
+    out_file : str
+        Destination path for the generated table.
+    omit_missing : bool, optional
+        Omit missing values in the entropy calculation for each position. The default is True.
+    *ranks : str
+        Ranks to be included in the information cuantification.
+
+    Raises
+    ------
+    Exception
+        Raise an exception if invalid ranks are given.
+
+    Returns
+    -------
+    None.
+
+    """
+    # filter guide for the accs present in the alignment matrix
+    # matrix : generated alignment matrix
+    # accs : accession list obtained from mapper (contains the accessions of records that made into the matrix)
+    # tax_tab : table containing the taxonomic index assigned to each record
+    # guide : EXTENDED guide
+    
+    incorrect_rks = [rk for rk in ranks if not rk in tax_tab.columns]
+    if len(incorrect_rks):
+        raise Exception(f'Error: Given ranks [{" ".join(incorrect_rks)}] are not present in the taxonomy table')
+
+    tax_tab = tax_tab.loc[accs].copy()    
+    # build difference table
+    print('Calculating entropy differences...')
+    diff_tab = get_ent_diff(matrix, tax_tab, *ranks, omit_missing)
+    print('Done!')
+    diff_tab.to_csv(out_file)
+    
 class Selector:
     def __init__(self, out_dir, ranks):
         self.out_dir = out_dir

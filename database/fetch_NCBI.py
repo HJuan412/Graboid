@@ -8,17 +8,19 @@ Created on Fri Feb 23 19:41:43 2024
 Perform search, retrieve sequence and taxonomy data from BOLD
 """
 
-import http
+import concurrent.futures
 import logging
 import numpy as np
 import os
 import pandas as pd
+import re
 import time
 from Bio import Entrez
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
-from database.fetch_tools import unfold_lineage
+
+from . import fetch_tools
 
 logger = logging.getLogger('Graboid.database.fetch_NCBI')
 
@@ -66,167 +68,151 @@ def acc_slicer(acc_list, chunksize):
     n_seqs = len(acc_list)
     for i in np.arange(0, n_seqs, chunksize):
         yield acc_list[i:i+chunksize]
-        
-def fetch_in(acc_list, seq_file, tax_file, chunk_size=500, max_attempts=3):
-    """
-    Retrieve the designated records returned from the NCBI survey. The
-    accession list is split into smaller pieces that are retrieved
-    sequentially.
-    Skip and record every piece that fails to be downloaded a given amount of
-    times.
-    Succesfully retrieved records are stored to two files:
-        seq_file: stores the retrieved sequences in fasta format
-        tax_file: 2 column table containing accession codes : TaxIds
-    
-    Parameters
-    ----------
-    acc_list : list
-        List of accession codes to be retrieved.
-    out_seqs : str
-        Path to the file to store the retrieved sequences.
-    out_taxs : str
-        Path to the file to store the retrieved taxonomy.
-    chunk_size : int, optional
-        Size of the pieces the accession list will be split into. The default is 500.
-    max_attempts : int, optional
-        Number of retrieval attempts to be made for each piece. The default is 3.
 
-    Returns
-    -------
-    failed : list
-        List of accession codes that failed to be retrieved.
-
-    """
-    
-    # chunks that can't be downloaded are returned in the failed list
-    failed = []
-    
-    # split acc_list
-    chunks = acc_slicer(acc_list, chunk_size)
-    n_chunks = int(np.ceil(len(acc_list)/chunk_size))
-    
-    print(f'Downloading {len(acc_list)} records from NCBI...')
-    for chunk_n, chunk in enumerate(chunks):
-        print(f'Downloading chunk {chunk_n + 1} of {n_chunks}')
-        seq_recs = []
-        for attempt in range(max_attempts):
-            # try to retrieve the sequence records up to max_attempt times per chunk
-            try:
-                # contact NCBI and attempt download
-                logger.debug(f'Starting chunk download (size: {len(chunk)})')
-                seq_handle = Entrez.efetch(db = 'nucleotide', id = chunk, rettype = 'fasta', retmode = 'xml')
-                seq_recs = Entrez.read(seq_handle)
-                logger.debug(f'Done retrieving {len(seq_recs)} records')
-                break
-            except IOError:
-                print(f'Chunk {chunk_n} download interrupted. {max_attempts - attempt} attempts remaining')
-                continue
-            except http.client.IncompleteRead:
-                print(f'Chunk {chunk_n} download interrupted. {max_attempts - attempt} attempts remaining')
-                continue
-            except KeyboardInterrupt:
-                print('Manually aborted')
-                return
+def retrieve(accs, tries=3, tag=0):
+    # retrieve a single chunk data (<accs>), perform up to <tries> attempts before giving up
+    # tag is used to illustrate the retrieval progress to the user
+    failed = accs # empty this list if chunk is succesfully retrieved
+    for t in range(1, tries+1):
+        print(f'Retrieving chunk {tag}...')
+        try:
+            # contact NCBI and attempt download
+            seq_handle = Entrez.efetch(db = 'nucleotide', id = accs, rettype = 'fasta', retmode = 'xml')
+            seq_recs = Entrez.read(seq_handle)
+            failed = [] # empty failed list!
+            break
+        except:
+            print(f'Chunk {tag}: attempt {t} of {tries} failed')
             time.sleep(3)
-        if len(seq_recs) != len(chunk):
-            failed += chunk
             continue
-        
-        # generate seq records and retrieve taxids
-        seqs = []
-        taxids = []
-        for acc, seq in zip(chunk, seq_recs):
-            seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
-            taxids.append(seq['TSeq_taxid'])
-        
-        # save seq recods to fasta
-        with open(seq_file, 'a') as out_handle0:
-            SeqIO.write(seqs, out_handle0, 'fasta')
-        # save tax table to csv
-        taxs = pd.DataFrame({'Accession':chunk, 'TaxId':taxids})
-        taxs.to_csv(tax_file, header = chunk_n == 0, index = False, mode='a')
-    return failed
-
-def fetch(acc_list, out_dir, warn_dir=None, chunk_size=500, max_attempts=3):
-    """
-    Retrieve records designated by the NCBI database survey. Perform two passes
-    and record accession codes that fail be retrieved.
-    Up to three files are generated:
-        seq_file: stores the retrieved sequences in fasta format
-        tax_file: 2 column table containing accession codes : TaxIds
-        warning_file:   stores a list of accession codes that fail to be
-                        retrieved after the two passes.
+    if len(failed) > 0:
+        logger.warning(f'Failed to retreive chunk {tag} after {tries} attempts.')
     
-    Parameters
-    ----------
-    acc_list : list
-        List of accession codes to be retrieved.
-    out_dir : str
-        Path to the directory to contain the generated files.
-    warn_dir : str, optional
-        Path to the directory to contain the warning file. If none is given, the warning file is stored in the output directory.
-    chunk_size : int, optional
-        Size of the pieces the accession list will be split into. The default is 500.
-    max_attempts : int, optional
-        Number of retrieval attempts to be made for each piece. The default is 3.
+    # generate seq records and retrieve taxids
+    seqs = []
+    taxids = []
+    for acc, seq in zip(accs, seq_recs):
+        seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
+        taxids.append(seq['TSeq_taxid'])
+    taxids = pd.Series(taxids, index=accs)
+    return seqs, taxids, failed
 
-    Raises
-    ------
-    Exception
-        Raise exception if no record can be retrieved.
+def retrieve_pass(acc_list, out_seqs, out_taxs, chunk_size=500, max_attempts=3, workers=1):
+    # perform a retrieval pass, returns list of failed records
+    # downloads are done in parallel
+    failed_accs = []
+    n_chunks = np.ceil(len(acc_list) / chunk_size)
+    # attempt to retrieve data
+    with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(retrieve, chunk, max_attempts, f'{idx+1} of {n_chunks}') for idx, chunk in enumerate(acc_slicer(acc_list, chunk_size))]
+        for future in concurrent.futures.as_completed(futures):
+            seqs, taxids, failed = future.result()
+            # save seq recods to fasta
+            with open(out_seqs, 'a') as out_handle0:
+                SeqIO.write(seqs, out_handle0, 'fasta')
+            # save tax table to csv
+            taxids.to_csv(out_taxs, header=False, mode='a')
+            failed_accs += failed
+    return failed_accs
 
-    Returns
-    -------
-    out_seqs : str
-        Path to the generated sequence file.
-    out_taxs : str
-        Path to the generated taxonomy file.
-    warn_failed : str
-        Path to the generated warning file.
-
-    """
+def fetch(acc_list, out_dir, tmp_dir, warn_dir, chunk_size=500, max_attempts=3, workers=1, db_name='NCBI'):
+    # perform two passes over the accession list, second pass attempts to retrieve the failed records
+    # store list of records that fail to be retrieved after two passes
     
-    # prepare output directory & files
-    os.makedirs(out_dir, exist_ok=True)
-    out_seqs = f'{out_dir}/NCBI.seqs'
-    out_taxs = f'{out_dir}/NCBI.tax'
-    if warn_dir is None:
-        warn_dir = out_dir
-    else:
-        os.makedirs(warn_dir, exist_ok=True)
+    # generate output file names
+    out_seqs = f'{out_dir}/{db_name}.seqs'
+    out_taxs = f'{tmp_dir}/{db_name}.taxs' # taxs file goes into the temporal directory because it is not the final taxonomy file
     warn_failed = f'{warn_dir}/NCBI_failed.lis'
     
-    # Make two download passes, only give up when a sequence chunk fails to be retrieved both times
-    failed = [] # here we store accessions that failed to download
+    failed = []
     # first pass
-    failed0 = fetch_in(acc_list, out_seqs, out_taxs, chunk_size, max_attempts)
-    # do a second pass if any sequence couldn't be downloaded
+    failed0 = retrieve_pass(acc_list, out_seqs, out_taxs, chunk_size, max_attempts, workers)
     if len(failed0) > 0:
-        logger.warning(f'NCBI first pass. Failed to retrieve {len(failed0)} of {len(acc_list)} sequence records.')
-        time.sleep(10)
-        failed = fetch_in(failed0, out_seqs, out_taxs, chunk_size, max_attempts)
-    if len(failed) > 0:
-        logger.warning(f'NCBI second pass. Failed to retrieve {len(failed)} of {len(failed0)} sequence records.')
-    
-    # no records could be retrieved
-    if len(failed) == len(acc_list):
-        raise Exception('Failed to retrieve sequences from NCBI database.')
-    
-    # report results
-    logger.info(f'Retrieved {len(acc_list) - len(failed)} of {len(acc_list)} sequence records from the NCBI database.')
-    
+        # second pass, skipped if there are no failed downloads
+        failed = retrieve_pass(failed0, out_seqs, out_taxs, chunk_size. max_attempts, workers)
+    nseqs = len(acc_list) - len(failed)
     # generate a save file containing the failed sequences (if any)
     if len(failed) > 0:
         with open(warn_failed, 'w') as w:
             w.write('\n'.join(failed))
-        logger.info(f'{len(failed)} failed accession codes saved to {warn_failed}')
-    else:
-        warn_failed = None
     
-    return out_seqs, out_taxs, warn_failed
+    exclusion = list(set(acc_list).difference(set(failed)))
+    return out_seqs, out_taxs, warn_failed, nseqs, exclusion
+
+"""
+Retrieve the designated records returned from the NCBI survey. The
+accession list is split into smaller pieces that are retrieved
+sequentially.
+Skip and record every piece that fails to be downloaded a given amount of
+times.
+Succesfully retrieved records are stored to two files:
+    seq_file: stores the retrieved sequences in fasta format
+    tax_file: 2 column table containing accession codes : TaxIds
+
+Parameters
+----------
+acc_list : list
+    List of accession codes to be retrieved.
+out_seqs : str
+    Path to the file to store the retrieved sequences.
+out_taxs : str
+    Path to the file to store the retrieved taxonomy.
+chunk_size : int, optional
+    Size of the pieces the accession list will be split into. The default is 500.
+max_attempts : int, optional
+    Number of retrieval attempts to be made for each piece. The default is 3.
+
+Returns
+-------
+failed : list
+    List of accession codes that failed to be retrieved.
+
+"""
+
+"""
+Retrieve records designated by the NCBI database survey. Perform two passes
+and record accession codes that fail be retrieved.
+Up to three files are generated:
+    seq_file: stores the retrieved sequences in fasta format
+    tax_file: 2 column table containing accession codes : TaxIds
+    warning_file:   stores a list of accession codes that fail to be
+                    retrieved after the two passes.
+
+Parameters
+----------
+acc_list : list
+    List of accession codes to be retrieved.
+out_dir : str
+    Path to the directory to contain the generated files.
+tmp_dir : str, optional
+    Path to the directory to contain the temporal files. If none is given, temporal files will be stored in the output directory.
+warn_dir : str, optional
+    Path to the directory to contain the warning file. If none is given, the warning file is stored in the output directory.
+chunk_size : int, optional
+    Size of the pieces the accession list will be split into. The default is 500.
+max_attempts : int, optional
+    Number of retrieval attempts to be made for each piece. The default is 3.
+
+Raises
+------
+Exception
+    Raise exception if no record can be retrieved.
+
+Returns
+-------
+out_seqs : str
+    Path to the generated sequence file.
+out_taxs : str
+    Path to the generated taxonomy file.
+warn_failed : str
+    Path to the generated warning file.
+nseqs : int
+    Number of records succesfully retrieved from the NCBI database.
+
+"""
 
 #%% Process taxonomy data
-def build_lineage_table(tax_file, nodes_tab, *ranks):
+def build_lineage_table(tax_file, nodes_tab, ranks):
     """
     Rebuild the lineage for each taxon present in the records.
     Include lineages of upper taxa
@@ -237,7 +223,7 @@ def build_lineage_table(tax_file, nodes_tab, *ranks):
         Path to the taxonomy file generated by the NCBI fetch function.
     nodes_tab : pandas.DataFrame
         DataFrame containing each taxon's parent TaxId and rank.
-    *ranks : str
+    ranks : str
         Ranks to be included in the lineage table.
 
     Returns
@@ -249,9 +235,9 @@ def build_lineage_table(tax_file, nodes_tab, *ranks):
 
     """
     # open the generated taxonomy file
-    taxid_tab = pd.read_csv(tax_file, index_col=0).TaxId
+    taxid_tab = pd.read_csv(tax_file, index_col=0, header=None, names='accesion TaxId'.split()).TaxId
     # unfold lineages
-    lineages = [unfold_lineage(taxid, nodes_tab, *ranks) for taxid in taxid_tab.unique()]
+    lineages = [fetch_tools.unfold_lineage(taxid, nodes_tab, ranks) for taxid in taxid_tab.unique()]
     lineages = pd.DataFrame(lineages, index = taxid_tab.unique())[list(ranks)]
     
     # some records have an assigned taxonomy at a lower rank than the ones specified in ranks
@@ -275,17 +261,17 @@ def build_lineage_table(tax_file, nodes_tab, *ranks):
 
 def build_taxonomy_table(tax_file, real_taxids):
     # build the dataframe containing the lowest valid taxId for each record
-    taxid_tab = pd.read_csv(tax_file, index_col=0).TaxId
+    taxid_tab = pd.read_csv(tax_file, index_col=0, header=None, names='accesion TaxId'.split()).TaxId
     taxonomy = real_taxids.loc[taxid_tab].astype(int)
     taxonomy.index = taxid_tab.index
     return taxonomy
 
 def build_name_table(lineage_tab, names_tab):
     # build the dataframe containing the TaxId-Scientific name pairs
-    names = names_tab.loc[np.unique(lineage_tab), 'TaxId']
+    names = names_tab.loc[np.unique(lineage_tab)]
     return names
 
-def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, *ranks):
+def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, ranks, db_name='NCBI'):
     """
     Generate the taxonomy, lineage, and names tables for the generated records.
 
@@ -299,7 +285,7 @@ def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, *ranks):
         Path to the file containing the NCBI TaxId:Scientific name pairs.
     nodes_tab : str
         Path to the file containing the cladistic information for each taxon.
-    *ranks : str
+    ranks : str
         Ranks to be included in the lineage table.
 
     Returns
@@ -314,12 +300,15 @@ def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, *ranks):
     """
     # prepare output directory & files
     os.makedirs(out_dir, exist_ok=True)
-    lineage_file=f'{out_dir}/NCBI.lineage'
-    taxonomy_file=f'{out_dir}/NCBI.taxonomy'
-    name_file=f'{out_dir}/NCBI.names'
+    lineage_file=f'{out_dir}/{db_name}.lineage'
+    taxonomy_file=f'{out_dir}/{db_name}.taxonomy'
+    name_file=f'{out_dir}/{db_name}.names'
+    
+    # load names and nodes tables
+    names_tab, nodes_tab = fetch_tools.read_taxdmp(names_tab, nodes_tab)
     
     # build taxonomy tables
-    lineages, real_taxids = build_lineage_table(tax_source, nodes_tab, *ranks)
+    lineages, real_taxids = build_lineage_table(tax_source, nodes_tab, ranks)
     taxonomy_table = build_taxonomy_table(tax_source, real_taxids)
     name_table = build_name_table(lineages, names_tab)
     
@@ -331,51 +320,75 @@ def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, *ranks):
     return lineage_file, taxonomy_file, name_file
 
 #%% main retrieval function
-def retrieve_data(taxon, marker, out_dir, names_tab, nodes_tab, warn_dir=None, chunk_size=500, max_attempts=3, *ranks):
-    """
-    Retrieve sequence and taxonomy data from the NCBI database.
+"""
+Retrieve sequence and taxonomy data from the NCBI database.
 
-    Parameters
-    ----------
-    taxon : str
-        Taxon to look for.
-    marker : str
-        Marker to look for.
-    out_dir : str
-        Path to the directory to contain the generated files.
-    names_tab : str
-        Path to the file containing the NCBI TaxId:Scientific name pairs.
-    nodes_tab : str
-        Path to the file containing the cladistic information for each taxon.
-    warn_dir : str, optional
-        Path to the directory to contain the warning file. If none is given, the warning file is stored in the output directory.
-    chunk_size : TYPE, optional
-        DESCRIPTION. The default is 500.
-    max_attempts : int, optional
-        Number of download attempts to perform. The default is 3.
-    *ranks : str
-        Ranks to be included in the lineage table.
+Parameters
+----------
+taxon : str
+    Taxon to look for.
+marker : str
+    Marker to look for.
+out_dir : str
+    Path to the directory to contain the generated files.
+names_tab : str
+    Path to the file containing the NCBI TaxId:Scientific name pairs.
+nodes_tab : str
+    Path to the file containing the cladistic information for each taxon.
+tmp_dir : str, optional
+    Path to the directory to contain the temporal files. If none is given, temporal files will be stored in the output directory.
+warn_dir : str, optional
+    Path to the directory to contain the warning file. If none is given, the warning file is stored in the output directory.
+chunk_size : TYPE, optional
+    DESCRIPTION. The default is 500.
+max_attempts : int, optional
+    Number of download attempts to perform. The default is 3.
+ranks : str
+    Ranks to be included in the lineage table.
 
-    Returns
-    -------
-    out_seqs : str
-        Path to the generated sequence file.
-    out_taxs : str
-        Path to the generated taxonomy file.
-    warn_failed : str
-        Path to the generated warning file.
-    lineage_file : str
-        Path to the file containing the generated lineage table.
-    taxonomy_file : str
-        Path to the file containing the accession-TaxId mapping.
-    name_file : str
-        Path to the file containing the TaxId-Scientific name mapping.
+Returns
+-------
+out_seqs : str
+    Path to the generated sequence file.
+out_taxs : str
+    Path to the generated taxonomy file.
+warn_failed : str
+    Path to the generated warning file.
+lineage_file : str
+    Path to the file containing the generated lineage table.
+taxonomy_file : str
+    Path to the file containing the accession-TaxId mapping.
+name_file : str
+    Path to the file containing the TaxId-Scientific name mapping.
+nseqs : int
+    Number of sequences successfuly retrieved from the NCBI database.
 
-    """
+"""
+def retrieve_data(taxon,
+                  marker,
+                  out_dir,
+                  names_tab,
+                  nodes_tab,
+                  tmp_dir,
+                  warn_dir,
+                  chunk_size=500,
+                  max_attempts=3,
+                  ranks=['phylum', 'class', 'order', 'family', 'genus', 'species'],
+                  workers=1,
+                  db_name='NCBI'):
+    # ensure directory names are properly formatted
+    out_dir = re.sub('/$', '', out_dir)
+    tmp_dir = re.sub('/$', '', tmp_dir)
+    warn_dir = re.sub('/$', '', warn_dir)
+    
     # retrieve data
+    print(f'Searching NCBI for records matching the terms "{taxon}" and "{marker}"...')
     acc_list = survey(taxon, marker, max_attempts)
-    out_seqs, out_taxs, warn_failed = fetch(acc_list, out_dir, warn_dir, chunk_size, max_attempts)
+    if len(acc_list) == 0:
+        raise Exception(f'No matching records found for terms "{taxon}" and "{marker}"')
+    print(f'Found {len(acc_list)} records. Beginning retrieval operation...')
+    out_seqs, out_taxs, warn_failed, nseqs, exclusion = fetch(acc_list, out_dir, tmp_dir, warn_dir, chunk_size=chunk_size, max_attempts=max_attempts, workers=workers, db_name=db_name)
     
     # generate taxonomy files
-    lineage_file, taxonomy_file, name_file = arrange_taxonomy(out_dir, out_taxs, names_tab, nodes_tab, *ranks)
-    return out_seqs, out_taxs, warn_failed, lineage_file, taxonomy_file, name_file
+    lineage_file, taxonomy_file, name_file = arrange_taxonomy(out_dir, out_taxs, names_tab, nodes_tab, ranks)
+    return out_seqs, out_taxs, warn_failed, lineage_file, taxonomy_file, name_file, nseqs, exclusion

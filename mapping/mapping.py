@@ -79,7 +79,7 @@ def read_blast(blast_file, evalue = 0.005):
     # blast file preformatted (comma separated), contains column names and last row with qseqid = Reference, length = reference marker length
     # returns processed blast table and used marker length
     blast_tab = pd.read_csv(blast_file)
-    
+    blast_tab.index = blast_tab.index.astype(str)
     # filter blast report for evalue
     blast_tab = blast_tab.query('evalue <= @evalue').copy()
     if len(blast_tab) == 0:

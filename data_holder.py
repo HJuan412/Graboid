@@ -73,6 +73,14 @@ class R:
         self.collapsed, self.branches = sequence_collapse.sequence_collapse(filtered_map, max_unk_thresh)
         self.y_collapsed = consensus_taxonomy.collapse_taxonomies(self.branches, filtered_accs, self.lineage_tab)
         self.lineage_collapsed = self.lineage_tab.loc[self.y_collapsed].reset_index(drop=True)
+    
+    def select(self, start=0, end=-1, max_unk_thresh=.2):
+        selected = self.map[self.valid][:, start:end]
+        filtered_accs = self.y[self.valid]
+        
+        self.selected, self.selected_branches = sequence_collapse.sequence_collapse(selected, max_unk_thresh)
+        self.y_selected = consensus_taxonomy.collapse_taxonomies(self.selected_branches, filtered_accs, self.lineage_tab)
+        self.lineage_selected = self.lineage_tab.loc[self.y_selected].reset_index(drop=True)
 
 class Q:
     def load(self, qry_file, qry_dir, blast_db, evalue=0.0005, dropoff=0.05, min_height=0.1, min_width=2, threads=1, qry_name='QUERY'):
@@ -128,12 +136,16 @@ class DataHolder:
         # min_cov : minimum coverage (percentage of max coverage) to select the columns by
         
         # filter columns by coverage
-        filtered = (self.Q.coverage_norm >= min_cov) & (self.R.coverage_norm > 0)
+        filtered = (self.Q.coverage_norm >= min_cov) & (self.R.coverage_norm > 0) if hasattr(self, 'Q') else self.R.coverage_norm > 0
         self.filtered_sites = np.arange(len(filtered))[filtered]
         
         # filter reference, get indexes of instances with known values at the given rank
         self.R.filter_rank(rank)
     
+    def select(self, start=0, end=-1, max_unk_thresh=.2):
+        self.R.select(start, end, max_unk_thresh)
+        
     def collapse(self, max_unk_thresh=.2):
         self.R.collapse(self.filtered_sites, max_unk_thresh)
-        self.Q.collapse(self.filtered_sites)
+        if hasattr(self, 'Q'):
+            self.Q.collapse(self.filtered_sites)

@@ -180,6 +180,25 @@ class ConceptLearner:
             return raw_report, norm_report, classif_report
         return None, None, None
     
+    def rules_classify(self, Q, threads=1):
+        results = {}
+        for rk, rank in self.ranks.items():
+            rank_compatibles = rules_classify(Q, rank.rules_matrix, rank.taxa, threads = 1)
+            unambiguous = rank_compatibles.query('Total_compatible == 1').drop(columns='Total_compatible')
+            
+            # assign classifications
+            rank_compatibles['Classification'] = None
+            rank_compatibles.loc[rank_compatibles.Total_compatible > 1, 'Classification'] = 'Unclear'
+            if len(unambiguous) > 0:
+                unambiguous_classif = np.tile(rank_compatibles.columns[:-2], (len(unambiguous), 1))[unambiguous]
+                unambiguous_classif = self.names_tab.loc[unambiguous_classif].values
+                rank_compatibles.loc[unambiguous.index, 'Classification'] = unambiguous_classif
+            
+            results[rk] = rank_compatibles
+        results = pd.concat(results, axis=1, names=['Rank', 'Taxon'])
+        results.rename(columns=self.names_tab, level=1, inplace=True)
+        return results
+    
     def build_summary(self, out_file):
         # get a summary of the learned concepts at each rank
         # TODO: add leading paragraph to summary, wxplaining what is what
@@ -318,8 +337,8 @@ def build_signal_mat(matrix, taxa, scores_tab):
         
         info_score = scores_tab.loc[tax, 'Info_score']
         
-        non_shared_sites = tax_concept.non_shared # remember to update non_shared attribute of concept taxa after getting shared info
-        non_shared_vals = tax_concept.signal[non_shared_sites].values
+        non_shared_sites = tax_concept.non_shared.astype(int) # remember to update non_shared attribute of concept taxa after getting shared info
+        non_shared_vals = tax_concept.signal[non_shared_sites].values.astype(int)
         ns_score = scores_tab.loc[tax, 'NS_score']
         
         # record informative score
@@ -334,6 +353,34 @@ def build_signal_mat(matrix, taxa, scores_tab):
             signal_matrix[non_shared_sites, non_shared_vals, non_shared_vals] = ns_score
     
     return signal_matrix
+
+def build_rules_matrix(matrix, taxa):
+    """
+    Construct the rules matrix
+
+    Parameters
+    ----------
+    matrix : numpy.array
+        Encoded alignment array. 3D boolean array of shape (sequences, sites, 4)
+    taxa : dict
+        Dictionary with key:value -> taxID:Concept
+        Contains a taxon Concept instances
+
+    Returns
+    -------
+    rules_matrix : numpy.array
+        3D Numpy boolean array of shape (matrix.shape[1], 5, 5) indicating when a value at a given site forms part of a rule (remember index 0 corresponds to missing values)
+
+    """
+    rules_matrix = np.full((matrix.shape[1], 5,5), False)
+    rules_matrix[:,0,:] = True
+    rules_matrix[:,:,0] = True
+
+    for tax, tax_concept in taxa.items():
+        for rule, val in zip(tax_concept.rules, tax_concept.rules_values):
+            rules_matrix[rule, val, val] = True
+    
+    return rules_matrix
 
 def get_concept_signal(Q, M, sn_sites, sn_values, ml_sites, ml_values):
     """
@@ -383,6 +430,91 @@ def get_concept_signal(Q, M, sn_sites, sn_values, ml_sites, ml_values):
     signal_total = (signal_single + signal_multi).astype(np.float16)
     return signal_total
 
+def check_compatible(Q, taxa):
+    """
+    Check if the sequences contained in Q are compatible with the tax concepts contained in taxa
+
+    Parameters
+    ----------
+    Q : numpy.array
+        Sub array of the rules matrix containing the observed value for each query sequence
+    taxa : dict
+        Dictionary of key:value pairs -> tax name: tax concept
+
+    Returns
+    -------
+    is_compatible : pandas.DataFrame
+        Table indicating the compatible taxa for each query sequence
+
+    """
+    is_compatible = []
+    for tax, tax_concept in taxa.items():
+        q_vals_concept = Q[:, tax_concept.rules]
+        compatible = (q_vals_concept & tax_concept.rules_encoded)[:,:,1:]
+        is_compatible.append(pd.Series(np.all(np.any(compatible, axis=2), axis=1), name=tax))
+    is_compatible = pd.concat(is_compatible, axis=1)
+    return is_compatible
+
+def rules_classify(Q, rules_matrix, taxa, threads=1):
+    """
+    Classify query instances using the rules matrix. If more than 1 thread is specified, use check_compatible function which allows for parallel classification
+    NOTE: multiprocssing mode is less efficient at lower numbers of query sequences
+
+    Parameters
+    ----------
+    Q : numpy.array
+        Array of query sequences
+    rules_matrix : numpy.array
+        Boolean matrix containing the learned rules for all taxon concepts
+    taxa : dict
+        Dictionary of key:value pairs -> tax name: tax concept
+    threads : int, optional
+        Number of processors to use in the classification. The default is 1.
+
+    Returns
+    -------
+    compatible_tab : pandas.DataFrame
+        Table indicating the compatible taxa for each query sequence. Taxa with no compatible sequences are ommited.
+        Total_compatible column records the number of compatible taxa for each query
+
+    """
+    # slicer function is used to subdivide the taxa dictionary
+    def slicer(taxa, threads=1):
+        tax_names = np.array(list(taxa.keys()))
+        n = len(tax_names)
+        
+        indexes = np.arange(0, n, int(n/threads) + 1)
+        if indexes.max() < n-1:
+            indexes = np.append(indexes, -1)
+        keys = [tax_names[idx0:idx1] for idx0, idx1 in zip(indexes[:-1], indexes[1:])]
+        for k in keys:
+            selected = {k_:taxa[k_] for k_ in k}
+            yield selected
+    
+    # generate a 3d array indicating the rules values for each site in each query sequence
+    q_vals = np.array([rules_matrix[np.arange(len(q)), q] for q in Q])
+    
+    # check compatibility using either single or multiple processors
+    if threads == 1:
+        compatible_tab = pd.DataFrame(False, index=np.arange(len(Q)), columns=taxa.keys())
+        for tax, tax_concept in taxa.items():
+            # select sites involved in the current concept
+            q_vals_concept = q_vals[:, tax_concept.rules]
+            # ensure compatibility with the current concept
+            compatible = (q_vals_concept & tax_concept.rules_encoded)[:,:,1:]
+            compatible_tab[tax] = np.all(np.any(compatible, axis=2), axis=1)
+    else:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+            futures = [executor.submit(check_compatible, q_vals, taxa_chunk) for taxa_chunk in slicer(taxa, threads)]
+            compatible_tab = pd.concat([future.result() for future in concurrent.futures.as_completed(futures)], axis=1)
+    
+    # prune table, keep only concepts with compatible queries, record compatible taxa for each sequence
+    found_concepts = compatible_tab.sum(axis=0)
+    found_concepts = (found_concepts[found_concepts > 0]).index
+    compatible_tab = compatible_tab[found_concepts]
+    compatible_tab['Total_compatible'] = compatible_tab.sum(axis=1)
+    return compatible_tab
+
 class Rank:
     def __init__(self, name):
         self.name = name
@@ -390,6 +522,7 @@ class Rank:
         self.scores_tab = None
         self.shared_tab = None
         self.signal_matrix = None
+        self.rules_matrix = None
         self.summary = None
     
     def __getitem__(self, taxon):
@@ -438,6 +571,9 @@ class Rank:
         self.scores_tab = get_signal_scores(self.shared_tab)
         self.signal_matrix = build_signal_mat(matrix, self.taxa, self.scores_tab)
         
+        # build rules matrix
+        self.rules_matrix = build_rules_matrix(matrix, self.taxa)
+        
         #build summary & confusion
         summ_columns = pd.MultiIndex.from_product([['Sequences', 'Subtaxa'],
                                                    ['Total', 'Solved', 'Solved_partial']])
@@ -480,7 +616,7 @@ class Rank:
         # get classification
         signal_tab[('Classification', self.name)] = signals_norm.columns.values[np.argmax(signals_norm, axis=1)]
         return signal_tab
-
+        
 #%% Summary
 def get_super_rank(ranks, rank):
     parent_ranks = {rk:pr for rk,pr in zip(ranks[1:], ranks[:-1])}
@@ -810,10 +946,12 @@ def get_composite_signal(matrix, in_indexes, unsolved_indexes):
         seqs_h = np.concatenate((unsolved_indexes[seqs_full], unsolved_indexes[~seqs_full][incomp_in_h]))
     
     # get signal values
-    values_v = np.any(in_matrix[:, signal_v], axis=0)
-    values_v = (values_v * np.array([1,2,3,4]))[values_v]
-    values_h = np.any(in_matrix[:, signal_h], axis=0)
-    values_h = (values_h * np.array([1,2,3,4]))[values_h]
+    if len(signal_v) > 0:
+        values_v = np.any(in_matrix[:, signal_v], axis=0)
+        values_v = (values_v * np.array([1,2,3,4]))[values_v]
+    if len(signal_h) > 0:
+        values_h = np.any(in_matrix[:, signal_h], axis=0)
+        values_h = (values_h * np.array([1,2,3,4]))[values_h]
     
     return signal_v, values_v, signal_h, values_h, intersection_v, intersection_h, seqs_h
 
@@ -1118,11 +1256,20 @@ def compress(matrix, sequences, *sites):
     values_multi = get_convos(matrix, sequences, sites_multi)
     return sites_single, values_single, sites_multi, values_multi
 
+def encode_rule_vals(rule_values):
+    encoded_vals = np.tile([1,0,0,0,0], (len(rule_values), 1)).astype(bool)
+    for idx, v in enumerate(rule_values):
+        encoded_vals[idx, v] = True
+    return encoded_vals
+
 class Concept:
     def __init__(self, name, rank=None):
         self.name = name
         self.rank = rank
         self.sequences = np.array([])
+        
+        self.rules = []
+        self.rules_values = []
         
         self.informative_sites = np.array([])
         self.informative_values = np.array([])
@@ -1174,7 +1321,7 @@ class Concept:
             self.intersection_vh = self.intersection_hv # alias to avoid confusion
             
             # signal attributes is a series that merges the sites and values of horizontal and vertical signal
-            self.signal = pd.Series(0, index=np.unique(np.concatenate((self.signal_v, self.signal_h))))
+            self.signal = pd.Series(0, index=np.unique(np.concatenate((self.signal_v, self.signal_h))).astype(int))
             self.signal.loc[self.signal_v] = self.values_v
             self.signal.loc[self.signal_h] = self.values_h
             
@@ -1197,6 +1344,11 @@ class Concept:
         
         # compress concept sequences
         self.sites_single, self.values_single, self.sites_multi, self.values_multi = compress(matrix, self.sequences, self.informative_sites, self.signal_v, self.signal_h)
+        
+        # get rules
+        self.rules = np.concatenate((self.informative_sites, self.signal.index)).astype(int)
+        self.rules_values = self.informative_values + self.signal.values.tolist()
+        self.rules_encoded = encode_rule_vals(self.rules_values)
 
 #%% Main
 def load_data(ref_dir,
@@ -1210,19 +1362,25 @@ def load_data(ref_dir,
               min_cov=.95,
               filter_rank='family',
               max_unk_thresh=.2,
-              threads=1):
+              threads=1,
+              qry_map_file=None,
+              qry_acc_file=None):
     # load data
     data = DataHolder()
     data.load_reference(ref_dir)
     # load query
-    data.load_query(qry_file,
-                    qry_dir=qry_dir,
-                    evalue=evalue,
-                    dropoff=dropoff,
-                    min_height=min_height,
-                    min_width=min_width,
-                    threads=threads,
-                    qry_name=qry_name)
+    if qry_map_file is None or qry_acc_file is None:
+        data.load_query(qry_file,
+                        qry_dir=qry_dir,
+                        evalue=evalue,
+                        dropoff=dropoff,
+                        min_height=min_height,
+                        min_width=min_width,
+                        threads=threads,
+                        qry_name=qry_name)
+    else:
+        # if query map file is provided, load with short method
+        data.load_query_short(qry_map_file, qry_acc_file)
     
     # filter and process data
     data.filter_data(min_cov=min_cov, rank=filter_rank)

@@ -10,6 +10,156 @@ import numpy as np
 import pandas as pd
 
 #%% functions
+def get_site_types_in(in_matrix, out_matrix):
+    # locate distinct, shared, missing (in and out) values, as well as invariable sites
+    # returns encoded matrices of shape:
+        # distinct_values, shared_values : (4, sites)
+        # in_missing, out_missing, invariable : (sites)
+        
+    # get values found in the inner and outer matrices
+    in_values = in_matrix.any(axis=0)
+    out_values = out_matrix.any(axis=0)
+    
+    # get sites with missing values in the inner and outer matrices
+    in_missing = ~in_matrix.any(axis=2).all(axis=0)
+    out_missing = ~out_matrix.any(axis=2).all(axis=0)
+    
+    # get encoded distinct and shared values
+    distinct_values = in_values & ~out_values
+    shared_values = in_values & out_values
+    
+    # get invariable sites
+    invariable = np.concatenate((in_matrix, out_matrix), axis=0).any(axis=0).sum(axis=1) == 1
+    return distinct_values, shared_values, in_missing, out_missing, invariable
+
+def get_site_types0(distinct_values, shared_values, in_missing, out_missing, invariable):
+    # process output of get_site_types_in to typify the type of each site in the alignment
+    # returns encoded sites array of shape (5, sites), indicating with a boolean the type of each site
+    
+    has_distinct = distinct_values.any(axis=1)
+    has_shared = shared_values.any(axis=1)
+    single_shared = shared_values.sum(axis=1) <= 1
+    connecting_unknowns = in_missing & out_missing
+    
+    type0 = invariable
+    type1 = has_distinct & ~has_shared & ~connecting_unknowns
+    type2 = has_distinct & (has_shared | connecting_unknowns)
+    type3 = ~has_distinct & single_shared & ~connecting_unknowns & ~invariable
+    type4 = ~type0 & ~type1 & ~type2 & ~type3
+    
+    types = np.array([type0, type1, type2, type3, type4])
+    return types
+
+def get_single_full(types, distinct_values):
+    # get single full rules, locate sites that show only distinctive values
+    # returns dictionary of key:values
+        # site index : encoded values
+    single_full_sites = np.arange(distinct_values.shape[0])[types[1]]
+    single_full_values = distinct_values[:, single_full_sites]
+    return single_full_sites, single_full_values
+
+def get_single_partial(types, distinct_values, shared_values):
+    # get single partial rules, locate sites that have distinctive and shared values
+    # returns dictinoary of key:values
+        # site index : encoded values (includes distinctive and shared values)
+    single_partial_sites = np.arange(distinct_values.shape[0])[types[2]]
+    single_partial_values = distinct_values[:, single_partial_sites] | shared_values[:, single_partial_sites]
+    return single_partial_sites, single_partial_values
+
+def check_single_partial(rule_indexes, in_matrix, out_matrix, distinct_values, shared_values):
+    # check which concept sequences are confirmed by the set of single partial rules
+    # check if any outsider sequences are compatible with the ruleset
+    # returns arrays of confirmed and out compatible sequences
+    
+    # select sites used by the single partial rules
+    in_matrix = in_matrix[:, rule_indexes]
+    out_matrix = out_matrix[:, rule_indexes]
+    
+    distinct_values = distinct_values[rule_indexes]
+    shared_values = shared_values[rule_indexes]
+    
+    # get confirmed sequences
+    confirmed = (in_matrix & distinct_values).any(axis=(1,2))
+    
+    # get out compatible sequences
+    out_compatible = (out_matrix & shared_values).any(axis=2).all(axis=1)
+    
+    return confirmed, out_compatible
+
+def prune0(out_shared):
+    # remove redundant sites (sites that do not reject any new sequences)
+    # returns a list of kept site indexes (Note, these indexes are relative to the set of type 2&3 sites), to get the real indexes extract the returned indexes from the array of composite rule sites
+    
+    # define kept sites list and indexes array
+    kept_sites = []
+    sites = np.arange(out_shared.shape[1])
+    
+    # get matrix of rejected outsider sequences (opposite of shared matrix)
+    out_rejected = ~out_shared
+    # initialize array of rejected outsider sequences (at first no sequences are rejected)
+    rejected = np.full(out_shared.shape[0], False)
+    
+    # iterate until prunning is done
+    for _ in range(out_shared.shape[0]):
+        # count the non-yet-rejected sequences that share values with the concept for each remaining site
+        total_shared = np.sum(out_shared[~rejected][:, sites], axis=0)
+        # sort sites by number of shared sequences (ascending), select the site with the least sequences
+        shared_sorted = sites[np.argsort(total_shared)]
+        first_place = shared_sorted[0]
+        
+        # verify that there are new rejected sequences (relative to the previous iteration)
+        new_rejected = ~rejected & out_rejected[:, first_place]
+        # no new rejections? end pruning (do not include the current site, as it adds no information)
+        if new_rejected.sum() == 0:
+            break
+        
+        # update rejected & kept sites
+        rejected = rejected | out_rejected[:, first_place]
+        kept_sites.append(first_place)
+        
+        # are all outsider sequences rejected?
+        if rejected.all():
+            break
+        
+        # remove newly redundant sites
+        # remaining_rejections : all remaining sites that reject any of the yet-unrejected sequences
+        remaining_rejections = out_rejected[:, ~rejected][:, sites].any(axis=0)
+        sites = sites[remaining_rejections]
+        
+        # are there sites remaining? (this would mean there are still sequences to reject)
+        if len(sites) == 0:
+            break
+        
+    return kept_sites
+
+def get_composite(types, shared_values, out_matrix):
+    # get composite rule, prune redundant sites, check if all outsider sequences are rejected
+    # returns dictionary of key : values
+        # site index : encoded values
+    # and array of out compatible sequences
+    
+    # get type 2 & 3 sites
+    site23_indexes = np.arange(shared_values.shape[0])[types[2] & types[3]]
+    # select sites (type-2) with a single shared value
+    single_shared = shared_values[site23_indexes].sum(axis=1) == 1
+    site23_indexes = site23_indexes[single_shared]
+    
+    # get shared values with the outsider sequences
+    out_matrix = out_matrix[:, site23_indexes]
+    shared_values = shared_values[site23_indexes]
+    # build shared matrix
+    out_shared = (out_matrix & shared_values).any(axis=2)
+    
+    # prune redundant sites
+    pruned = prune0(out_shared)
+    
+    # build ruleset and list compatible outsider sequences
+    composite_sites = site23_indexes[pruned]
+    composite_values = shared_values[:, composite_sites]
+    out_compatible = out_shared.all(axis=1)
+    
+    return composite_sites, composite_values, out_compatible
+#%%
 def get_distinct_shared(matrix, tax_sequences):
     # detect distinct and shared values for the current tax
     # counc how many distinctive and shared values are found in each site
@@ -34,28 +184,32 @@ def get_distinct_shared(matrix, tax_sequences):
     
     # Identify and count shared values in each site
     shared = changed_values & ~new_zeros
+    
     shared_vals = [nums[sh] for sh in shared]
     shared_vals_encoded = shared
     shared_counts = shared.sum(axis=1)
     
     return distinct_vals, distinct_vals_encoded, distinct_counts, shared_vals, shared_vals_encoded, shared_counts
 
-def get_site_types(distinct_vals, distinct_counts, shared_vals, shared_counts):
-    
+def get_site_types(matrix, distinct_vals, distinct_counts, shared_vals, shared_counts):
+
     # get types
     has_distinct = distinct_counts > 0
     has_shared = shared_counts > 0
+    
+    type0 = np.any(matrix, axis=0).sum(axis=1) == 1 # type 0 sites are invariable/unknown across the alignment
     type1 = (has_distinct & ~has_shared)
     type2 = (has_distinct & has_shared)
-    type3 = ((~has_distinct) & (shared_counts == 1))
+    type3 = ((~has_distinct) & (shared_counts == 1)) & (~type0)
     type4 = ((~has_distinct) & (shared_counts > 1))
     
     # prepare results
     site_types = type1 + type2*2 + type3*3 + type4*4
-    type_summmary = pd.Series([type1.sum(),
-                          type2.sum(),
-                          type3.sum(),
-                          type4.sum()], index=[1,2,3,4], name='Type')
+    type_summmary = pd.Series([type0.sum(),
+                               type1.sum(),
+                               type2.sum(),
+                               type3.sum(),
+                               type4.sum()], name='Type')
     return site_types, type_summmary
 
 def get_single_rules(matrix, tax_sequences, site_types, distinct_vals, shared_vals):
@@ -83,138 +237,247 @@ def get_single_rules(matrix, tax_sequences, site_types, distinct_vals, shared_va
     
     return single_whole, single_partial
 
-def check_single(whole, partial, matrix, tax_sequences, distinct_vals, shared_vals, distinct_vals_encoded, shared_vals_encoded):
-    # verify which sequences of the taxon concept can be solved with the set of single rules
-    solved = np.array([])
-    unsolved = np.array([])
-    confused = np.array([])
+def check_single(whole, partial, matrix, tax_sequences, distinct_vals_encoded, shared_vals_encoded):
+    # verify which concept sequences are confirmed, compatible or missed by the signle rules
+    # verify outsider concept sequences compatible with the single rules
     
-    # There is at least one whole rule, no need to keep searching
+    confirmed = np.array([], dtype=int)
+    in_compatible = tax_sequences
+    in_missed = np.array([], dtype=int)
+    out_compatible = np.array([], dtype=int)
+    
+    in_matrix = matrix[tax_sequences]
+    out_matrix = np.delete(matrix, tax_sequences, axis=0)
+    
+    # get confirmed, compatible & missed taxon sequences
     if len(whole) > 0:
-        solved = tax_sequences
-    else:
-        # If there are no single whole rules, it is possible that some sequences of the concept taxon are unsolved
+        # there is at least one whole single rule, all concept sequences are confirmed & compatible, all outsider sequences are rejected
+        in_compatible = tax_sequences
+        confirmed = tax_sequences
+        
+    elif len(partial) > 0:
+        # there are no whole single rules
+        # check confirmed, compatible, missed taxon sequences
+        in_compatible = np.any(in_matrix & (distinct_vals_encoded | shared_vals_encoded), axis=(1,2))
+        in_missed = tax_sequences[~in_compatible]
+        in_compatible = tax_sequences[in_compatible]
+        confirmed = np.any(in_matrix & distinct_vals_encoded, axis=(1,2))
+        confirmed = tax_sequences[confirmed]
+    
+        # check compatible outsider sequences
+        # compatible outsider sequences -> any ousider sequences that contains a shared value in ALL partial sites
+        #   Even if a single rule has unknown values, we are strict and reject sequences that show a value different than the one seen in the concept sequences
+        #   has_unknowns = ~in_matrix.any(axis=2).all(axis=0)
+        #   out_compatible = np.all(np.any(out_matrix & shared_vals_encoded, axis=2) | has_unknowns, axis=1)
         partial_sites = np.array(list(partial.keys()))
-        partial_distinct = distinct_vals_encoded[partial_sites]
-        partial_shared = shared_vals_encoded[partial_sites]
-        
-        # get tax sequences with at least one distinct value
-        in_partial = matrix[tax_sequences][:, partial_sites]
-        in_solved = np.any(in_partial & partial_distinct, axis=(1,2))
-        solved = tax_sequences[in_solved]
-        unsolved = tax_sequences[~in_solved]
-        
-        if len(unsolved) > 0:
-            # if there are unsolved sequences, get outsider sequences that are compatible with the current concept
-            # confused outsider sequences -> any ousider sequences that contains a shared value in ALL partial sites
-            # get partial rule sites from outsider sequences
-            out_partial = np.delete(matrix, tax_sequences, axis=0)[:, partial_sites]
-            # get all out sequences that contain shared values in all partial rule sites
-            out_confused = np.all(np.any(out_partial & partial_shared, axis=2), axis=1)
-            confused = np.delete(np.arange(matrix.shape[0]), tax_sequences)[out_confused]
+        out_compatible = np.all(np.any((out_matrix & shared_vals_encoded)[:, partial_sites], axis=2), axis=1)
+        out_compatible = np.delete(np.arange(matrix.shape[0]), tax_sequences)[out_compatible]
     
-    # out_matrix = np.delete(matrix, tax_sequences, axis=0)
-    # out_indexes = np.delete(np.arange(matrix.shape[0]), tax_sequences)
-    # for site in partial:
-    #     # get taxon sequences that contain one of the distinctive values found in the partial rule
-    #     solved_by_site = tax_sequences[np.any(matrix[tax_sequences][:, site][:, distinct_vals[site]-1], axis=1)]
-    #     solved.append(solved_by_site)
-    #     confused.append(np.any(out_matrix[:, site][:, shared_vals[site]-1], axis=1))
-    
-    # solved = np.unique(np.concatenate(solved))
-    # unsolved = np.setdiff1d(tax_sequences, solved)
-    # confused = np.all(np.array(confused), axis=0)
-    # confused = out_indexes[confused]
-    return solved, unsolved, confused
+    else:
+        # if no single rules are found, all outsider sequences are compatible
+        out_compatible = np.delete(np.arange(matrix.shape[0]), tax_sequences)
+        
+    return confirmed, in_compatible, in_missed, out_compatible
 
-def get_composite_rule(matrix, solved, unsolved, confused, shared_vals, site_types):
-    composite_rule = []
-    rule_vals = []
-    rule_confused = confused
+def prune(shared_matrix):
     
+    # sort sites by least shared sequences
+    indexes = np.arange(shared_matrix.shape[1])
+    
+    # keep track of sequences that are yet to be rejected
+    # information = np.full((shared_matrix.shape[0], 1), True)
+    to_reject = np.full(shared_matrix.shape[0], True)
+    retain = []
+    
+    for _ in indexes:
+        # detect if any of the remaining sites can discriminate a previously confused sequence
+        # keep_sites = np.any(~shared_matrix[:, sorted_sites] & information, axis=0)
+        new_rejections = ~shared_matrix[to_reject][:, indexes]
+        new_rejections_any = np.any(new_rejections, axis=0)
+        new_rejections_count = new_rejections.sum(axis=0)
+        
+        if not new_rejections_any.any():
+            # no new information can be extracted from the remaining sites
+            break
+        
+        # discard sites that add no new information
+        indexes = indexes[new_rejections_any]
+        new_rejections = new_rejections[:, new_rejections_any]
+        new_rejections_count = new_rejections_count[new_rejections_any]
+        
+        # select site that rejects the most sequences
+        best_site = np.argmax(new_rejections_count)
+        best_site_index = indexes[best_site]
+        indexes = np.delete(indexes, best_site)
+        
+        to_reject = to_reject & shared_matrix[:, best_site_index]
+        retain.append(best_site_index)
+        if not to_reject.any():
+            # all sequences succesfully rejected
+            break
+        
+    retain = np.array(retain, dtype=int)
+    return retain, to_reject
+    
+def get_composite_rule(matrix, tax_sequences, shared_vals_encoded, site_types):
+    composite_rule = {}
+    out_matrix = np.delete(matrix, tax_sequences, axis=0)
+    
+    # get shared values from type 2 sites, select only those with a single shared site
+    sites_2 = np.arange(matrix.shape[1])[site_types == 2]
+    sites_2 = sites_2[shared_vals_encoded[sites_2].sum(axis=1) == 1]
     # get all type 3 sites
     sites_3 = np.arange(matrix.shape[1])[site_types == 3]
-    vals_3 = np.array([shared_vals[site] for site in sites_3]).flatten()
     
-    # get all confused sequences
-    confused_seqs = matrix[confused]
+    site_candidates = np.concatenate((sites_2, sites_3))
+    # get shared values
+    shared_23 = shared_vals_encoded[site_candidates]
+    
+    # count shred values among outsider sequences
+    shared_compatible = np.any(out_matrix[:, site_candidates] & shared_23, axis=2)
+    
+    # get composite rule sites and update out compatibles
+    composite_sites, to_reject = prune(shared_compatible)
+    composite_sites = site_candidates[composite_sites]
+    # out_compatible = out_compatible[to_reject]
     
     # build composite rule
-    for _ in np.arange(len(sites_3)):
-        # count shared values
-        shared_counts = confused_seqs[:, sites_3, vals_3].sum(axis=0)
-        # get site with least shared values
-        best_site = np.argmin(shared_counts)
-        
-        # break if no sequences can be removed, partial rule
-        if shared_counts[best_site] == confused_seqs.shape[0]:
-            break
-        
-        # add site & value to rule
-        composite_rule.append(sites_3[best_site])
-        rule_vals.append(vals_3[best_site])
-        
-        # break if no confused sequences remain, whole rule
-        if shared_counts[best_site] == 0:
-            break
-        
-        # remove confused sequences without shared sites
-        confused_seqs = confused_seqs[confused_seqs[:, best_site]]
-        rule_confused = rule_confused[best_site]
-        
-        # remove selected site & value
-        sites_3 = np.delete(sites_3, best_site)
-        vals_3 = np.delete(vals_3, best_site)
+    nums = np.arange(1,5)
+    composite_rule = {site:nums[shared_vals_encoded[site]] for site in composite_sites}
     
-    composite_rule = np.array(composite_rule)
-    rule_vals = np.array(rule_vals)
+    return composite_rule #, out_compatible
+
+def check_composite(composite, matrix, tax_sequences, shared_vals_encoded, single_out_compatible):
+    # get compatible outsider sequences -> outsider sequences that share values in all composite rule sites
+    composite_sites = np.array(list(composite.keys()), dtype=int)
+    composite_encoded = shared_vals_encoded[composite_sites]
+    out_matrix = np.delete(matrix, tax_sequences, axis=0)[:, composite_sites]
     
-    return composite_rule, rule_vals, confused
-
-#%%
-
-# make dummy alignment of 8 sequences
-# test taxon comprised of sequences 1, 2 & 3
-
-dummy = np.array([
-    [1,2,2,2,1],# 0, type 1 single value full
-    [1,0,2,2,1],# 1, type 1 single value partial
-    [1,2,3,3,1],# 2, type 1 multi value full
-    [1,2,0,3,1],# 3, type 1 multi value partial
-    [1,1,2,2,1],# 4, type 2 single value, one shared
-    [1,2,3,1,1],# 5, type 2 multi value
-    [1,1,1,1,2],# 6, type 3 a
-    [2,2,2,2,1],# 7, type 3 a
-    [1,2,2,2,2],# 8, type 3 b
-    [1,1,2,2,2],# 9, type 4
-    [1,1,1,3,2]# 10, type 2 single value, multiple shared, one distinctive
+    # get outsider sequences compatible with the composite rule 
+    out_compatible = np.all(np.any(out_matrix & composite_encoded, axis=2), axis=1)
+    out_compatible = np.delete(np.arange(matrix.shape[0]), tax_sequences)[out_compatible]
     
-    ]).T
+    return out_compatible
 
-encoded = np.array([(dummy == i).T for i in [1,2,3,4]]).T
-#%%
-tax_seqs = np.array([1,2,3])
-
-def test(matrix, indexes):
-    distinct_vals, distinct_vals_encoded, distinct_counts, shared_vals, shared_vals_encoded, shared_counts = get_distinct_shared(matrix, indexes)
-    site_types, type_summary = get_site_types(distinct_vals, distinct_counts, shared_vals, shared_counts)
-    single_whole, single_partial = get_single_rules(matrix, indexes, site_types, distinct_vals, shared_vals)
-    solved, unsolved, confused = check_single(single_whole, single_partial, matrix, indexes, distinct_vals, shared_vals, distinct_vals_encoded, shared_vals_encoded)
-    return solved, unsolved, confused
-
-[0,1,2,3,4,5,6,7,8,9]
-# case 1, dummy alignment includes 1 single whole site, can be fully solved
-test(encoded, tax_seqs)
-
-# case 2, dummy alignment has no single whole sites, can be fully solved with single partial rules
-test(encoded[:, [1,2,4,6,7,8,9]], tax_seqs)
-
-# case 3, dummy alignment has no single whole sites, can't be fully solved with single partial rules, no outsider sequences confused
-test(encoded[:, [3,6,7,8,9]], tax_seqs)
-
-# case 4, dummy alignment has no single whole sites, can't be fully solved with single ppartial rules, outsider sequences confused
-test(encoded[:, [4, 6, 9]], tax_seqs)
-
+#%% test single rules
+def learn_concept_rules0(matrix, tax_sequences):
+    # Build the necessary rulesets to fully solve the concept (if possible)
+        # First: check if the concept can be solved by Single-Full ruleset
+        # Second: check if the concept can be solved by Single-Partial ruleset
+        # Third: check if the concpet can be solved by the Composite ruleset
+        # Fourth: check if the concept can be solved by a combination of the Single-Partial and Composite rulesets
+    # Returns ruleset dictionaries of key : value -> site index : encoded values
+        # rules_full : Single-Full ruleset
+        # rules_partial : Single-Partial ruleset
+        # rules_composite : Composite ruleset
+    # Also retunrs confirmed, out_compatible arrays
+        # confirmed : shape (3, concept sequences), indicates which concept sequences are confirmed by each ruleset (Single-Full, Single-Partial, Composite)
+        # out_compatible : shape (3, outsider sequences), indicates which outsider sequences cannot be rejected by each ruleset (Single-Full, Single-Partial, Composite)
+    
+    # get submatrices & out sequence indexes
+    in_matrix = matrix[tax_sequences]
+    out_matrix = np.delete(matrix, tax_sequences, axis=0)
+    out_sequences = np.delete(np.arange(matrix.shape[0]), tax_sequences)
+    
+    # find distinct and shared sites, sites with null values & invariable sites
+    distinct_values, shared_values, null_in, null_out, invariable = get_site_types_in(in_matrix, out_matrix)
+    # get site types (including type 0 sites)
+    types = get_site_types0(distinct_values, shared_values, null_in, null_out, invariable)
+    has_type = types.any(axis=1)
+    
+    full_sites = []
+    full_values = []
+    partial_sites = []
+    partial_values = []
+    composite_sites = []
+    composite_values = []
+    
+    confirmed = np.full((3, len(tax_sequences)), False)
+    out_compatible = np.full((3, len(out_sequences)), True)
+    
+    # Concept can be solved by Single-Full ruleset?
+    # concept has any type-1 sites?
+    if has_type[1]:
+        # get single full rules
+        full_sites, full_values = get_single_full(types, distinct_values)
+        confirmed[0] = True
+        out_compatible[0] = False
+    
+    else:
+        # Concept can be solved by Single-Partial ruleset?
+        # concept has a set of type-2 sites that confirm all concept sequences/reject all outsider sequences
+        if has_type[2]:
+            # get single partial rules, check if they can solve the entire concept
+            partial_sites, partial_values = get_single_partial(types, distinct_values, shared_values)
+            confirmed_partial, out_compatible_partial = check_single_partial(partial_sites, in_matrix, out_matrix, distinct_values, shared_values)
+            confirmed[1] = confirmed_partial
+            out_compatible[1] = out_compatible_partial
+        
+        # concept has no Single-Partial ruleset or it can't confirm all concept sequences
+        if not confirmed[1].all():
+            
+            # Concept can be solved by Composite ruleset?
+            # has a set of type-3 sites that can reject all outsider sequences
+            if has_type[3] and not confirmed_partial.all():
+                # get composite rule, check if it can reject all outsider sequences
+                composite_sites, composite_values, out_compatible_composite = get_composite(types, shared_values, out_matrix)
+                out_compatible[2] = out_compatible_composite
+                if not out_compatible_composite.any():
+                    confirmed[2] = True
+    # pack rulesets
+    rules_full = {'sites':full_sites, 'values':full_values}
+    rules_partial = {'sites':partial_sites, 'values':partial_values}
+    rules_composite = {'sites':composite_sites, 'values':composite_values}
+    return rules_full, rules_partial, rules_composite, confirmed, out_compatible
+    
+def learn_concept_rules(matrix, tax_sequences):
+    # detect distinct & shared values
+    distinct_vals, distinct_vals_encoded, distinct_counts, shared_vals, shared_vals_encoded, shared_counts = get_distinct_shared(matrix, tax_sequences)
+    
+    # typify sites
+    site_types, type_summmary = get_site_types(matrix,
+                                               distinct_vals,
+                                               distinct_counts,
+                                               shared_vals,
+                                               shared_counts)
+    
+    # identify single rules
+    single_whole, single_partial = get_single_rules(matrix,
+                                                    tax_sequences,
+                                                    site_types,
+                                                    distinct_vals,
+                                                    shared_vals)
+    
+    # check classification efficiency
+    confirmed, in_compatible, in_missed, single_out_compatible = check_single(single_whole,
+                                                                              single_partial,
+                                                                              matrix,
+                                                                              tax_sequences,
+                                                                              distinct_vals_encoded,
+                                                                              shared_vals_encoded)
+    
+    # generate composite rule if single rules cant reject all outsiders or confirm all sequences
+    composite = {}
+    out_compatible = single_out_compatible
+    if len(out_compatible) > 0 or len(confirmed) < len(in_compatible):
+        # get composite rule & update compatible outsider sequences
+        composite = get_composite_rule(matrix,
+                                       tax_sequences,
+                                       shared_vals_encoded,
+                                       site_types)
+    
+        composite_out_compatible = check_composite(composite,
+                                                   matrix,
+                                                   tax_sequences,
+                                                   shared_vals_encoded,
+                                                   out_compatible)
+        out_compatible = np.intersect1d(single_out_compatible, composite_out_compatible)
+        if len(out_compatible) == 0:
+            confirmed = tax_sequences
+    
+    return single_whole, single_partial, composite, confirmed, in_compatible, in_missed, out_compatible
+# confirmed, in_compatible, in_missed, out_compatible = learn_concept_rules(encoded, tax_seqs)
+# single_whole, single_partial, composite, confirmed, in_compatible, in_missed, out_compatible = learn_concept_rules(encoded[:, sites], tax_seqs)
 #%%
 def get_distinct_vals(matrix, in_indexes):
     """
@@ -870,16 +1133,87 @@ class Concept:
         self.rules = np.concatenate((self.informative_sites, self.signal.index)).astype(int)
         self.rules_values = self.informative_values + self.signal.values.tolist()
         self.rules_encoded = encode_rule_vals(self.rules_values)
+
+def parse_ruleset(**rules):
+    origin_set = []
+    rule_sites = []
+    rule_values = []
+    for origin, ruleset in rules.items():
+        origin_set.append(np.full(len(ruleset['sites']), origin))
+        rule_sites.append(ruleset['sites'])
+        rule_values.append(ruleset['values'])
+    origin_set = np.concatenate(origin_set)
+    rule_sites = np.concatenate(rule_sites)
+    rule_values = np.concatenate(rule_values, axis=1)
+    return origin_set, rule_sites, rule_values
+
+class Concept0:
+    def __init__(self, name, rank=None):
+        self.name = name
+        self.rank = rank
+        self.confirmed = [None, None, None]
+        self.out_compatible = [None, None, None]
+        self.solved = 'No'
+        self.solved_by = 'None'
     
-    def learn_rules(self, matrix, concept_sequences, lineage_tab):
+    @property
+    def confirmed_full(self):
+        return self.sequences[self.confirmed[0]]
+    @property
+    def confirmed_partial(self):
+        return self.sequences[self.confirmed[1]]
+    @property
+    def confirmed_composite(self):
+        return self.sequences[self.confirmed[2]]
+    @property
+    def confirmed_all(self):
+        return self.sequences[self.confirmed.any(axis=0)]
+    
+    @property
+    def compatible_full(self):
+        return self.out_sequences[self.out_compatible[0]]
+    @property
+    def compatible_partial(self):
+        return self.out_sequences[self.out_compatible[1]]
+    @property
+    def compatible_composite(self):
+        return self.out_sequences[self.out_compatible[2]]
+    @property
+    def compatible_all(self):
+        return self.out_sequences[self.out_compatible.all(axis=0)]
+    
+    def learn(self, matrix, concept_sequences, lineage_tab):
+        self.sequences = concept_sequences
+        self.out_sequences = np.delete(np.arange(matrix.shape[0]), concept_sequences)
         
-        distinct_vals, distinct_vals_encoded, distinct_counts, shared_vals, shared_vals_encoded, shared_counts = get_distinct_shared(matrix, concept_sequences)
-        site_types, type_summmary = get_site_types(distinct_vals, distinct_counts, shared_vals, shared_counts)
+        self.full_rules, self.partial_rules, self.composite_rules, confirmed, out_compatible = learn_concept_rules0(matrix, concept_sequences)
+        self.confirmed = confirmed
+        self.out_compatible = out_compatible
         
-        # single full rules
-        get_single_rules(matrix, concept_sequences, site_types, distinct_vals, shared_vals)
+        confirmed_any = confirmed.any(axis=0)
         
-        # single partial rules
+        # check if the concept taxon is fully solved
+        if confirmed_any.any():
+            self.solved = 'Partial'
+            if confirmed_any.all():
+                self.solved = 'Full'
         
-        # composite rule
-        pass
+        # generate ruleset that best solves the concept
+        confirmed_all = confirmed.all(axis=1)
+        # record which ruleset solves the concept taxon (if any)
+        if confirmed_all[0]:
+            self.solved_by = 'Single-Full'
+            origin_set, rule_sites, rule_values = parse_ruleset(Single_Full=self.full_rules)
+        elif confirmed_all[1]:
+            self.solved_by = 'Single-Partial'
+            origin_set, rule_sites, rule_values = parse_ruleset(Single_Partial=self.partial_rules)
+        elif confirmed_all[2]:
+            self.solved_by = 'Composite'
+            origin_set, rule_sites, rule_values = parse_ruleset(Composite=self.composite_rules)
+        elif np.any(~out_compatible[1:], axis=0).all():
+            self.solved_by = 'Single-Partial/Composite'
+            origin_set, rule_sites, rule_values = parse_ruleset(Single_Partial=self.partial_rules, Composite=self.composite_rules)
+        
+        self.ruleset_origin = origin_set
+        self.ruleset_sites = rule_sites
+        self.ruleset_values = rule_values

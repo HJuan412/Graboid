@@ -47,3 +47,21 @@ class ConceptLearner:
     def learn(self, threads=1):
         for rank in self.ranks.values():
             rank.learn(self.matrix, self.lineage_collapsed, self.lineage_flat, threads=threads)
+    
+    def classify(self, query, *ranks):
+        if len(ranks) == 0:
+            ranks = self.ranks.keys()
+        
+        signals = {}
+        called_taxa = {}
+        for rk in ranks:
+            rank = self.ranks[rk]
+            rk_calls, rk_signals = rank.classify(query)
+            
+            # filter out taxa with no calls (signal value of 1)
+            rk_calls['Sum'] = rk_calls.sum(axis=1)
+            called_taxa[rk] = rk_calls
+            signals[rk] = rk_signals
+        signals = pd.concat(signals, axis=1)
+        called_taxa = pd.concat(called_taxa, axis=1)
+        return called_taxa, signals

@@ -288,3 +288,7 @@ class Concept:
             self.solved = 'Full'
         elif len(self.confirmed_seqs) > 0 or len(self.out_compatible_seqs) < len(self.out_sequences):
             self.solved = 'Partial'
+    
+    def get_signal(self, query):
+        signal_values = (query[:, self.rule_sites] & self.rule_values).any(axis=2).sum(axis=1).astype(np.int16)
+        return signal_values

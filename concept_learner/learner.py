@@ -59,6 +59,7 @@ class ConceptLearner:
             rk_calls, rk_signals = rank.classify(query)
             
             # filter out taxa with no calls (signal value of 1)
+            rk_calls.columns = pd.MultiIndex.from_product([['Taxa'], rk_calls.columns])
             rk_calls['Sum'] = rk_calls.sum(axis=1)
             called_taxa[rk] = rk_calls
             signals[rk] = rk_signals

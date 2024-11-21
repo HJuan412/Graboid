@@ -125,7 +125,7 @@ class Rank:
         self.get_confusion(lineage_tab[self.name])
     
 
-    def classify(self, query):
+    def classify(self, query, clear_multi=True):
         # calculate signals for every taxon/query
         rank_signals = {}
         for tax, concept in self.taxa.items():
@@ -135,21 +135,22 @@ class Rank:
         # filter out taxa with no calls (signal value of 1)
         called_taxa = rank_signals.loc[:, (rank_signals == 1).any(axis=0)] == 1
         
-        # find queries with multiple taxon calls for the current rank
-        rank_multihits = called_taxa.loc[called_taxa.sum(axis=1) > 1]
-        
-        # check for fully solved taxon calls in multihit queries
-        solved_tab = pd.DataFrame(False, index=rank_multihits.index, columns=rank_multihits.columns)
-        for tax in solved_tab.columns:
-            try:
-                if self[tax].solved == 'Full':
-                    solved_tab[tax] = True
-            except KeyError:
-                pass
-        # clear partially solved taxa sharing multihit with fully solved taxa
-        solved_tab = solved_tab & rank_multihits
-        solved_tab = solved_tab.loc[solved_tab.any(axis=1)]
-        # update call table
-        called_taxa.loc[solved_tab.index] = solved_tab.values
+        if clear_multi:
+            # find queries with multiple taxon calls for the current rank
+            rank_multihits = called_taxa.loc[called_taxa.sum(axis=1) > 1]
+            
+            # check for fully solved taxon calls in multihit queries
+            solved_tab = pd.DataFrame(False, index=rank_multihits.index, columns=rank_multihits.columns)
+            for tax in solved_tab.columns:
+                try:
+                    if self[tax].solved == 'Full':
+                        solved_tab[tax] = True
+                except KeyError:
+                    pass
+            # clear partially solved taxa sharing multihit with fully solved taxa
+            solved_tab = solved_tab & rank_multihits
+            solved_tab = solved_tab.loc[solved_tab.any(axis=1)]
+            # update call table
+            called_taxa.loc[solved_tab.index] = solved_tab.values
         
         return called_taxa, rank_signals

@@ -61,7 +61,7 @@ def survey(taxon, marker, max_attempts=3):
             logger.warning(f'Download of {taxon} {marker} interrupted (Exception: {excp}), {max_attempts - attempt} attempts remaining')
             attempt += 1
             time.sleep(3)
-    raise Exception('Failed to perform survey after {max_attempts} attempts.')
+    raise Exception(f'Failed to perform survey after {max_attempts} attempts.')
 
 def acc_slicer(acc_list, chunksize):
     # slice the list of accessions into chunks
@@ -90,18 +90,17 @@ def retrieve(accs, tries=3, tag=0):
     
     # generate seq records and retrieve taxids
     seqs = []
-    taxids = []
-    for acc, seq in zip(accs, seq_recs):
-        seqs.append(SeqRecord(id=acc, seq = Seq(seq['TSeq_sequence']), description = ''))
-        taxids.append(seq['TSeq_taxid'])
-    taxids = pd.Series(taxids, index=accs)
+    taxids = pd.Series()
+    for record in seq_recs:
+        seqs.append(SeqRecord(id=record['TSeq_accver'], seq = Seq(record['TSeq_sequence']), description = ''))
+        taxids[record['TSeq_accver']] = record['TSeq_taxid']
     return seqs, taxids, failed
 
 def retrieve_pass(acc_list, out_seqs, out_taxs, chunk_size=500, max_attempts=3, workers=1):
     # perform a retrieval pass, returns list of failed records
     # downloads are done in parallel
     failed_accs = []
-    n_chunks = np.ceil(len(acc_list) / chunk_size)
+    n_chunks = int(np.ceil(len(acc_list) / chunk_size))
     # attempt to retrieve data
     with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
         futures = [executor.submit(retrieve, chunk, max_attempts, f'{idx+1} of {n_chunks}') for idx, chunk in enumerate(acc_slicer(acc_list, chunk_size))]
@@ -127,6 +126,7 @@ def fetch(acc_list, out_dir, tmp_dir, warn_dir, chunk_size=500, max_attempts=3, 
     failed = []
     # first pass
     failed0 = retrieve_pass(acc_list, out_seqs, out_taxs, chunk_size, max_attempts, workers)
+    print(f'Retrieved {len(acc_list) - len(failed0)} records in the first pass')
     if len(failed0) > 0:
         # second pass, skipped if there are no failed downloads
         failed = retrieve_pass(failed0, out_seqs, out_taxs, chunk_size. max_attempts, workers)

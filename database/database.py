@@ -23,7 +23,7 @@ from . import fetch_NCBI
 from . import fetch_tools
 # from mapping import director as mp
 # from mapping import matrix
-from Graboid.mapping import mapping as mpp
+from mapping import mapping as mpp
 
 #%% set logger
 logger = logging.getLogger('Graboid.database')
@@ -184,7 +184,7 @@ def make_main(db_dir,
     set_entrez(email, apikey)
     
     # check sequences in ref_seq
-    mpp.check_ref(guide_file)
+    mpp.check_guide(guide_file)
     
     # make database directory tree, copy guide file
     print('Setting up working directory...')
@@ -209,7 +209,7 @@ def make_main(db_dir,
     print('Building blast reference database...')
     guide_db = f'{guide_dir}/guide_db'
     guide_header = mpp.makeblastdb(guide_file, guide_db)
-    guide_len = mpp.get_guide_len(guide_header)
+    guide_len = mpp.get_guide_len(guide_db)
     print('Building map...')
     map_prefix = f'{db_dir}/reference'
     map_matrix_file, map_acc_file, map_nrows, map_ncols = mpp.build_map(db_seqs, guide_db, map_prefix, evalue, threads)

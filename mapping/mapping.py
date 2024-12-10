@@ -44,14 +44,14 @@ def check_fasta(fasta_file):
             nseqs += 1
     return nseqs
 
-def check_ref(ref_file):
+def check_guide(ref_file):
     nseqs = check_fasta(ref_file)
     if nseqs > 1:
-        raise Exception(f'Reference file must contain ONE sequence. File {ref_file} contains {nseqs}')
+        raise Exception(f'Guide file must contain ONE sequence. File {ref_file} contains {nseqs}')
 
 def makeblastdb(guide_file, db_prefix):
     # check that reference file is valid
-    check_ref(guide_file)
+    check_guide(guide_file)
     guide_header = get_header(guide_file)
     
     # build the reference BLAST database

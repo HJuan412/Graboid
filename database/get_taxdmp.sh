@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # create out dir (if needed)
-mkdir $1
+mkdir -p $1
 # retrieve taxdmp file
 wget -O $1/taxdmp.zip -t 3 https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdmp.zip
 

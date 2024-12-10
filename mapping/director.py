@@ -46,34 +46,40 @@ def check_ref(ref_file):
             raise Exception(f'Reference file must contain ONE sequence. File {ref_file} contains {nseqs}')
     return marker_len
             
-def build_blastdb(ref_seq, db_dir, clear=False, logger=map_logger):
+def build_blastdb(ref_seq, db_dir):
+    """
+    Build a blast database from a reference sequence.
+
+    Parameters
+    ----------
+    ref_seq : str
+        Path to the file to build the database from. Must contain a single sequence.
+    db_dir : str
+        Path to the directory to contain the generated database files.
+
+    Returns
+    -------
+    db_name : str
+        Path and prefix of the generated database files.
+    ref_len : int
+        Length of the reference sequence.
+    ref_header : str
+        Header of the reference sequence.
+
+    """
     # build a blast database
     # ref_seq : fasta file containing the reference sequences
-    # db_dir : directory to where the generated db files will be stored
-    # clear : overwrite existing db files
     
-    # check database directory
-    try:
-        db_name = blast.check_db_dir(db_dir)
-        # base exists 
-        if clear:
-            logger.info(f'Overwriting database {db_name} using file {ref_seq}')
-        else:
-            logger.info('A blast database of the name {db_name} already exists in the specified route. To overwrite it run this function again with clear set as True')
-            return
-    except Exception:
-        db_name = db_dir + '/db'
-    # clear previous db_files (if present)
-    for file in glob(db_dir + '/*.n'):
-        os.remove(file)
+    db_name = f'{db_dir}/db'
+    
     # check that reference file is valid
-    marker_len = check_ref(ref_seq)
+    ref_len = check_ref(ref_seq)
     ref_header = get_header(ref_seq)
+    
     # build the blast database
     blast.makeblastdb(ref_seq, db_name)
-    logger.info(f'Generated blast databse from reference sequence "{ref_header}" of length {marker_len} bp')
-    logger.info(f'Blast database was built using the file {ref_seq} and stored in directory {db_dir}')
-    return marker_len
+    
+    return db_name, ref_len, ref_header
 
 #%% classes
 class Director:

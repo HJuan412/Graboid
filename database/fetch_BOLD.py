@@ -12,44 +12,44 @@ import logging
 import numpy as np
 import os
 import pandas as pd
+import re
 import time
 import urllib3
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
-from database.fetch_tools import unfold_lineage
+
+from . import fetch_tools
 
 logger = logging.getLogger('Graboid.database.BOLD')
 
 #%% Retrieve records from the BOLD database
-def fetch_in(taxon, marker, out_dir, max_attempts=3):
-    """
-    Retrieve records matching the cross-search for the given taxon-marker
+"""
+Retrieve records matching the cross-search for the given taxon-marker
 
-    Parameters
-    ----------
-    taxon : str
-        Taxon to look for.
-    marker : str
-        Marker to look for.
-    out_dir : str
-        Path to the directory to contain the retrieved files.
-    max_attempts : int, optional
-        Number of attempts to perform. The default is 3.
+Parameters
+----------
+taxon : str
+    Taxon to look for.
+marker : str
+    Marker to look for.
+out_dir : str
+    Path to the directory to contain the retrieved files.
+max_attempts : int, optional
+    Number of attempts to perform. The default is 3.
 
-    Raises
-    ------
-    Exception
-        Abort operation after the given amount of failed requests.
+Raises
+------
+Exception
+    Abort operation after the given amount of failed requests.
 
-    Returns
-    -------
-    out_file : str
-        Path to the file containing the retrieved records.
+Returns
+-------
+out_file : str
+    Path to the file containing the retrieved records.
 
-    """
-    os.makedirs(out_dir, exist_ok=True)
-    out_file = f'{out_dir}/BOLD.records'
+"""
+def fetch_in(taxon, marker, out_file, max_attempts=3):
     
     attempt = 1
     while attempt <= max_attempts:
@@ -91,6 +91,8 @@ def postprocess_data(source_file, exclude):
         List of extracted sequence records.
     tax_subtab : pandas.DataFrame
         DataFrame containing the taxonomic data from the selected records.
+    nseqs : int
+        Number of records retrieved from the BOLD database.
 
     """
     
@@ -108,69 +110,60 @@ def postprocess_data(source_file, exclude):
     records = []
     for acc, seq in seq_subtab.iteritems():
         records.append(SeqRecord(id=acc, seq = Seq(seq.replace('-', '')), description = ''))
-    
-    return records, tax_subtab
+    nseqs = len(seq_subtab)
+    return records, tax_subtab, nseqs
 
-def fetch(taxon, marker, out_dir, exclude=None, tmp_dir=None, warn_dir=None, max_attempts=3, rm_temp=True):
-    """
-    Retrieve sequence and taxonomy data from the BOLD repository.
-    Make two download attempts.
-    Generates 2 files:
-        seq_file: contains the sequence data in fasta format.
-        tax_file: contains a table with the taxonomic data of the selected records
+"""
+Retrieve sequence and taxonomy data from the BOLD repository.
+Make two download attempts.
+Generates 2 files:
+    seq_file: contains the sequence data in fasta format.
+    tax_file: contains a table with the taxonomic data of the selected records
 
-    Parameters
-    ----------
-    taxon : str
-        Taxon to look for.
-    marker : str
-        Marker to look for.
-    out_dir : str
-        Path to the directory to contain the generated files.
-    exclude : list
-        List of accession codes to be excluded from the source file (already retrieved from NCBI).
-    tmp_dir : str, optional
-        Path to the directory to contain the temporal files. If none is given, temporal files will be stored in the output directory.
-    warn_dir : str, optional
-        Path to the directory to contain the warning file. If none is given, the warning file is stored in the output directory.
-    max_attempts : int, optional
-        Number of attempts to perform. The default is 3.
-    rm_temp : bool, optional
-        Delete temporary record file at the end of the task. The default is True.
+Parameters
+----------
+taxon : str
+    Taxon to look for.
+marker : str
+    Marker to look for.
+out_dir : str
+    Path to the directory to contain the generated files.
+exclude : list
+    List of accession codes to be excluded from the source file (already retrieved from NCBI).
+tmp_dir : str, optional
+    Path to the directory to contain the temporal files. If none is given, temporal files will be stored in the output directory.
+warn_dir : str, optional
+    Path to the directory to contain the warning file. If none is given, the warning file is stored in the output directory.
+max_attempts : int, optional
+    Number of attempts to perform. The default is 3.
+rm_temp : bool, optional
+    Delete temporary record file at the end of the task. The default is True.
 
-    Raises
-    ------
-    Exception
-        Raise exception if no record can be retrieved.
+Raises
+------
+Exception
+    Raise exception if no record can be retrieved.
 
-    Returns
-    -------
-    out_seqs : str
-        Path to the generated sequence file.
-    out_taxs : str
-        Path to the generated taxonomy file.
+Returns
+-------
+out_seqs : str
+    Path to the generated sequence file.
+out_taxs : str
+    Path to the generated taxonomy file.
+nseqs : int
+    Number of records retrieved from the BOLD database.
 
-    """
-    
-    # prepare output directory & files
-    os.makedirs(out_dir, exist_ok=True)
-    if tmp_dir is None:
-        tmp_dir = out_dir
-    else:
-        os.makedirs(tmp_dir, exist_ok=True)
-    if warn_dir is None:
-        warn_dir = out_dir
-    else:
-        os.makedirs(warn_dir, exist_ok=True)
-    out_seqs = f'{out_dir}/NCBI.seqs'
-    out_taxs = f'{out_dir}/NCBI.tax'
-    
+"""
+def fetch(taxon, marker, out_dir, tmp_dir, warn_dir, exclude=None, max_attempts=3, rm_temp=True, db_name='BOLD'):
+    out_seqs = f'{out_dir}/{db_name}.seqs'
+    out_taxs = f'{out_dir}/{db_name}.taxs'
+    records_file = f'{tmp_dir}/BOLD.records'
     # Make two download passes, only give up when a sequence chunk fails to be retrieved both times
     done=False
     # first pass
     for pss in ('first', 'second'):
         try:
-            tmp_file = fetch_in(taxon, marker, tmp_dir, max_attempts)
+            tmp_file = fetch_in(taxon, marker, records_file, max_attempts)
             done = True
             break
         except Exception as excp:
@@ -179,7 +172,7 @@ def fetch(taxon, marker, out_dir, exclude=None, tmp_dir=None, warn_dir=None, max
         raise Exception('Failed to retrieve sequences from BOLD database.')
     
     # extract sequence and taxonomic data
-    records, tax_tab = postprocess_data(tmp_file, exclude)
+    records, tax_tab, nseqs = postprocess_data(records_file, exclude)
     logger.info(f'Retrieved {len(records)} sequence records from the BOLD database.')
     
     # save results
@@ -189,10 +182,10 @@ def fetch(taxon, marker, out_dir, exclude=None, tmp_dir=None, warn_dir=None, max
     if rm_temp:
         os.remove(tmp_file)
         
-    return out_seqs, out_taxs
+    return out_seqs, out_taxs, nseqs
 
 #%% Process taxonomy data
-def parse_source_tax(tax_file, *ranks):
+def parse_source_tax(tax_file, ranks):
     """
     Extract the relevant taxonomc data from the taxonomy table retrieved from
     the BOLD database.
@@ -201,7 +194,7 @@ def parse_source_tax(tax_file, *ranks):
     ----------
     tax_file : str
         Path to the file containing the retrieved taxonomy data.
-    *ranks : str
+    ranks : str
         Ranks to extract from the taxonomy table.
 
     Raises
@@ -251,7 +244,7 @@ def get_acc_taxids(src_tax, names_tab):
     acc_taxids = names_tab.reset_index().set_index('TaxId').loc[lowest_taxa.values].set_index(src_tax.index).sciName
     return acc_taxids
 
-def build_lineage_table(taxid_tab, nodes_tab, *ranks):
+def build_lineage_table(taxid_tab, nodes_tab, ranks):
     """
     Rebuild the lineage for each taxon present in the records.
     Include lineages of upper taxa.
@@ -263,7 +256,7 @@ def build_lineage_table(taxid_tab, nodes_tab, *ranks):
         DataFrame containing the 3 last taxa for each record.
     nodes_tab : pandas.DataFrame
         DataFrame containing each taxon's parent TaxId and rank.
-    *ranks : str
+    ranks : str
         Ranks to be included in the lineage table.
     
     Returns
@@ -275,7 +268,7 @@ def build_lineage_table(taxid_tab, nodes_tab, *ranks):
     
     """
     # unfold lineages
-    lineages = [unfold_lineage(taxid, nodes_tab, *ranks) for taxid in taxid_tab.unique()]
+    lineages = [fetch_tools.unfold_lineage(taxid, nodes_tab, ranks) for taxid in taxid_tab.unique()]
     lineages = pd.DataFrame(lineages, index = taxid_tab.unique())[list(ranks)]
     
     # some records have an assigned taxonomy at a lower rank than the ones specified in ranks
@@ -306,10 +299,10 @@ def build_taxonomy_table(acc_taxids, real_taxids):
 
 def build_name_table(lineage_tab, names_tab):
     # build the dataframe containing the TaxId-Scientific name pairs
-    names = names_tab.loc[np.unique(lineage_tab), 'TaxId']
+    names = names_tab.loc[np.unique(lineage_tab)]
     return names
 
-def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, *ranks):
+def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, ranks):
     """
     Generate the taxonomy, lineage, and names tables for the generated records.
 
@@ -323,7 +316,7 @@ def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, *ranks):
         Path to the file containing the NCBI TaxId:Scientific name pairs.
     nodes_tab : str
         Path to the file containing the cladistic information for each taxon.
-    *ranks : str
+    ranks : str
         Ranks to be included in the lineage table.
 
     Returns
@@ -342,12 +335,15 @@ def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, *ranks):
     taxonomy_file=f'{out_dir}/BOLD.taxonomy'
     name_file=f'{out_dir}/BOLD.names'
     
+    # load names and nodes tables
+    names_tab, nodes_tab = fetch_tools.read_taxdmp(names_tab, nodes_tab)
+    
     # parse retrieved taxonomy data
-    source_taxonomy = parse_source_tax(tax_source, *ranks)
+    source_taxonomy = parse_source_tax(tax_source, ranks)
     acc_taxids = get_acc_taxids(source_taxonomy, names_tab)
     
     # build taxonomy tables
-    lineages, real_taxids = build_lineage_table(acc_taxids, nodes_tab, *ranks)
+    lineages, real_taxids = build_lineage_table(acc_taxids, nodes_tab, ranks)
     taxonomy_table = build_taxonomy_table(acc_taxids, real_taxids)
     name_table = build_name_table(lineages, names_tab)
     
@@ -359,52 +355,69 @@ def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, *ranks):
     return lineage_file, taxonomy_file, name_file
 
 #%%
-def retrieve_data(taxon, marker, out_dir, names_tab, nodes_tab, exclude=None, tmp_dir=None, warn_dir=None, max_attempts=3, rm_temp=True, *ranks):
-    """
-    Retrieve sequence and taxonomy data from the BOLD database.
+"""
+Retrieve sequence and taxonomy data from the BOLD database.
 
-    Parameters
-    ----------
-    taxon : str
-        Taxon to look for.
-    marker : str
-        Marker to look for.
-    out_dir : str
-        Path to the directory to contain the generated files.
-    names_tab : str
-        Path to the file containing the NCBI TaxId:Scientific name pairs.
-    nodes_tab : str
-        Path to the file containing the cladistic information for each taxon.
-    exclude : list
-        List of accession codes to be excluded from the source file (already retrieved from NCBI).
-    tmp_dir : str, optional
-        Path to the directory to contain the temporal files. If none is given, temporal files will be stored in the output directory.
-    warn_dir : str, optional
-        Path to the directory to contain the warning file. If none is given, the warning file is stored in the output directory.
-    max_attempts : int, optional
-        Number of attempts to perform. The default is 3.
-    rm_temp : bool, optional
-        Delete temporary record file at the end of the task. The default is True.
-    *ranks : str
-        Ranks to extract from the taxonomy table.
+Parameters
+----------
+taxon : str
+    Taxon to look for.
+marker : str
+    Marker to look for.
+out_dir : str
+    Path to the directory to contain the generated files.
+names_tab : str
+    Path to the file containing the NCBI TaxId:Scientific name pairs.
+nodes_tab : str
+    Path to the file containing the cladistic information for each taxon.
+exclude : list
+    List of accession codes to be excluded from the source file (already retrieved from NCBI).
+tmp_dir : str, optional
+    Path to the directory to contain the temporal files. If none is given, temporal files will be stored in the output directory.
+warn_dir : str, optional
+    Path to the directory to contain the warning file. If none is given, the warning file is stored in the output directory.
+max_attempts : int, optional
+    Number of attempts to perform. The default is 3.
+rm_temp : bool, optional
+    Delete temporary record file at the end of the task. The default is True.
+ranks : str
+    Ranks to extract from the taxonomy table.
 
-    Returns
-    -------
-    out_seqs : str
-        Path to the generated sequence file.
-    out_taxs : str
-        Path to the generated taxonomy file.
-    lineage_file : str
-        Path to the file containing the generated lineage table.
-    taxonomy_file : str
-        Path to the file containing the accession-TaxId mapping.
-    name_file : str
-        Path to the file containing the TaxId-Scientific name mapping.
+Returns
+-------
+out_seqs : str
+    Path to the generated sequence file.
+out_taxs : str
+    Path to the generated taxonomy file.
+lineage_file : str
+    Path to the file containing the generated lineage table.
+taxonomy_file : str
+    Path to the file containing the accession-TaxId mapping.
+name_file : str
+    Path to the file containing the TaxId-Scientific name mapping.
+nseqs : int
+    Number of records retrieved from the BOLD database.
 
-    """
+"""
+def retrieve_data(taxon,
+                  marker,
+                  out_dir,
+                  names_tab,
+                  nodes_tab,
+                  tmp_dir,
+                  warn_dir,
+                  exclude=None,
+                  max_attempts=3,
+                  rm_temp=True,
+                  ranks=['phylum', 'class', 'order', 'family', 'genus', 'species'],
+                  db_name='BOLD'):
+    # ensure directory names are properly formatted
+    out_dir = re.sub('/$', '', out_dir)
+    tmp_dir = re.sub('/$', '', tmp_dir)
+    warn_dir = re.sub('/$', '', warn_dir)
     # retrieve data
-    out_seqs, out_taxs = fetch(taxon, marker, out_dir, exclude, tmp_dir, warn_dir, max_attempts, rm_temp)
+    out_seqs, out_taxs, nseqs = fetch(taxon, marker, out_dir, exclude, tmp_dir, warn_dir, max_attempts, rm_temp, db_name)
     
     # generate taxonomy files
-    lineage_file, taxonomy_file, name_file = arrange_taxonomy(out_dir, out_taxs, names_tab, nodes_tab, *ranks)
-    return out_seqs, out_taxs, lineage_file, taxonomy_file, name_file
+    lineage_file, taxonomy_file, name_file = arrange_taxonomy(out_dir, out_taxs, names_tab, nodes_tab, ranks)
+    return out_seqs, out_taxs, lineage_file, taxonomy_file, name_file, nseqs

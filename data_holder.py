@@ -179,11 +179,13 @@ class R(Data):
         None.
 
         """
+
         try:
             with open(f'{ref_dir}/meta.json', 'r') as handle:
                 meta = json.load(handle)
         except FileNotFoundError:
             raise Exception('Meta file not found, verify that the given reference directory is a graboid database.')
+
         # load map files
         self.map, self.accs, self.bounds, self.coverage, self.coverage_norm = load_map(meta['map_mat_file'], meta['map_acc_file'])
         
@@ -434,6 +436,7 @@ class DataHolder:
         None.
 
         """
+        
         self.Q = Q()
         self.Q.load(qry_file,
                     qry_dir,

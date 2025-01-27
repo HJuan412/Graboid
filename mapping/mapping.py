@@ -44,10 +44,18 @@ def check_fasta(fasta_file):
             nseqs += 1
     return nseqs
 
-def check_guide(ref_file):
-    nseqs = check_fasta(ref_file)
+def check_guide(guide_file):
+    nseqs = 0
+    guide_len = 0
+    with open(guide_file, 'r') as fasta_handle:
+        for title, seq in sfp(fasta_handle):
+            nseqs += 1
+            guide_len = len(seq)
+            if nseqs > 1:
+                break
     if nseqs != 1:
-        raise Exception(f'Guide file must contain ONE sequence. File {ref_file} contains {nseqs}')
+        raise Exception(f'Guide file must contain ONE sequence. File {guide_file} contains {nseqs}')
+    return guide_len
 
 def makeblastdb(guide_file, db_prefix):
     # check that reference file is valid
@@ -121,7 +129,7 @@ def get_numseq(seq, trans_dict):
     numseq = np.array([trans_dict[base] for base in seq], dtype = np.int8)
     return numseq
 
-def build_map(seq_file, blast_db, prefix, evalue=0.005, threads=1, clip=False):    
+def build_map(seq_file, blast_db, prefix, marker_len, evalue=0.005, threads=1, clip=False):    
     """
     Align the given sequence file against a reference file using BLAST. Output
     alignment as a numberic matrix (npz file).
@@ -140,6 +148,8 @@ def build_map(seq_file, blast_db, prefix, evalue=0.005, threads=1, clip=False):
         Blast database to be used in the alignment (path + prefix).
     prefix : str
         Common name to the generated files (path + prefix).
+    marker_len: int
+        Length of the marker guide sequence.
     evalue : float, optional
         Evalue threshold for the blast alignment. The default is 0.005.
     threads : int, optional
@@ -153,10 +163,9 @@ def build_map(seq_file, blast_db, prefix, evalue=0.005, threads=1, clip=False):
         Generated alignment file (prefix + "__map.npz").
         Contans 3 arrays:
             matrix : alignment array (2D array)
+            accs : array of accession codes (1D array)
             bounds : 2 element array indicating the alignment bounds (1D array)
             coverage : array containing sequence coverage per position of the reference sequence (1D array)
-    acc_file : str
-        Accession list of sequences included in the alignment.
     nrows : int
         Number of rows present in the alignment matrix.
     ncols : int
@@ -165,7 +174,6 @@ def build_map(seq_file, blast_db, prefix, evalue=0.005, threads=1, clip=False):
     """
     blast_out = f'{prefix}.blast'
     matrix_file = f'{prefix}__map.npz'
-    acc_file = f'{prefix}__map.acc'
     
     # perform blast
     blast(seq_file, blast_db, blast_out, threads)
@@ -176,7 +184,6 @@ def build_map(seq_file, blast_db, prefix, evalue=0.005, threads=1, clip=False):
     upper = blast_tab.send.max()
     nrows = len(blast_tab.qseqid.unique())
     ncols = upper - lower
-    marker_len = get_guide_len(blast_db) # length of the guide sequence is taken as the marker's length
     
     print('Retrieving sequences...')
     sequences = read_seqfile(seq_file)
@@ -200,8 +207,6 @@ def build_map(seq_file, blast_db, prefix, evalue=0.005, threads=1, clip=False):
         matrix = matrix[:,lower:upper+1]
     
     # store output
-    # save the matrix along with the bounds and coverage array (coverage array done over the entire length of the marker reference)
-    np.savez_compressed(matrix_file, bounds=np.array([lower, upper]), matrix=matrix, coverage=coverage, marker_len=marker_len)
-    with open(acc_file, 'w') as list_handle:
-        list_handle.write('\n'.join(acclist))
-    return matrix_file, acc_file, nrows, ncols
+    # save the matrix along with the accession list and the bounds and coverage arrays (coverage array done over the entire length of the marker reference)
+    np.savez_compressed(matrix_file, bounds=np.array([lower, upper]), accs=np.array(acclist), matrix=matrix, coverage=coverage)
+    return matrix_file, nrows, ncols

@@ -209,4 +209,4 @@ def build_map(seq_file, blast_db, prefix, marker_len, evalue=0.005, threads=1, c
     # store output
     # save the matrix along with the accession list and the bounds and coverage arrays (coverage array done over the entire length of the marker reference)
     np.savez_compressed(matrix_file, bounds=np.array([lower, upper]), accs=np.array(acclist), matrix=matrix, coverage=coverage)
-    return matrix_file, nrows, ncols
+    return matrix_file, nrows, ncols, acclist

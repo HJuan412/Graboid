@@ -12,18 +12,19 @@ Director script for database creation, exporting & updating (maybe)
 import json
 import logging
 import os
+import pandas as pd
 import re
 import shutil
 from Bio import Entrez
 
 # graboid modules
-from . import fetch_BOLD
-from . import fetch_FASTA
-from . import fetch_NCBI
-from . import fetch_tools
+from Graboid.database import fetch_BOLD
+from Graboid.database import fetch_FASTA
+from Graboid.database import fetch_NCBI
+from Graboid.database import fetch_tools
 # from mapping import director as mp
 # from mapping import matrix
-from mapping import mapping as mpp
+from Graboid.mapping import mapping as mpp
 
 #%% set logger
 logger = logging.getLogger('Graboid.database')
@@ -113,6 +114,44 @@ def retrieve(out_dir,
                 db_seqs, db_lineages, db_taxonomy, db_names, db_nseqs = bold_seqs, bold_lineages, bold_taxonomy, bold_names, bold_nseqs
     return db_seqs, db_lineages, db_taxonomy, db_names, db_nseqs
 
+class Retriever:
+    def __init__(self, out_dir, tmp_dir, warn_dir):
+        self.out_dir = out_dir
+        self.tmp_dir = tmp_dir
+        self.warn_dir = warn_dir
+        # retrieve taxdmp
+        self.names_tab, self.nodes_tab = fetch_tools.get_taxdmp(tmp_dir)
+        
+    def get_local(self, fasta_file, tax_file, ranks=['phylum', 'class', 'order', 'family', 'genus', 'species'], db_name='reference'):
+        # retrieve records from fasta file
+        self.db_seqs, self.db_lineages, self.db_taxonomy, self.db_names, self.db_nseqs = fetch_FASTA.retrieve_data(fasta_file, tax_file, self.out_dir, self.names_tab, self.nodes_tab, ranks, db_name=db_name)
+        self.rank_counts = fetch_tools.count_ranks(self.db_taxonomy, self.db_lineages)
+    
+    def get_remote(self, taxon, marker, ncbi=True, bold=False, chunk_size=500, max_attempts=3, ranks=['phylum', 'class', 'order', 'family', 'genus', 'species'], db_name='reference', workers=1):
+        # retrieve records from repositories
+        bold_exclude = [] # 
+        if ncbi:
+            ncbi_out = self.tmp_dir if bold else self.out_dir
+            ncbi_name = 'NCBI' if bold else db_name
+            ncbi_seqs, ncbi_taxs, warn_failed, ncbi_lineages, ncbi_taxonomy, ncbi_names, ncbi_nseqs, bold_exclude = fetch_NCBI.retrieve_data(taxon, marker, ncbi_out, self.names_tab, self.nodes_tab, self.tmp_dir, self.warn_dir, chunk_size, max_attempts, ranks, workers, ncbi_name)
+            if not bold:
+                db_seqs, db_lineages, db_taxonomy, db_names, db_nseqs = ncbi_seqs, ncbi_lineages, ncbi_taxonomy, ncbi_names, ncbi_nseqs
+        if bold:
+            bold_out = self.tmp_dir if ncbi else self.out_dir
+            bold_name = 'BOLD' if ncbi else db_name
+            bold_seqs, bold_taxs, bold_lineages, bold_taxonomy, bold_names, bold_nseqs = fetch_BOLD.retrieve_data(taxon, marker, bold_out, self.names_tab, self.nodes_tab, self.tmp_dir, self.warn_dir, bold_exclude, max_attempts, ranks=ranks, db_name=bold_name)
+            
+            if ncbi:
+                db_seqs, db_nseqs = fetch_tools.merge_records(ncbi_seqs, bold_seqs, self.out_dir, db_name=db_name)
+                db_taxonomy, db_lineages, db_names = fetch_tools.merge_taxonomies(ncbi_taxonomy, ncbi_lineages, ncbi_names, bold_taxonomy, bold_lineages, bold_names, self.out_dir, db_name=db_name)
+            else:
+                db_seqs, db_lineages, db_taxonomy, db_names, db_nseqs = bold_seqs, bold_lineages, bold_taxonomy, bold_names, bold_nseqs
+        self.db_seqs = db_seqs
+        self.db_lineages = db_lineages
+        self.db_taxonomy = db_taxonomy
+        self.db_names = db_names
+        self.db_nseqs = db_nseqs
+        self.rank_counts = fetch_tools.count_ranks(self.db_taxonomy, self.db_lineages)
 """
 Build a graboid database using either online repositories or a local fasta file
 
@@ -158,6 +197,158 @@ apikey : str, optional
     NCBI API key.
 
 """
+class Constructor:
+    def __init__(self, email, apikey):
+        # set entrez api key
+        set_entrez(email, apikey)
+    
+    def setup(self, db_dir, guide_file):
+        # check sequences in ref_seq
+        self.marker_len = mpp.check_guide(guide_file)
+        
+        # make database directory tree, copy guide file
+        print('Setting up working directory...')
+        self.db_dir = db_dir
+        self.tmp_dir, self.warn_dir, self.guide_dir = make_db_dir(db_dir)
+        self.guide_file = re.sub('^', f'{self.guide_dir}/', re.sub('.*/', '', guide_file))
+        shutil.copyfile(guide_file, self.guide_file)
+        
+        # retrieve taxdmp
+        self.names_tab, self.nodes_tab = fetch_tools.get_taxdmp(self.tmp_dir)
+        
+        # add file handler for logger
+        fh = logging.FileHandler(f'{db_dir}/database.log')
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+    
+    def get_local(self, fasta_file, tax_file, ranks=['phylum', 'class', 'order', 'family', 'genus', 'species']):
+        self.fasta_file = fasta_file
+        self.tax_file = tax_file
+        self.ranks = ranks
+        
+        # retrieve records from fasta file
+        self.db_seqs, self.db_lineages, self.db_taxonomy, self.db_names, self.db_nseqs = fetch_FASTA.retrieve_data(fasta_file, tax_file, self.db_dir, self.names_tab, self.nodes_tab, ranks, db_name='reference')
+        self.rank_counts = fetch_tools.count_ranks(self.db_taxonomy, self.db_lineages)
+        self.description = f'Database built from file: {fasta_file}. {self.db_nseqs} sequences.'
+    
+    def get_remote(self, taxon, marker, ncbi=True, bold=False, chunk_size=500, max_attempts=3, ranks=['phylum', 'class', 'order', 'family', 'genus', 'species'], workers=1):
+        self.taxon = taxon
+        self.marker = marker
+        self.ncbi = ncbi
+        self.bold = bold
+        self.ranks = ranks
+        
+        # retrieve records from repositories
+        bold_exclude = [] # 
+        if ncbi:
+            ncbi_out = self.tmp_dir if bold else self.db_dir
+            ncbi_name = 'NCBI' if bold else 'reference'
+            ncbi_seqs, ncbi_taxs, warn_failed, ncbi_lineages, ncbi_taxonomy, ncbi_names, ncbi_nseqs, bold_exclude = fetch_NCBI.retrieve_data(taxon, marker, ncbi_out, self.names_tab, self.nodes_tab, self.tmp_dir, self.warn_dir, chunk_size, max_attempts, ranks, workers, ncbi_name)
+            if not bold:
+                db_seqs, db_lineages, db_taxonomy, db_names, db_nseqs = ncbi_seqs, ncbi_lineages, ncbi_taxonomy, ncbi_names, ncbi_nseqs
+        if bold:
+            bold_out = self.tmp_dir if ncbi else self.db_dir
+            bold_name = 'BOLD' if ncbi else 'reference'
+            bold_seqs, bold_taxs, bold_lineages, bold_taxonomy, bold_names, bold_nseqs = fetch_BOLD.retrieve_data(taxon, marker, bold_out, self.names_tab, self.nodes_tab, self.tmp_dir, self.warn_dir, bold_exclude, max_attempts, ranks=ranks, db_name=bold_name)
+            
+            if ncbi:
+                db_seqs, db_nseqs = fetch_tools.merge_records(ncbi_seqs, bold_seqs, self.db_dir, db_name='reference')
+                db_taxonomy, db_lineages, db_names = fetch_tools.merge_taxonomies(ncbi_taxonomy, ncbi_lineages, ncbi_names, bold_taxonomy, bold_lineages, bold_names, self.db_dir, db_name='reference')
+            else:
+                db_seqs, db_lineages, db_taxonomy, db_names, db_nseqs = bold_seqs, bold_lineages, bold_taxonomy, bold_names, bold_nseqs
+        self.db_seqs = db_seqs
+        self.db_lineages = db_lineages
+        self.db_taxonomy = db_taxonomy
+        self.db_names = db_names
+        self.db_nseqs = db_nseqs
+        self.rank_counts = fetch_tools.count_ranks(self.db_taxonomy, self.db_lineages)
+        self.description = f'Database built from search terms: {taxon} + {marker}. {self.db_nseqs} sequences.'
+    
+    def build_map(self, evalue=0.005, threads=1):
+        # build map
+        print('Beginning sequence mapping...')
+        print('Building blast reference database...')
+        self.guide_db = f'{self.guide_dir}/guide_db'
+        self.guide_header = mpp.makeblastdb(self.guide_file, self.guide_db)
+        self.guide_len = mpp.get_guide_len(self.guide_db)
+        print('Building map...')
+        map_prefix = f'{self.db_dir}/reference'
+        self.map_file, self.map_nrows, self.map_ncols, self.mapped_accs = mpp.build_map(self.db_seqs, self.guide_db, map_prefix, self.marker_len, evalue, threads)
+        print('Sequence mapping is done!')
+        self.rank_counts = fetch_tools.count_ranks(self.db_taxonomy, self.db_lineages, self.mapped_accs)
+    
+    def build_summ(self):
+        try:
+            source = self.guide_file
+        except:
+            source = []
+            if self.ncbi:
+                source.append('NCBI')
+            if self.bold:
+                source.append('BOLD')
+            source = ' '.join(source)
+        summ = pd.Series({'db_dir':self.db_dir,
+                          'guide_file':self.guide_file,
+                          'guide_length':self.marker_len,
+                          'data_source':source,
+                          'retrieved_seqs':self.db_nseqs,
+                          'aligned_seqs':self.map_nrows,
+                          'seq_file':self.db_seqs,
+                          'tax_file':self.db_taxonomy,
+                          'lineages_file':self.db_lineages,
+                          'names_file':self.db_names,
+                          'blast_db':self.guide_db,
+                          'map_file':self.map_file,
+                          'ranks':' '.join(self.ranks),
+                          'description':self.description})
+        summ = pd.concat([summ, pd.Series(self.rank_counts)])
+        summ.to_csv(f'{self.db_dir}/summary.csv')
+    
+    def build_local(self):
+        pass
+    def build_remote(self,
+                     db_dir,
+                     guide_file,
+                     taxon,
+                     marker,
+                     ncbi=True,
+                     bold=False,
+                     chunk_size=500,
+                     max_attempts=3,
+                     ranks=['phylum', 'class', 'order', 'family', 'genus', 'species'],
+                     evalue=0.005,
+                     threads=1):
+        self.setup(db_dir, guide_file)
+        self.get_remote(taxon, marker, ncbi, bold, chunk_size, max_attempts, ranks, workers=threads)
+        self.build_map(evalue, threads)
+        self.build_summ()
+
+class Loader:
+    def __init__(self, db_dir):
+        if not os.path.isdir(db_dir):
+            raise Exception(f'Database directory {db_dir} not found')
+        self.db_dir = db_dir
+        try:
+            self.summary = pd.read_csv(f'{db_dir}/summary.csv', index_col=0)
+        except FileNotFoundError:
+            raise (f'Could not find summary file in directory {db_dir}')
+        self.guide = self.summary['guide_file']
+        self.seqs = self.summary['seq_file']
+        self.taxonomy = self.summary['tax_file']
+        self.lineages = self.summary['lineages_file']
+        self.names = self.summary['names_file']
+        self.guide_db = self.summary['blast_db']
+        self.map = self.summary['map_file']
+        self.ranks = self.summary['ranks']
+    
+    def check_files(self):
+        files = 'guide seqs taxonomy lineages names map'.split()
+        for fl in files:
+            if not os.path.isfile(getattr(self, fl)):
+                raise Exception(f'Missing {fl} file!')
+    
+
 def make_main(db_dir,
               guide_file,
               ranks,

@@ -51,11 +51,14 @@ def unfold_lineage(taxid, node_tab, ranks):
 
     """
     lineage = {}
-    while len(lineage) < len(ranks) and node_tab.loc[taxid, 'Parent'] != 1:
-        rk = node_tab.loc[taxid, 'Rank']
-        if rk in ranks:
-            lineage[rk] = taxid
-        taxid = node_tab.loc[taxid, 'Parent']
+    try:
+        while len(lineage) < len(ranks) and node_tab.loc[taxid, 'Parent'] != 1:
+            rk = node_tab.loc[taxid, 'Rank']
+            if rk in ranks:
+                lineage[rk] = taxid
+            taxid = node_tab.loc[taxid, 'Parent']
+    except KeyError:
+        pass
     return lineage
 
 def count_seqs(fasta_file):
@@ -95,8 +98,11 @@ def merge_taxonomies(ncbi_tax, ncbi_lin, ncbi_nam, bold_tax, bold_lin, bold_nam,
     merged_nam.to_csv(out_nam)
     return out_tax, out_lin, out_nam
 
-def count_ranks(taxonomy_tab, lineage_tab):
-    tax_tab = pd.read_csv(taxonomy_tab, index_col=0).iloc[:,0]
+def count_ranks(taxonomy_tab, lineage_tab, acclist=[]):
+    tax_tab = pd.read_csv(taxonomy_tab, index_col=0)
+    if len(acclist) > 0:
+        tax_tab = tax_tab.loc[acclist]
+    tax_tab = tax_tab.iloc[:,0]
     lin_tab = pd.read_csv(lineage_tab, index_col=0).loc[tax_tab.values]
     rk_counts = {}
     for rk in lin_tab.columns:

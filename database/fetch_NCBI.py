@@ -20,7 +20,7 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
-from . import fetch_tools
+from Graboid.database import fetch_tools
 
 logger = logging.getLogger('Graboid.database.fetch_NCBI')
 
@@ -92,8 +92,11 @@ def retrieve(accs, tries=3, tag=0):
     seqs = []
     taxids = pd.Series()
     for record in seq_recs:
-        seqs.append(SeqRecord(id=record['TSeq_accver'], seq = Seq(record['TSeq_sequence']), description = ''))
-        taxids[record['TSeq_accver']] = record['TSeq_taxid']
+        try:
+            seqs.append(SeqRecord(id=record['TSeq_accver'], seq = Seq(record['TSeq_sequence']), description = ''))
+            taxids[record['TSeq_accver']] = record['TSeq_taxid']
+        except KeyError:
+            pass
     return seqs, taxids, failed
 
 def retrieve_pass(acc_list, out_seqs, out_taxs, chunk_size=500, max_attempts=3, workers=1):
@@ -246,6 +249,7 @@ def build_lineage_table(tax_file, nodes_tab, ranks):
     for col in lineages.columns:
         valid_idxs = ~lineages[col].isna().values
         real_taxids.loc[valid_idxs] = lineages.loc[valid_idxs, col].values
+    real_taxids = real_taxids.fillna(0).astype(int)
     
     # repeated records produced by records with lower rank taxonomic assignments, clear them
     lineages.index = real_taxids.values.astype(int)
@@ -257,7 +261,7 @@ def build_lineage_table(tax_file, nodes_tab, ranks):
             lineages.loc[tax, trail] = subtab[trail].iloc[0]
     lineages.sort_values(list(ranks)[::-1], inplace=True)
     lineages = lineages.fillna(0).astype(int)
-    return lineages, real_taxids.astype(int)
+    return lineages, real_taxids
 
 def build_taxonomy_table(tax_file, real_taxids):
     # build the dataframe containing the lowest valid taxId for each record

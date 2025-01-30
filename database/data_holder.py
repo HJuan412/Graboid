@@ -9,7 +9,6 @@ This script contains the data holder class used to load graboid databases and qu
 """
 
 #%% libraries
-import json
 import numpy as np
 import os
 import pandas as pd
@@ -18,22 +17,19 @@ import pandas as pd
 from mapping import mapping as mpp
 from preprocess import sequence_collapse, consensus_taxonomy
 #%% functions
-def load_map(map_file, acc_file):
+def load_map(map_file):
     # map_file: __map.npz file
-    # acc_file: __map.acc file
     
     # load a map file and the corresponding accession file
     # from npz file, extract: alignment map, bounds array, coverage array
     # calculate normalized coverage
-    # TODO: could incorporate accession list to npz file?
     map_ = np.load(map_file)
     matrix = map_['matrix']
     bounds = map_['bounds']
     coverage = map_['coverage']
     coverage_norm = coverage / coverage.max()
     # retrieve accession list
-    with open(acc_file, 'r') as acc_:
-        accs = acc_.read().splitlines()
+    accs = map_['accs']
     
     return matrix, accs, bounds, coverage, coverage_norm
 
@@ -179,26 +175,40 @@ class R(Data):
         None.
 
         """
-
+        
+        if not os.path.isdir(ref_dir):
+            raise Exception(f'Database directory {ref_dir} not found')
+        self.ref_dir = ref_dir
         try:
-            with open(f'{ref_dir}/meta.json', 'r') as handle:
-                meta = json.load(handle)
+            self.summary = pd.read_csv(f'{ref_dir}/summary.csv', index_col=0, header=None, skiprows=1)[1]
         except FileNotFoundError:
-            raise Exception('Meta file not found, verify that the given reference directory is a graboid database.')
+            raise (f'Could not find summary file in directory {ref_dir}')
+        
+        self.guide = self.summary['guide_file']
+        self.seqs = self.summary['seq_file']
+        self.tax_file = self.summary['tax_file']
+        self.lin_file = self.summary['lineages_file']
+        self.names_file = self.summary['names_file']
+        self.blast_db = self.summary['blast_db']
+        self.map_file = self.summary['map_file']
+        self.ranks = self.summary['ranks']
+        
+        files = 'guide seqs tax_file lin_file names_file map_file'.split()
+        for fl in files:
+            if not os.path.isfile(getattr(self, fl)):
+                raise Exception(f'Missing {fl} file!')
 
         # load map files
-        self.map, self.accs, self.bounds, self.coverage, self.coverage_norm = load_map(meta['map_mat_file'], meta['map_acc_file'])
+        self.map, self.accs, self.bounds, self.coverage, self.coverage_norm = load_map(self.map_file)
         
         # load taxonomy data
-        ref_tax = pd.read_csv(meta['tax_file'], names=['Accession', 'TaxId'], skiprows=[0])
+        ref_tax = pd.read_csv(self.tax_file, names=['Accession', 'TaxId'], skiprows=[0])
         self.y = ref_tax.set_index('Accession').loc[self.accs, 'TaxId'].to_numpy()
-        self.lineage_tab = pd.read_csv(meta['lineages_file'], index_col=0)
-        self.names_tab = pd.read_csv(meta['names_file'], index_col=0)['SciName']
+        self.lineage_tab = pd.read_csv(self.lin_file, index_col=0)
+        self.names_tab = pd.read_csv(self.names_file, index_col=0)['SciName']
         
         self.lineage = self.lineage_tab.loc[self.y] # subsection of lineage_tab corresponding to the reference instances
         
-        # load guide blast reference
-        self.blast_db = meta['guide_db']
         
         # apply coverage threshold
         self.filter_sites(min_coverage)

@@ -92,7 +92,7 @@ def get_nsites(sorted_sites, min_n=None, max_n=None, step_n=None, n=None):
         site_lists.append(sites)
         all_sites = np.concatenate((all_sites, sites))
     return site_lists
-
+        
 @nb.njit
 def get_entropy(array, omit_missing=True):
     valid_rows = array
@@ -112,31 +112,33 @@ def get_matrix_entropy(matrix, omit_missing=True):
     
     # maximum possible entropy is log2(num of classes)
     # fasta code has 15 possible classes (not counting gaps and missing values)
-    # most frequently 4 clases (acgt), log2(4) = 2
-    return (2-entropy) / 2 # 1 min entropy, 0 max entropy
+    # most frequently 4 classes (acgt), log2(4) = 2
+    entropy = (2-entropy) / 2 # 1 min entropy, 0 max entropy
+    return entropy
 
-def build_tax_series(tax_tab, ranks):
+def build_tax_series(tax_tab):
     # reformat taxonomy_table to facilitate per taxon entropy calculation
     # tax_series contains the positions (row indexes) of each taxon occurrence for every rank in the alignment matrix
     # index values are taxIds and are not unique, the number of appearances of each taxon equals the number of rows that belong to said taxon
     # tax_series contains no rank information
     
     # add index positions
-    tax_tab['idx'] = np.arange(len(tax_tab))
+    _tab = tax_tab.copy()
+    _tab['idx'] = np.arange(len(tax_tab))
     tax_series = []
     # extract index positions of each rank
-    for rk in ranks:
-        tax_series.append(tax_tab.set_index(rk)['idx'])
+    for rk in tax_tab.columns:
+        tax_series.append(_tab.set_index(rk)['idx'])
     # sort series (cluster taxa occurrences together) and remove unknown values (0)
     tax_series = pd.concat(tax_series).sort_index()
     tax_series.drop(index=0)
     
     return tax_series
     
-def per_tax_entropy(matrix, tax_tab, ranks, omit_missing=True):
+def per_tax_entropy(matrix, tax_tab, omit_missing=True):
     
     # builds entropy difference tab, columns : rank_idx, TaxID, records, bases..., n (number of records)
-    tax_series = build_tax_series(tax_tab, ranks)
+    tax_series = build_tax_series(tax_tab)
     
     entropy_array = []
     taxids = []
@@ -150,161 +152,36 @@ def per_tax_entropy(matrix, tax_tab, ranks, omit_missing=True):
     entropy_array = np.array(entropy_array)
     return entropy_array, taxids, tax_counts
 
-def get_ent_diff(matrix, tax_tab, ranks, omit_missing=True):
-    general_entropy = get_matrix_entropy(matrix, omit_missing)
-    tax_entropy, taxids, tax_counts = per_tax_entropy(matrix, tax_tab, ranks, omit_missing)
-    entropy_difference = tax_entropy - general_entropy
-    diff_tab = pd.DataFrame(entropy_difference, index=taxids)
-    diff_tab['n_taxa'] = tax_counts
-    return diff_tab
-    
-def get_gain(matrix, tax_tab):
-    gain_dict = {}
-    rows, cols = matrix.shape
-
-    for rk in tax_tab.columns:
-        gain = np.zeros(cols)
-        
-        for col_idx in range(cols):
-            col = matrix[:,col_idx]
-            for val in np.unique(col):
-                val_idxs = np.argwhere(col == val).flatten()
-                tax_array = tax_tab.iloc[val_idxs,:].loc[:,rk].values
-                
-                gain[col_idx] += (len(val_idxs)/rows) * get_entropy(tax_array)
-        
-        gain_dict[rk] = gain
-    
-    gain_tab = pd.DataFrame.from_dict(gain_dict, orient = 'index')
-    return gain_tab
-
-def extract_cols(matrix, cols):
-    # extract the position of each column specified in cols from every row in matrix
-    cols_submat = np.zeros((len(matrix), len(cols)), dtype = matrix.dtype)
-    for idx, row in enumerate(matrix):
-        cols_submat[idx] = row[np.isin(row, cols)]
-    return cols_submat
-#%%
-def build_entropy_difference_tab(matrix, accs, tax_tab, out_file, omit_missing=True, *ranks):
+def get_information_gain(matrix, tax_tab, omit_missing=False):
     """
-    Calculate entropy difference in the alignment for each rank for each taxon
-    for each position.
+    Calculate the information gain for each site (column) for each taxon.
+    Information gain for a given taxon in a given site is taken as the negative
+    of decrease of entropy in that site when the representatives of the taxon
+    in question are removed. High gain values mean the site is a good signal
+    for the taxon.
 
     Parameters
     ----------
     matrix : numpy.array
-        Alignment array.
-    accs : list
-        List of accession codes of the sequences present in the array.
+        2D array, contains the alignment data.
     tax_tab : pandas.DataFrame
-        Taxonomy table for the sequences in the alignment.
-    out_file : str
-        Destination path for the generated table.
-    omit_missing : bool, optional
-        Omit missing values in the entropy calculation for each position. The default is True.
-    *ranks : str
-        Ranks to be included in the information cuantification.
-
-    Raises
-    ------
-    Exception
-        Raise an exception if invalid ranks are given.
+        Dataframe containing the taxonomic classification for each sequence.
+        Each column of the dataframe correspond to a givenn taxonomic rank.
+    count_missing : bool, optional
+        Fake missing values into account for entropy calculations.
+        The default is False.
 
     Returns
     -------
-    None.
+    diff_tab : pandas.DataFrame
+        Table containing the information gain value for each taxon at each site.
+    tax_counts : pandas.Series
+        Series accounting the number of representative sequences in each taxon.
 
     """
-    # filter guide for the accs present in the alignment matrix
-    # matrix : generated alignment matrix
-    # accs : accession list obtained from mapper (contains the accessions of records that made into the matrix)
-    # tax_tab : table containing the taxonomic index assigned to each record
-    # guide : EXTENDED guide
-    
-    incorrect_rks = [rk for rk in ranks if not rk in tax_tab.columns]
-    if len(incorrect_rks):
-        raise Exception(f'Error: Given ranks [{" ".join(incorrect_rks)}] are not present in the taxonomy table')
-
-    tax_tab = tax_tab.loc[accs].copy()    
-    # build difference table
-    print('Calculating entropy differences...')
-    diff_tab = get_ent_diff(matrix, tax_tab, *ranks, omit_missing)
-    print('Done!')
-    diff_tab.to_csv(out_file)
-    
-class Selector:
-    def __init__(self, out_dir, ranks):
-        self.out_dir = out_dir
-        self.ranks = ranks
-        self.rk_dict = {rk:idx for idx, rk in enumerate(ranks)}
-        self.order_file = f'{out_dir}/order.npz'
-        self.diff_file = f'{out_dir}/diff.csv'
-    
-    def build_tabs(self, matrix, accs, tax_tab, guide):
-        # filter guide for the accs present in the alignment matrix
-        # matrix : generated alignment matrix
-        # accs : accession list obtained from mapper (contains the accessions of records that made into the matrix)
-        # tax_tab : table containing the taxonomic index assigned to each record
-        # guide : EXTENDED guide
-        taxids = tax_tab.loc[accs, 'TaxID'].values
-        tax_guide = guide.loc[taxids].reset_index(drop=True) # this table contains the full taxonomy of each SECUENCE
-        
-        # build difference table
-        print('Calculating entropy differences...')
-        diff_tab = get_ent_diff(matrix, tax_guide, self.ranks)
-        self.diff_tab = diff_tab
-        print('Done!')
-        # order bases by decreasing information difference
-        # ordered contains the placement of each column per row in the difference tab
-        # taxa is the difference tab index as a numpy array
-        print('Sorting columns by entropy difference...')
-        self.order_tab = np.flip(np.argsort(diff_tab.drop(columns='n').to_numpy(), 1), 1).astype(np.int16)
-        self.order_tax = np.array([diff_tab.index.get_level_values(0), diff_tab.index.get_level_values(1)], dtype=int).T
-        print('Done!')
-        # save data
-        np.savez_compressed(self.order_file,
-                            order = self.order_tab,
-                            taxs = self.order_tax)
-        self.diff_tab.to_csv(self.diff_file)
-    
-    def load_order_mat(self, file):
-        order_data = np.load(file)
-        self.order_tab = order_data['order']
-        self.order_tax = order_data['taxs']
-    
-    def load_diff_tab(self, file):
-        # remember that the last column of diff tab ('n') is the count of records for that taxon
-        self.diff_tab = pd.read_csv(file, index_col = [0, 1])
-    
-    def get_sites(self, n_range, rank, cols=None):
-        # for a given range of sites, generate a dictionary containing the new sites selected at each n
-        # used for exploring multiple n values in calibration and classification, (avoids repeating calculations)
-        if rank not in self.ranks:
-            raise Exception(f'Invalid rank {rank} not found in: {" ".join(self.ranks)}')            
-        self.selected_rank = rank
-        # get the selected rank's index
-        rk = self.rk_dict[rank]
-        # extract the rows corresponding to the given rank
-        rank_submat = self.order_tab[self.order_tax[:,0] == rk]
-        
-        # if no columns were specified, select among every column (YOU SHOULDN'T DO THIS)
-        col_submat = rank_submat
-        if not cols is None:
-            if min(cols) < 0 or max(cols) > self.order_tab.max():
-                raise Exception(f'Invalid column indexes, must be between 0 and {self.order_tab.max()}')
-            # get the specified columns
-            col_submat = extract_cols(rank_submat, cols)
-        
-        # sites dictionary will keep the selected sites specific for a given n (include the sites from the previous n values) 
-        sites = {}
-        # total_sites keeps account of sites that have already been incorporated
-        total_sites = np.array([], dtype = np.int8)
-        for n in n_range:
-            # get the best n sites for every row in col_submat, select all that are not already selected
-            n_sites = np.unique(col_submat[:, :n])
-            new_sites = n_sites[np.in1d(n_sites, total_sites, invert=True)]
-            # only update sites dictionary if new sites are incorporated for n
-            if len(new_sites) > 0:
-                sites[n] = new_sites
-                total_sites = np.concatenate([total_sites, new_sites])
-        return sites
+    general_entropy = get_matrix_entropy(matrix, omit_missing)
+    tax_entropy, taxids, tax_counts = per_tax_entropy(matrix, tax_tab, omit_missing)
+    entropy_difference = general_entropy - tax_entropy
+    diff_tab = pd.DataFrame(entropy_difference, index=taxids)
+    tax_counts = pd.Series(tax_counts, index=diff_tab.index)
+    return diff_tab, tax_counts

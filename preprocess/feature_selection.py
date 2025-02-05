@@ -92,7 +92,17 @@ def get_nsites(sorted_sites, min_n=None, max_n=None, step_n=None, n=None):
         site_lists.append(sites)
         all_sites = np.concatenate((all_sites, sites))
     return site_lists
-        
+
+def get_entropy0(matrix, omit_missing=True):
+    counts = np.array([np.sum(matrix == i, axis=0) for i in range(5)]).T
+    if omit_missing:
+        counts[:,0] = 0
+    
+    freqs = np.divide(counts, counts.sum(axis=1).reshape(-1, 1))
+    with np.errstate(divide='ignore'):
+        entropy = -np.sum(np.where(freqs > 0, np.log2(freqs), 0) * freqs, dtype=np.float32, axis=1)
+    return entropy
+
 @nb.njit
 def get_entropy(array, omit_missing=True):
     valid_rows = array
@@ -152,6 +162,47 @@ def per_tax_entropy(matrix, tax_tab, omit_missing=True):
     entropy_array = np.array(entropy_array)
     return entropy_array, taxids, tax_counts
 
+def sans_tax_entropy(matrix, tax_tab, omit_missing=True):
+    """
+    Calculate entropy of the alignemnt matrix after removing instances of each
+    taxon.
+
+    Parameters
+    ----------
+    matrix : numpy.array
+        Alignment matrix.
+    tax_tab : pandas.DataFrame
+        Lineage table of alignment sequences.
+    omit_missing : bool, optional
+        Omit missing values. The default is True.
+
+    Returns
+    -------
+    entropy_array : numpy.array
+        Calculated entropy for each site (column) of the matrix for each taxon
+        (rows).
+    taxids : list
+        List of taxonomic ids for each sequence.
+    tax_counts : list
+        Counts of instances of each taxon.
+
+    """
+    # builds entropy difference tab, columns : rank_idx, TaxID, records, bases..., n (number of records)
+    tax_series = build_tax_series(tax_tab)
+    
+    entropy_array = []
+    taxids = []
+    tax_counts = []
+    for tax, subseries in tax_series.groupby(level=0):
+        tax_submat = np.delete(matrix, subseries.values, axis=0)
+        #tax_entropy = get_matrix_entropy(tax_submat, omit_missing)
+        tax_entropy = get_entropy0(tax_submat, omit_missing)
+        taxids.append(tax)
+        entropy_array.append(tax_entropy)
+        tax_counts.append(len(subseries))
+    entropy_array = np.array(entropy_array)
+    return entropy_array, taxids, tax_counts
+
 def get_information_gain(matrix, tax_tab, omit_missing=False):
     """
     Calculate the information gain for each site (column) for each taxon.
@@ -179,8 +230,10 @@ def get_information_gain(matrix, tax_tab, omit_missing=False):
         Series accounting the number of representative sequences in each taxon.
 
     """
-    general_entropy = get_matrix_entropy(matrix, omit_missing)
-    tax_entropy, taxids, tax_counts = per_tax_entropy(matrix, tax_tab, omit_missing)
+    #general_entropy = get_matrix_entropy(matrix, omit_missing)
+    general_entropy = get_entropy0(matrix, omit_missing)
+    #tax_entropy, taxids, tax_counts = per_tax_entropy(matrix, tax_tab, omit_missing)
+    tax_entropy, taxids, tax_counts = sans_tax_entropy(matrix, tax_tab, omit_missing)
     entropy_difference = general_entropy - tax_entropy
     diff_tab = pd.DataFrame(entropy_difference, index=taxids)
     tax_counts = pd.Series(tax_counts, index=diff_tab.index)

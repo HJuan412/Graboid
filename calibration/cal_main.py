@@ -9,24 +9,17 @@ Created on Tue Nov 30 11:06:10 2021
 #%% libraries
 import concurrent.futures
 import datetime
-import json
 import logging
 import numpy as np
 import os
 import pandas as pd
 import re
 import shutil
-import sys
 import time
 
 # Graboid libraries
-sys.path.append("..") # use this to allow importing from a sibling package
-from calibration import cal_classify
-from calibration import cal_dists
-from calibration import cal_metrics
-from calibration import cal_plot
-from calibration import cal_preprocess
-from DATA import DATA
+from Graboid.calibration import cal_classify, cal_dists, cal_metrics, cal_plot, cal_preprocess
+from Graboid.database import data_holder
 
 #%% set logger
 logger = logging.getLogger('Graboid.calibrator')
@@ -223,23 +216,97 @@ def save_classifications(cls_dir, out_dir):
             cls_tabs[key] = npz[f'predicted_{mth}']
     
     np.savez(out_dir + '/classifs.npz', **cls_tabs)
+
+#%% window coordinates
+def set_sliding_windows(size, step, max_pos):
+    if size >= max_pos:
+        raise Exception(f'Given window size: {size} is equal or greater than the total length of the alignment {max_pos}, please use a smaller window size.')
+    if step > size:
+        raise Exception(f'Window displacement rate ({step}) must be lower or equal to the window size ({size})')
+    
+    # adjust window size to get uniform distribution (avoid having to use a "tail" window)
+    last_position = max_pos - size
+    n_windows = int(np.ceil(last_position / step))
+    w_start = np.linspace(0, last_position, n_windows, dtype=int)
+    windows = np.array([w_start, w_start + size]).T
+    return windows
+
+def set_custom_windows(coords, max_pos):
+    # ensure coordinates are given as a n x 2 array
+    if len(coords.shape) != 2 or coords.shape[1] != 2:
+        raise Exception('Coordinates must be given as a 2d array of n rows and 2 columns!')
+    
+    # ensure all coordinate pairs are valid
+    invalid = coords[:, 0] >= coords[:, 1]
+    if invalid.sum() > 0:
+        raise Exception(f'At least one pair of coordinates is invalid: {[list(i) for i in coords[invalid]]}')
+    
+    # ensure all cordinates are within bounds
+    out_of_bounds = ((coords < 0) | (coords >= max_pos)).any(axis=1)
+    if out_of_bounds.sum() > 0:
+        raise Exception(f'At least one pair of coordinates is out of bounds [0 : {max_pos}]: {[list(i) for i in coords[out_of_bounds]]}')
+    
+    return coords
 #%% classes
+class GridResult:
+    def __init__(self, n_range, k_range, grid, items, ranks):
+        self.n_range = {n:idx for idx, n in enumerate(n_range)}
+        self.k_range = {k:idx for idx, k in enumerate(k_range)}
+        self.mth_range = {'unweighted':0, 'wknn':1, 'dwknn':2}
+        self.grid = grid
+        self.taxa = items
+        self.ranks = ranks
+    def cell(self, n, k, method):
+        n_idx = self.n_range[n]
+        k_idx = self.k_range[k]
+        mth_idx = self.mth_range[method]
+        result = pd.DataFrame(self.grid[n_idx, k_idx, mth_idx], index=self.taxa, columns=self.ranks)
+        return result
+
+class GridMetricsInd(GridResult):
+    def get_best(self):
+        # combine first 3 dimensions (n, k and method)
+        grid_reshaped = self.grid.reshape(-1, self.grid.shape[3], self.grid.shape[4])
+
+        # find maximum values along the combined dimension
+        max_vals = np.max(grid_reshaped, axis=0)
+
+        # find positions of maximum values in the combined dimension
+        max_indices_flat = np.argmax(grid_reshaped, axis=0)
+
+        # convert flat indices to original 3d indices
+        max_indices = np.unravel_index(max_indices_flat, self.grid.shape[:3])
+        
+        self.n = pd.DataFrame(np.array(list(self.n_range.keys()))[max_indices[0]], index=self.items, columns=self.ranks)
+        self.k = pd.DataFrame(np.array(list(self.k_rande.keys()))[max_indices[1]], index=self.items, columns=self.ranks)
+        self.method = pd.DataFrame(np.array(list(self.mth_range.keys()))[max_indices[2]], index=self.items, columns=self.ranks)
+        self.best = pd.DataFrame(max_vals, index=self.items, columns=self.ranks)
+
+class GridMetrics:
+    def __init__(self, acc_grid, prc_grid, rec_grid, f1_grid):
+        acc_grid.get_best()
+        prc_grid.get_best()
+        rec_grid.get_best()
+        f1_grid.get_best()
+        self.accuracy = acc_grid
+        self.precision = prc_grid
+        self.recall = rec_grid
+        self.f1 = f1_grid
+
 class Calibrator:
-    def __init__(self, out_dir=None):
-        if not out_dir is None:
-            self.set_outdir(out_dir)
+    def __init__(self, data=None, cost_mat=None):
+        if data is None:
+            self.data = data_holder.DataHolder()
+        else:
+            self.data = data
     
-    @property
-    def window_len(self):
-        if hasattr(self, 'windows'):
-            return self.windows[:,1] - self.windows[:,0]
-        return 0
+    def set_database(self, db_dir, min_coverage=0, required_rank='family'):
+        # run this method if no database was imported
+        self.data.load_reference(db_dir, min_coverage, required_rank)
     
-    @property
-    def n_windows(self):
-        if hasattr(self, 'windows'):
-            return len(self.windows)
-        return 0
+    # TODO: fill this
+    def set_cost_matrix(self, cost_mat):
+        pass
     
     def set_outdir(self, out_dir):
         self.out_dir = re.sub('/$', '', out_dir)
@@ -262,172 +329,183 @@ class Calibrator:
         fh = logging.FileHandler(self.out_dir + '/calibration.log')
         fh.setLevel(logging.INFO)
         logger.addHandler(fh)
-        
-    def set_database(self, database):
-        self.db = database
-        try:
-            self.db_dir = DATA.get_database(database)
-        except Exception:
-            raise
-        # use meta file from database to locate necessary files
-        db_meta = DATA.DBASE_INFO[database]
-        
-        # load taxonomy guides
-        self.guide = pd.read_csv(db_meta['guide_file'], index_col=0)
-        self.guide.loc[-2] = 'undetermined'
-        self.tax_ext = pd.read_csv(db_meta['expguide_file'], index_col=0)
-        self.ranks = self.tax_ext.columns.tolist()
-        
-        # load matrix & accession codes
-        map_npz = np.load(db_meta['mat_file'])
-        self.matrix = map_npz['matrix']
-        self.max_pos = self.matrix.shape[1]
-        with open(db_meta['acc_file'], 'r') as handle:
-            self.accs = handle.read().splitlines()
-        
-        # build extended taxonomy
-        tax_tab = pd.read_csv(db_meta['tax_file'], index_col=0).loc[self.accs]
-        # the tax_tab attribute is the extended taxonomy for each record
-        self.tax_tab = self.tax_ext.loc[tax_tab.TaxID.values]
-        self.tax_tab.index = tax_tab.index
-        
-        logger.info(f'Set database: {database}')
-        
-    def set_sliding_windows(self, size, step):
-        if size >= self.max_pos:
-            raise Exception(f'Given window size: {size} is equal or greater than the total length of the alignment {self.max_pos}, please use a smaller window size.')
-        if step > size:
-            raise Exception(f'Window displacement rate ({step}) must be lower or equal to the window size ({size})')
-        
-        # adjust window size to get uniform distribution (avoid having to use a "tail" window)
-        last_position = self.max_pos - size
-        n_windows = int(np.ceil(last_position / step))
-        w_start = np.linspace(0, last_position, n_windows, dtype=int)
-        self.windows = np.array([w_start, w_start + size]).T
-        self.custom = False
-        logger.info(f'Set {n_windows} windows of size {size} at intervals of {w_start[1] - w_start[0]}')
     
-    def set_custom_windows(self, starts, ends):
-        # ensure arguments are lists
-        if isinstance(starts, int):
-            starts = [starts]
-        if isinstance(ends, int):
-            ends = [ends]
+    # TODO: delete this method
+    # def set_database(self, database):
+        # self.db = database
+        # try:
+        #     self.db_dir = DATA.get_database(database)
+        # except Exception:
+        #     raise
+        # # use meta file from database to locate necessary files
+        # db_meta = DATA.DBASE_INFO[database]
         
-        # ensure start and end lengths match
-        if len(starts) != len(ends):
-            raise Exception(f'Error: start and end coordinates do not match ({len(starts)} starts, {len(ends)} ends)')
+        # # load taxonomy guides
+        # self.guide = pd.read_csv(db_meta['guide_file'], index_col=0)
+        # self.guide.loc[-2] = 'undetermined'
+        # self.tax_ext = pd.read_csv(db_meta['expguide_file'], index_col=0)
+        # self.ranks = self.tax_ext.columns.tolist()
         
-        raw_coords = np.array([starts, ends], dtype=np.int).T
+        # # load matrix & accession codes
+        # map_npz = np.load(db_meta['mat_file'])
+        # self.matrix = map_npz['matrix']
+        # self.max_pos = self.matrix.shape[1]
+        # with open(db_meta['acc_file'], 'r') as handle:
+        #     self.accs = handle.read().splitlines()
         
-        # ensure all coordinate pairs are valid
-        invalid = raw_coords[:, 0] >= raw_coords[:, 1]
-        if invalid.sum() > 0:
-            raise Exception(f'At least one pair of coordinates is invalid: {[list(i) for i in raw_coords[invalid]]}')
+        # # build extended taxonomy
+        # tax_tab = pd.read_csv(db_meta['tax_file'], index_col=0).loc[self.accs]
+        # # the tax_tab attribute is the extended taxonomy for each record
+        # self.tax_tab = self.tax_ext.loc[tax_tab.TaxID.values]
+        # self.tax_tab.index = tax_tab.index
         
-        # ensure all cordinates are within bounds
-        out_of_bounds = ((raw_coords < 0) | (raw_coords >= self.max_pos))
-        out_of_bounds = out_of_bounds[:,0] | out_of_bounds[:,1]
-        if out_of_bounds.sum() > 0:
-            raise Exception(f'At least one pair of coordinates is out of bounds [0 {self.max_pos}]: {[list(i) for i in raw_coords[out_of_bounds]]}')
+        # logger.info(f'Set database: {database}')
         
-        # set custom window values
-        self.windows = raw_coords
-        self.custom = True
-        logger.info(f'Set {raw_coords.shape[0]} custom windows at positions:')
-        for coor_idx, coords in enumerate(raw_coords):
-            logger.info(f'\tWindow {coor_idx}: [{coords[0]} - {coords[1]}] (length {coords[1] - coords[0]})')
+    # def set_sliding_windows(self, size, step):
+    #     if size >= self.data.shape:
+    #         raise Exception(f'Given window size: {size} is equal or greater than the total length of the alignment {self.max_pos}, please use a smaller window size.')
+    #     if step > size:
+    #         raise Exception(f'Window displacement rate ({step}) must be lower or equal to the window size ({size})')
+        
+    #     # adjust window size to get uniform distribution (avoid having to use a "tail" window)
+    #     last_position = self.data.shape - size
+    #     n_windows = int(np.ceil(last_position / step))
+    #     w_start = np.linspace(0, last_position, n_windows, dtype=int)
+    #     self.windows = np.array([w_start, w_start + size]).T
+    #     self.custom = False
+    #     logger.info(f'Set {n_windows} windows of size {size} at intervals of {w_start[1] - w_start[0]}')
     
+    # def set_custom_windows(self, starts, ends):
+    #     # ensure arguments are lists
+    #     if isinstance(starts, int):
+    #         starts = [starts]
+    #     if isinstance(ends, int):
+    #         ends = [ends]
+        
+    #     # ensure start and end lengths match
+    #     if len(starts) != len(ends):
+    #         raise Exception(f'Error: start and end coordinates do not match ({len(starts)} starts, {len(ends)} ends)')
+        
+    #     raw_coords = np.array([starts, ends], dtype=np.int).T
+        
+    #     # ensure all coordinate pairs are valid
+    #     invalid = raw_coords[:, 0] >= raw_coords[:, 1]
+    #     if invalid.sum() > 0:
+    #         raise Exception(f'At least one pair of coordinates is invalid: {[list(i) for i in raw_coords[invalid]]}')
+        
+    #     # ensure all cordinates are within bounds
+    #     out_of_bounds = ((raw_coords < 0) | (raw_coords >= self.data.shape))
+    #     out_of_bounds = out_of_bounds[:,0] | out_of_bounds[:,1]
+    #     if out_of_bounds.sum() > 0:
+    #         raise Exception(f'At least one pair of coordinates is out of bounds [0 {self.max_pos}]: {[list(i) for i in raw_coords[out_of_bounds]]}')
+        
+    #     # set custom window values
+    #     self.windows = raw_coords
+    #     self.custom = True
+    #     logger.info(f'Set {raw_coords.shape[0]} custom windows at positions:')
+    #     for coor_idx, coords in enumerate(raw_coords):
+    #         logger.info(f'\tWindow {coor_idx}: [{coords[0]} - {coords[1]}] (length {coords[1] - coords[0]})')
+    
+    def calibrate_sliding(self, w_size, w_step, max_n, step_n, max_k, step_k, row_thresh=.2, col_thresh=.1, min_seqs=50, rank='genus', min_n=5, min_k=3, criterion='orbit', collapse_hm=True, threads=1):
+        # get window coordinates
+        windows = set_sliding_windows(w_size, w_step, self.data.shape[1])
+        # run calibration for each window
+        for win in windows:
+            self.data.select_region(win[0], win[1], row_thresh)
+            # TODO: select sites
+            self.grid_search(max_n, step_n, max_k, step_k, min_seqs, rank, min_n, min_k, criterion, collapse_hm, threads)
+    def calibrate_custom(self, w_coords):
+        # get window coordinates
+        windows = set_custom_windows(w_coords, self.data.shape[1])
+        # run calibration for each window
+        
     def grid_search(self,
                     max_n,
                     step_n,
                     max_k,
                     step_k,
-                    cost_mat,
-                    row_thresh=0.1,
-                    col_thresh=0.1,
-                    min_seqs=50,
                     rank='genus',
                     min_n=5,
                     min_k=3,
                     criterion='orbit',
                     collapse_hm=True,
-                    threads=1,
-                    clear_tmp=True):
+                    threads=1):
         
         t0 = time.time()
         # prepare n, k ranges
         n_range = np.arange(min_n, max_n + 1, step_n)
         k_range = np.arange(min_k, max_k + 1, step_k)
         
-        # initialize grid search report report
+        # initialize grid search report
         reporter = RunReporter(self.out_dir, self.db)
         
         logger.info('Beginning calibration...')
         t_collapse_0 = time.time()
         
         # collapse windows
-        logger.info('Collapsing windows...')
-        win_indexes, win_list, rej_indexes, rej_list = cal_preprocess.collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
-        taxa_counts, merged_guides = count_taxa(win_list, win_indexes, self.guide, self.tax_ext)  # keep the number of taxa per window
+        # logger.info('Collapsing windows...')
+        # win_indexes, win_list, rej_indexes, rej_list = cal_preprocess.collapse_windows(self.windows, self.matrix, self.tax_tab, row_thresh, col_thresh, min_seqs, threads)
+        # taxa_counts, merged_guides = count_taxa(win_list, win_indexes, self.guide, self.tax_ext)  # keep the number of taxa per window
 
         # build windows tab
-        win_tab = pd.DataFrame(self.windows, columns = ['Start', 'End'])
-        win_tab.index.name = 'Window'
-        win_tab.to_csv(self.out_dir + '/windows.csv')
-        # store window taxonomies (used for building confusion matrices later)
-        win_taxa = {}
-        for win_idx, window in zip(win_indexes, win_list):
-            win_taxa[str(win_idx)] = self.tax_ext.loc[window.taxonomy].fillna(-1).to_numpy().astype(int)
-        np.savez(self.out_dir + '/win_taxa.npz', **win_taxa)
-        t_collapse_1 = time.time()
-        logger.info(f'Collapsed {len(win_list)} of {len(self.windows)} windows in {t_collapse_1 - t_collapse_0:.2f} seconds')
+        # win_tab = pd.DataFrame(self.windows, columns = ['Start', 'End'])
+        # win_tab.index.name = 'Window'
+        # win_tab.to_csv(self.out_dir + '/windows.csv')
+        # # store window taxonomies (used for building confusion matrices later)
+        # win_taxa = {}
+        # for win_idx, window in zip(win_indexes, win_list):
+        #     win_taxa[str(win_idx)] = self.tax_ext.loc[window.taxonomy].fillna(-1).to_numpy().astype(int)
+        # np.savez(self.out_dir + '/win_taxa.npz', **win_taxa)
+        # t_collapse_1 = time.time()
+        # logger.info(f'Collapsed {len(win_list)} of {len(self.windows)} windows in {t_collapse_1 - t_collapse_0:.2f} seconds')
         
         # abort calibration if no collapsed windows are generated
-        if len(win_list) == 0:
-            logger.info('No windows passed the collapsing filters. Ending calibration')
-            return
+        # if len(win_list) == 0:
+        #     logger.info('No windows passed the collapsing filters. Ending calibration')
+        #     return
         
         # save parameters, used for reporting calibration metrics for classification parameters
-        np.savez(self.out_dir + '/params.npz', n = n_range, k = k_range, windows = np.array(win_idx))
+        # np.savez(self.out_dir + '/params.npz', n = n_range, k = k_range, windows = np.array(win_idx))
         # select sites
-        logger.info('Selecting informative sites...')
-        t_sselection_0 = time.time()
-        windows_sites = cal_preprocess.select_sites(win_list, self.tax_ext, rank, min_n, max_n, step_n)
-        t_sselection_1 = time.time()
-        logger.info(f'Site selection finished in {t_sselection_1 - t_sselection_0:.2f} seconds')
+        # logger.info('Selecting informative sites...')
+        # t_sselection_0 = time.time()
+        # windows_sites = cal_preprocess.select_sites(win_list, self.tax_ext, rank, min_n, max_n, step_n)
+        # t_sselection_1 = time.time()
+        # logger.info(f'Site selection finished in {t_sselection_1 - t_sselection_0:.2f} seconds')
         
         # report parameters
-        reporter.build_report(n_range,
-                              k_range,
-                              criterion,
-                              row_thresh,
-                              col_thresh,
-                              min_seqs,
-                              rank,
-                              threads,
-                              win_indexes,
-                              win_list,
-                              rej_indexes,
-                              rej_list,
-                              windows_sites,
-                              taxa_counts,
-                              merged_guides)
+        # reporter.build_report(n_range,
+        #                       k_range,
+        #                       criterion,
+        #                       row_thresh,
+        #                       col_thresh,
+        #                       min_seqs,
+        #                       rank,
+        #                       threads,
+        #                       win_indexes,
+        #                       win_list,
+        #                       rej_indexes,
+        #                       rej_list,
+        #                       windows_sites,
+        #                       taxa_counts,
+        #                       merged_guides)
         
         # calculate distances
         logger.info('Calculating paired distances...')
         t_distance_0 = time.time()
-        all_distances = [] # contains one 3d array per window. Arrays have shape (n, #seqs, #seqs), contain paired distances for every level of n
-        for window, win_sites in zip(win_list, windows_sites):
-            all_distances.append(cal_dists.get_distances(window, win_sites, cost_mat))
+        # all_distances = [] # contains one 3d array per window. Arrays have shape (n, #seqs, #seqs), contain paired distances for every level of n
+        # for window, win_sites in zip(win_list, windows_sites):
+        #     all_distances.append(cal_dists.get_distances(window, win_sites, cost_mat))
+        distances = cal_dists.get_distances(window, win_sites, cost_mat) # 3d array of shape (n, #seqs, #seqs), contains paired distances for every value of n
         t_distance_1 = time.time()
         logger.info(f'Distance calculation finished in {t_distance_1 - t_distance_0:.2f} seconds')
         
         # classify
         logger.info('Classifying...')
         t_classification_0 = time.time()
-        classify(all_distances, win_list, win_indexes, self.tax_ext, n_range, k_range, self.classif_dir, criterion, threads)
-        save_classifications(self.classif_dir, self.out_dir)
+        # classify(all_distances, win_list, win_indexes, self.tax_ext, n_range, k_range, self.classif_dir, criterion, threads)
+        # save_classifications(self.classif_dir, self.out_dir)
+        
         t_classification_1 = time.time()
         logger.info(f'Finished classifications in {t_classification_1 - t_classification_0:.2f} seconds')
         
@@ -479,9 +557,8 @@ class Calibrator:
         logger.info(f'Finished plotting in {t_plots_1 - t_plots_0:.2f} seconds')
         
         # clear temporal files
-        if clear_tmp:
-            logger.info('Removing temporal files')
-            shutil.rmtree(self.tmp_dir)
+        # logger.info('Removing temporal files')
+        # shutil.rmtree(self.tmp_dir)
         t1 = time.time()
         logger.info(f'Finished calibration in {t1 - t0:.2f} seconds')
         return

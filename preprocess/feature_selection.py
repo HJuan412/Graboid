@@ -93,7 +93,7 @@ def get_nsites(sorted_sites, min_n=None, max_n=None, step_n=None, n=None):
         all_sites = np.concatenate((all_sites, sites))
     return site_lists
 
-def get_entropy0(matrix, omit_missing=True):
+def get_entropy(matrix, omit_missing=True):
     counts = np.array([np.sum(matrix == i, axis=0) for i in range(5)]).T
     if omit_missing:
         counts[:,0] = 0
@@ -101,29 +101,6 @@ def get_entropy0(matrix, omit_missing=True):
     freqs = np.divide(counts, counts.sum(axis=1).reshape(-1, 1))
     with np.errstate(divide='ignore'):
         entropy = -np.sum(np.where(freqs > 0, np.log2(freqs), 0) * freqs, dtype=np.float32, axis=1)
-    return entropy
-
-@nb.njit
-def get_entropy(array, omit_missing=True):
-    valid_rows = array
-    if omit_missing:
-        valid_rows = array[array != 0]
-    n_rows = len(valid_rows)
-    values = np.unique(valid_rows)
-    counts = np.array([(valid_rows == val).sum() for val in values])
-    freqs = counts / n_rows
-    return -np.sum(np.log2(freqs) * freqs, dtype=np.float32)
-
-
-def get_matrix_entropy(matrix, omit_missing=True):
-    entropy = np.zeros(matrix.shape[1], dtype=np.float32)
-    for idx, col in enumerate(matrix.T):
-        entropy[idx] = get_entropy(col, omit_missing)
-    
-    # maximum possible entropy is log2(num of classes)
-    # fasta code has 15 possible classes (not counting gaps and missing values)
-    # most frequently 4 classes (acgt), log2(4) = 2
-    entropy = (2-entropy) / 2 # 1 min entropy, 0 max entropy
     return entropy
 
 def build_tax_series(tax_tab):
@@ -144,23 +121,6 @@ def build_tax_series(tax_tab):
     tax_series.drop(index=0)
     
     return tax_series
-    
-def per_tax_entropy(matrix, tax_tab, omit_missing=True):
-    
-    # builds entropy difference tab, columns : rank_idx, TaxID, records, bases..., n (number of records)
-    tax_series = build_tax_series(tax_tab)
-    
-    entropy_array = []
-    taxids = []
-    tax_counts = []
-    for tax, subseries in tax_series.groupby(level=0):
-        tax_submat = matrix[subseries.values]
-        tax_entropy = get_matrix_entropy(tax_submat, omit_missing)
-        taxids.append(tax)
-        entropy_array.append(tax_entropy)
-        tax_counts.append(len(subseries))
-    entropy_array = np.array(entropy_array)
-    return entropy_array, taxids, tax_counts
 
 def sans_tax_entropy(matrix, tax_tab, omit_missing=True):
     """
@@ -195,8 +155,7 @@ def sans_tax_entropy(matrix, tax_tab, omit_missing=True):
     tax_counts = []
     for tax, subseries in tax_series.groupby(level=0):
         tax_submat = np.delete(matrix, subseries.values, axis=0)
-        #tax_entropy = get_matrix_entropy(tax_submat, omit_missing)
-        tax_entropy = get_entropy0(tax_submat, omit_missing)
+        tax_entropy = get_entropy(tax_submat, omit_missing)
         taxids.append(tax)
         entropy_array.append(tax_entropy)
         tax_counts.append(len(subseries))
@@ -230,9 +189,8 @@ def get_information_gain(matrix, tax_tab, omit_missing=False):
         Series accounting the number of representative sequences in each taxon.
 
     """
-    #general_entropy = get_matrix_entropy(matrix, omit_missing)
-    general_entropy = get_entropy0(matrix, omit_missing)
-    #tax_entropy, taxids, tax_counts = per_tax_entropy(matrix, tax_tab, omit_missing)
+    
+    general_entropy = get_entropy(matrix, omit_missing)
     tax_entropy, taxids, tax_counts = sans_tax_entropy(matrix, tax_tab, omit_missing)
     entropy_difference = general_entropy - tax_entropy
     diff_tab = pd.DataFrame(entropy_difference, index=taxids)

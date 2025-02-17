@@ -10,6 +10,7 @@ Created on Tue Nov 30 11:06:10 2021
 import concurrent.futures
 import datetime
 import logging
+import numba as nb
 import numpy as np
 import os
 import pandas as pd
@@ -19,7 +20,9 @@ import time
 
 # Graboid libraries
 from Graboid.calibration import cal_classify, cal_dists, cal_metrics, cal_plot, cal_preprocess
+from Graboid.classification import cls_distance, cls_classify
 from Graboid.database import data_holder
+from Graboid.preprocess import feature_selection
 
 #%% set logger
 logger = logging.getLogger('Graboid.calibrator')
@@ -158,34 +161,6 @@ def final_recount(report, taxa_count, out_dir=None):
             win_report.to_csv(handle, mode='a')
     return abs_report, lose_report, fail_report, win_report
 
-# grid search functions
-def classify(win_distances, win_list, win_indexes, taxonomy, n_range, k_range, out_dir, criterion='orbit', threads=1):
-    """Direct support calculation and classification for each calibration window"""
-    # win_distances: list of 3d-numpy arrays of shape (#seqs, #seqs, len(n_range))
-    # win_list: list of Window objects
-    # win_indexes: array of selected window indexes
-    # taxonomy: pandas dataframe containing the training set's extended taxonomy
-    # n_range, k_range: ranges of n and k values
-    # out_dir: classification directory
-    # criterion: orbit/neigh
-    
-    # build list of inputs for parallel classification jobs
-    inputs = []
-    for distances, window, window_idx in zip(win_distances, win_list, win_indexes):
-        win_tax = taxonomy.loc[window.taxonomy].to_numpy()
-        for n, n_dists in zip(n_range, distances):
-            inputs.append([n_dists, win_tax, window_idx, n])
-    
-    # parallel classification, one job per window*n, each job classifies for all the k values
-    n_cells = 0
-    total_cells = len(win_list)*len(n_range)*len(k_range)
-    with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
-        futures = [executor.submit(cal_classify.classify, dists, w_tax, n, k_range, out_dir, w_idx, criterion) for (dists, w_tax, w_idx, n) in inputs]
-        for future in concurrent.futures.as_completed(futures):
-            future.result()
-            n_cells += len(k_range)
-            print(f'Classified {n_cells} of {total_cells} cells')
-
 def get_metrics(win_list, win_indexes, classif_dir, out_dir, taxonomy):
     """Calculate calibration metrics for each cell in the grid"""
     # win_list: list of Window objects
@@ -217,7 +192,7 @@ def save_classifications(cls_dir, out_dir):
     
     np.savez(out_dir + '/classifs.npz', **cls_tabs)
 
-#%% window coordinates
+#%% window definition
 def set_sliding_windows(size, step, max_pos):
     if size >= max_pos:
         raise Exception(f'Given window size: {size} is equal or greater than the total length of the alignment {max_pos}, please use a smaller window size.')
@@ -247,21 +222,371 @@ def set_custom_windows(coords, max_pos):
         raise Exception(f'At least one pair of coordinates is out of bounds [0 : {max_pos}]: {[list(i) for i in coords[out_of_bounds]]}')
     
     return coords
+
+#%% sites selection
+def get_sites(gain, n_range):
+    sorted_gain = np.flip(np.argsort(gain, axis=1), axis=1)
+    # get sites for each n level
+    sites = [np.unique(sorted_gain[:, :n]) for n in n_range]
+    # clear contained sites
+    for i in np.flip(np.arange(1, len(n_range))):
+        sites[i] = np.setdiff1d(sites[i], sites[i-1])
+    return sites
+
+#%% distance calculation
+# TODO: remove cal_dists
+def get_distances(matrix, sites, cost_mat):
+    """
+    Calcuate paired distances for every sub window, for every level of n
+
+    Parameters
+    ----------
+    matrix : numpy.array
+        Alignment array.
+    sites : list
+        List of numpy arrays containing the unique sites found at each level
+        of n.
+    cost_mat : numpy.array
+        2d matrix detailing the distance cost of every substitution.
+
+    Returns
+    -------
+    distances : numpy.array
+        3d array of shape (# levels of n, # seqs in window, # seqs in window),
+        diagonal elements are -1.
+
+    """
+    
+    distances = []
+    # get distances for each value of n, use cumsum to include the distance of all previous levels of n
+    for n_sites in sites:
+        n_cols = matrix[:, n_sites]
+        distances.append(cls_distance.get_distances(n_cols, n_cols, cost_mat))
+    distances = np.cumsum(distances, 0) # some elements in the diagonal have distance over 0 because of unknown sites
+    distances[:, np.arange(distances.shape[1]), np.arange(distances.shape[2])] = -1 # diagonal elements to -1 ensures distance vs self is always first place when sorting
+    return distances
+
+#%% classification
+# 0. find orbitals ###############################################################
+@nb.njit
+def get_orbitals(sorted_dists, k=1):
+    # get up to the (k+1)th distance orbital for each query
+    # sorted dists is a 2d array of shape [ #queries, #references ]
+    # k is the number of orbitals to select (1 by default)
+    
+    # returns 2d array of shape [ #queries, k+1 ], indicating the radius of each orbital
+    
+    # preinitialize orbitals array
+    orbitals = np.full((sorted_dists.shape[0], k+1), -1, dtype=np.float32)
+    
+    # extract k smallest distances for each query
+    for idx, row in enumerate(sorted_dists):
+        orbs = np.unique(row)[:k+1]
+        orbitals[idx, :len(orbs)] = orbs
+    return orbitals
+
+@nb.njit
+def get_orbital_sizes(sorted_dists, orbitals):
+    # count the number of neighbours in each orbital for each query
+    # sorted dists is a 2d array of shape [ #queries, #references ]
+    # orbitals is a 2d array of shape [ #queries, k+1 ], indicating the radii of the orbitals
+    
+    # returns 2d array of shape [ #queries, k ], indicating the number of neighours in each orbital
+    
+    # preinitialize sizes array
+    orbital_sizes = np.full((orbitals.shape[0], orbitals.shape[1]-1), 0)
+    
+    # count the number of neighbours in each (>=k) orbital for each query
+    for idx0, orb in enumerate(orbitals.T[1:]):
+        for idx1, (_orb, row) in enumerate(zip(orb, sorted_dists)):
+            orbital_sizes[idx1, idx0] = np.argmax(row == _orb)
+    return orbital_sizes
+
+def find_orbitals(sorted_distances, k):
+    # build two 2d arrays, containing the radii and population size of each orbital
+    # (up to the kth) of each query sequence
+    
+    orbitals = get_orbitals(sorted_distances, k)
+    orbital_sizes = get_orbital_sizes(sorted_distances, orbitals)
+    return orbitals, orbital_sizes
+
+# 1.0 calculate orbital weights ###################################################
+
+def build_weights_mat(weights, sizes):
+    # builds a matrix containing the weights of all neighbours for all queries (for a single value of k)
+    # returns a 2d array of shape [ #queries, max # of neighbours among all queries]
+    # each row contains the weights of the neighbours of a given query
+    weight_lists = []
+    for seq_weights, seq_sizes in zip(weights, sizes):
+        weight_lists.append(np.concatenate([np.full(size, weight) for size, weight in zip(seq_sizes, seq_weights)]))
+    
+    # count the number of neighbours for each query (depends on the population sizes of their orbitals)
+    neighs = [len(seq) for seq in weight_lists]
+    
+    # initialize weights matrix (must acomodate up to the maximum number of neighbours)
+    n_cols = np.max(neighs)
+    weights_mat = np.zeros((len(weights), n_cols))
+    # populate weights matrix
+    for idx, (seq, nghs) in enumerate(zip(weight_lists, neighs)):
+        weights_mat[idx, :nghs] = seq
+    return weights_mat
+
+def get_orbital_weights(orbitals, orbital_sizes, k_range, weight_func):
+    # builds a list of 2d arrays containing the weights for each neighbour of each query
+    # each 2d array corresponds to a value of k and shape [ #queries, max # of neighbours among all queries (for that value of k)]
+    # this is performed for the orbitals of a single value of n
+    
+    # calculate orbital weights for each value of k
+    k_weights = [weight_func(orbitals[:,:k]) for k in k_range]
+    # build weights matrix
+    k_sizes = [orbital_sizes[:,:k] for k in k_range]
+    weights = [build_weights_mat(w, s) for w, s in zip(k_weights, k_sizes)]
+    return weights
+
+# 2. build neighbour supports matrix #############################################
+
+def replace_vals(matrix):
+    # replace values in matrix for their sorted equivalent (eg: matrix with values 6,15,32, values are replaced for 0,1,2)
+    # used to build the supports matrix
+    vals = np.unique(matrix)
+    new_mat = np.zeros(matrix.shape, dtype=np.int32)
+    for idx, v in enumerate(vals):
+        new_mat[matrix == v] = idx
+    return new_mat
+
+def get_supports_mat(weights, sorted_distances_idxs):
+    # builds set of arrays assigning the corresponding weight to each neighbour depending on their distance to the query.
+    # returns:
+        # supports_mat: 3d-array of shape [ range_k, #queries, max neighbours ]
+            # each layer of the array contains the weights of all neighbours (cols) to all queries (rows) for a given value of k
+        # neigh_idxs: array containing the neighbour column indexes (inidcate their relative position to their respective queries)
+    
+        
+    # get involved neighbours, clip sorted_disstances_idxs at the size of the largest weight matrix
+    clipped_idxs = sorted_distances_idxs[:, :weights[-1].shape[1]]
+    # get unique neighbout indexes
+    neigh_idxs = np.unique(clipped_idxs)
+    
+    # replace indxes by their sorted equivalent (this is done to place weight values in the corresponding neighbour column)
+    replaced_idxs = replace_vals(clipped_idxs)
+    # preinitialize supports matrix
+    supports_mat = np.zeros((len(weights), sorted_distances_idxs.shape[0], len(neigh_idxs)), dtype=np.float32)
+    
+    # populate supports matrix
+    for k, k_weights in enumerate(weights):
+        # get column indexes for the neighbours at the current k
+        k_dist_idxs = replaced_idxs[:, :k_weights.shape[1]]
+        # place weight values for the neighbours of each query
+        for idx, (w, d) in enumerate(zip(k_weights, k_dist_idxs)):
+            supports_mat[k, idx, d] = w
+    return supports_mat, neigh_idxs
+
+# 3. get taxa supports ###########################################################
+
+def get_tax_support(lineage, supports, neigh_idxs):
+    # calculates the accumulated support (sum of weights) for each taxon
+    # returns:
+        # taxa_supports: list of 3d arrays of shape [ #queries, #values of k, #taxa in rank], one element per taxonomic ranks
+        # taxa_idxs: list of arrays indicating the taxonomic id corresponding to each column of the taxa_supports arrays (same number of elements)
+    
+    # extract lineages of neighbours
+    clipped_lineage = lineage.iloc[neigh_idxs].copy()
+    clipped_lineage['neigh_idxs'] = np.arange(clipped_lineage.shape[0])
+    
+    # preinitialize lists
+    taxa_supports = []
+    taxa_idxs = []
+    
+    # calculate supports for each rank
+    for rk in clipped_lineage.drop(columns='neigh_idxs').columns:
+        # get taxa in rank
+        rk_taxa = np.unique(clipped_lineage[rk])
+        rk_lineage = clipped_lineage.set_index(rk)['neigh_idxs']
+        
+        # calculate total support for each taxon in rank
+        rk_supp = np.zeros((supports.shape[0], supports.shape[1], len(rk_taxa)))
+        for tax_idx, tax in enumerate(rk_taxa):
+            # get taxon representatives in supports matrix, summ their supports
+            tax_neighs = rk_lineage.loc[[tax]].values
+            rk_supp[:,:, tax_idx] = supports[:,:,tax_neighs].sum(axis=2)
+        taxa_supports.append(rk_supp)
+        taxa_idxs.append(rk_taxa)
+    return taxa_supports, taxa_idxs
+
+def norm_supports(tax_suports):
+    # softmax normalize supports of each query
+    normalized = []
+    for rk in tax_suports:
+        # softmax supports
+        exp_supports = np.exp(rk)
+        exp_sum = exp_supports.sum(axis=2)
+        exp_sum = exp_sum[:,:, np.newaxis]
+        normalized.append(exp_supports / exp_sum)
+    return normalized
+
+# 4. final classification ########################################################
+def get_classification(normalized_support, tax_ids):
+    # identify the taxon with the most support for each query in each rank
+    classif_support = np.array([np.max(rk, axis=2) for rk in normalized_support]).transpose(1,2,0)
+    best_pos = np.array([np.argmax(rk, axis=2) for rk in normalized_support]).transpose(1,2,0)
+    
+    classif = np.array([tax_ids[idx][best_pos[:,:,idx]] for idx in range(best_pos.shape[2])]).transpose(1,2,0)
+    
+    return classif, classif_support
+
+def n_classify(sorted_dists, sorted_indexes, k_range, lineage):
+    
+    # 0. get orbitals + orbital sizes
+    orbitals, orbital_sizes = find_orbitals(sorted_dists, k_range.max())
+    
+    # 1. calculate orbital weights using the three methods
+    u_weights = get_orbital_weights(orbitals, orbital_sizes, k_range, cls_classify.unweighted)
+    w_weights = get_orbital_weights(orbitals, orbital_sizes, k_range, cls_classify.wknn)
+    d_weights = get_orbital_weights(orbitals, orbital_sizes, k_range, cls_classify.dwknn)
+    
+    # 2. build neighbour support matrixes (neigh indexes are the same for all)
+    u_supports, neigh_idxs = get_supports_mat(u_weights, sorted_indexes)
+    w_supports, neigh_idxs = get_supports_mat(w_weights, sorted_indexes)
+    d_supports, neigh_idxs = get_supports_mat(d_weights, sorted_indexes)
+    
+    # 3. calcualte taxon supports & normalize
+    u_tax_supports, u_tax_ids = get_tax_support(lineage, u_supports, neigh_idxs)
+    w_tax_supports, w_tax_ids = get_tax_support(lineage, w_supports, neigh_idxs)
+    d_tax_supports, d_tax_ids = get_tax_support(lineage, d_supports, neigh_idxs)
+    
+    u_norm = norm_supports(u_tax_supports)
+    w_norm = norm_supports(w_tax_supports)
+    d_norm = norm_supports(d_tax_supports)
+    
+    # 4. get classifications (+ support of winner taxon)
+    u_classif, u_classif_support = get_classification(u_norm, u_tax_ids)
+    w_classif, w_classif_support = get_classification(w_norm, w_tax_ids)
+    d_classif, d_classif_support = get_classification(d_norm, d_tax_ids)
+    
+    classifications = np.array([u_classif, w_classif, d_classif]).transpose(1,0,2,3)
+    classification_supports = np.array([u_classif_support, w_classif_support, d_classif_support]).transpose(1,0,2,3)
+    
+    return classifications, classification_supports
+
+def classify(distances, lineage, k_range, criterion='orbit', threads=1):
+    """
+    Generates KNN classifications for the provided distance arrays.
+
+    Parameters
+    ----------
+    distances : numpy.array
+        3d array of shape (# levels of n, # seqs in window, # seqs in window),
+        diagonal elements are -1.
+    lineage : pandas.DataFrame
+        Dataframe containing the taxonomic IDs for each reference sequence.
+        Each column corresponds to the sequence's classification at a given
+        rank.
+    k_range : numpy.array
+        Range of values of K to be used in the classification.
+    criterion : string, optional
+        Neighbour selection criterion, possible values are "orbit"/"neighbour". The default is 'orbit'.
+    threads : int, optional
+        Number of parallel tasks. The default is 1.
+
+    Returns
+    -------
+    classifications : numpy.array
+        5d array of shape (# levels of n,
+                           # values of k,
+                           3 (weighting methods: unweighted, wknn, dwknn),
+                           # query sequences,
+                           # taxonomic ranks).
+        The first 3 dimensions correspond to a given cell of the grid search.
+        Array values correspond to assigned taxonomic ID  for each query/rank
+        for each parameter combination.
+    classification_supports : numpy.array
+        5d array containing the calculated support for the assigned
+        claassifications (shape is the same as the classifications array).
+
+    """
+    
+    # sort distances (remove first column from each layer (it's always distance to self))
+    sorted_distances = np.sort(distances, axis=2)[:, :, 1:]
+    sorted_distances_idxs = np.argsort(distances, axis=2)[:,:, 1:]
+    
+    # get classification (& support) for each n layer
+    classifications = []
+    classification_supports = []
+    
+    with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+        futures = [executor.submit(n_classify, n_dists, n_sort_idxs, k_range, lineage) for n_dists, n_sort_idxs in zip(sorted_distances, sorted_distances_idxs)]
+        for future in concurrent.futures.as_completed(futures):
+            res = future.result()
+            classifications.append(res[0])
+            classification_supports.append(res[1])
+    
+    classifications = np.array(classifications)
+    classification_supports = np.array(classification_supports)
+    
+    return classifications, classification_supports
+    
+#%% calibration funcs
+def calibrate_sliding(data, w_size, w_step, max_n, step_n, max_k, step_k, row_thresh=.2, col_thresh=.1, min_seqs=50, rank='genus', min_n=5, min_k=3, criterion='orbit', collapse_hm=True, threads=1):
+    # get window coordinates
+    windows = set_sliding_windows(w_size, w_step, data.shape[1])
+    window_grids_classif = []
+    window_grids_supp = []
+    # run calibration for each window
+    for win in windows:
+        data.select_region(win[0], win[1], row_thresh)
+        gain, counts = feature_selection.get_information_gain(data.collapsed, data.lineage_collapsed)
+        win_grid_clss, win_grid_supp = grid_search(max_n, step_n, max_k, step_k, min_seqs, rank, min_n, min_k, criterion, collapse_hm, threads)
+        window_grids_classif.append(win_grid_clss)
+        window_grids_supp.append(win_grid_supp)
+        
+def calibrate_custom(self, w_coords):
+    # get window coordinates
+    windows = set_custom_windows(w_coords, self.data.shape[1])
+    # run calibration for each window
+
+def grid_search(matrix, lineage, gain, cost_mat, max_n, step_n, max_k, step_k, row_thresh=.2, col_thresh=.1, min_seqs=50, rank='genus', min_n=5, min_k=3, criterion='orbit', collapse_hm=True, threads=1):
+    # prepare n, k ranges
+    n_range = np.arange(min_n, max_n + 1, step_n)
+    k_range = np.arange(min_k, max_k + 1, step_k)
+    
+    # get sites arrays
+    sites = get_sites(gain, n_range)
+    # calculate distances
+    distances = cal_dists.get_distances(matrix, sites, cost_mat) # 3d array of shape (n, #seqs, #seqs), contains paired distances for every value of n
+    
+    # classify instances
+    classifications, supports = classify(distances, lineage, k_range, criterion, threads)
+    grid_classif = GridResult(n_range, k_range, classifications, lineage.columns.values, sites)
+    grid_supp = GridResult(n_range, k_range, supports, lineage.columns.values)
+    return grid_classif, grid_supp
+    
 #%% classes
 class GridResult:
-    def __init__(self, n_range, k_range, grid, items, ranks):
+    def __init__(self, n_range, k_range, grid, ranks, sites=None):
         self.n_range = {n:idx for idx, n in enumerate(n_range)}
         self.k_range = {k:idx for idx, k in enumerate(k_range)}
-        self.mth_range = {'unweighted':0, 'wknn':1, 'dwknn':2}
+        self.mth_range = {'unweighted':0, 'u':0, 'wknn':1, 'w':1, 'dwknn':2, 'd':2}
+        self.sites = sites
         self.grid = grid
-        self.taxa = items
         self.ranks = ranks
+    
     def cell(self, n, k, method):
         n_idx = self.n_range[n]
         k_idx = self.k_range[k]
         mth_idx = self.mth_range[method]
-        result = pd.DataFrame(self.grid[n_idx, k_idx, mth_idx], index=self.taxa, columns=self.ranks)
+        result = pd.DataFrame(self.grid[n_idx, k_idx, mth_idx], columns=self.ranks)
         return result
+    
+    def icell(self, n, k, method):
+        result = pd.DataFrame(self.grid[n, k, method], columns=self.ranks)
+        return result
+    
+    def n_sites(self, n):
+        try:
+            n_idx = self.n_range[n]
+            return self.sites[n_idx]
+        except:
+            pass
 
 class GridMetricsInd(GridResult):
     def get_best(self):
@@ -293,6 +618,7 @@ class GridMetrics:
         self.recall = rec_grid
         self.f1 = f1_grid
 
+#%%
 class Calibrator:
     def __init__(self, data=None, cost_mat=None):
         if data is None:

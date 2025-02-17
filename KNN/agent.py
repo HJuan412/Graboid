@@ -294,7 +294,7 @@ def get_rk_metrics(rk_confusion, total_seqs):
     f1 = np.nan_to_num((2 * prc * rec) / (prc + rec), 0)
     return acc, prc, rec, f1
 
-def get_metrics(grid_confusion):
+def get_metrics(grid_confusion, total_sequences):
     acc = []
     prc = []
     rec = []
@@ -302,7 +302,7 @@ def get_metrics(grid_confusion):
     taxa = []
     
     for rk in grid_confusion.ranks:
-        rk_acc, rk_prc, rk_rec, rk_f1 = get_rk_metrics(grid_confusion[rk], grid_confusion.total_seqs)
+        rk_acc, rk_prc, rk_rec, rk_f1 = get_rk_metrics(grid_confusion[rk], total_sequences)
         acc.append(rk_acc)
         prc.append(rk_prc)
         rec.append(rk_rec)
@@ -311,10 +311,10 @@ def get_metrics(grid_confusion):
     
     acc = np.concatenate(acc, axis=3)
     prc = np.concatenate(prc, axis=3)
-    acc = np.concatenate(rec, axis=3)
+    rec = np.concatenate(rec, axis=3)
     f1 = np.concatenate(f1, axis=3)
     
-    ranks = np.concatenate([np.full(len(tx), rk) for tx, rk in enumerate(taxa, grid_confusion.ranks)])
+    ranks = np.concatenate([np.full(len(tx), rk) for tx, rk in zip(taxa, grid_confusion.ranks)])
     taxa = np.concatenate(taxa)
     
     acc_grid = GridMetricsInd(grid_confusion.n_range, grid_confusion.k_range, acc, taxa, ranks)
@@ -336,7 +336,7 @@ class GridMetricsInd:
         
     def get_best(self):
         # combine first 3 dimensions (n, k and method)
-        grid_reshaped = self.grid.reshape(-1, self.grid.shape[3], self.grid.shape[4])
+        grid_reshaped = self.grid.reshape(-1, self.grid.shape[3])
 
         # find maximum values along the combined dimension
         max_vals = np.max(grid_reshaped, axis=0)
@@ -347,10 +347,11 @@ class GridMetricsInd:
         # convert flat indices to original 3d indices
         max_indices = np.unravel_index(max_indices_flat, self.grid.shape[:3])
         
-        self.n = pd.DataFrame(np.array(list(self.n_range.keys()))[max_indices[0]], index=self.items, columns=self.ranks)
-        self.k = pd.DataFrame(np.array(list(self.k_rande.keys()))[max_indices[1]], index=self.items, columns=self.ranks)
-        self.method = pd.DataFrame(np.array(list(self.mth_range.keys()))[max_indices[2]], index=self.items, columns=self.ranks)
-        self.best = pd.DataFrame(max_vals, index=self.items, columns=self.ranks)
+        index = pd.MultiIndex.from_arrays([self.ranks, self.taxa])
+        self.best = pd.DataFrame({'Score':pd.Series(max_vals, index=index),
+                                  'n':pd.Series(np.array(list(self.n_range.keys()))[max_indices[0]], index=index),
+                                  'k':pd.Series(np.array(list(self.k_range.keys()))[max_indices[1]], index=index),
+                                  'Method':pd.Series(np.array(['u', 'w', 'd'])[max_indices[2]], index=index)}).drop(index=0, level=1)
         
 class GridMetrics:
     def __init__(self, acc_grid, prc_grid, rec_grid, f1_grid):
@@ -362,3 +363,8 @@ class GridMetrics:
         self.precision = prc_grid
         self.recall = rec_grid
         self.f1 = f1_grid
+    
+
+mets = get_metrics(conf, agent.data.R.lineage_collapsed.shape[0])
+
+#b.groupby(['n', 'k', 'Method']).agg(lambda x : x.shape[0])

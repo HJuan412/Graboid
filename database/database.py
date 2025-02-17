@@ -59,7 +59,7 @@ def build_summary(db_dir,
                   nseqs,
                   aln_seqs,
                   ranks):
-    summ_file = f'{db_dir}/summary'
+    summ_file = f'{db_dir}/summary.csv'
     with open(summ_file, 'w') as summary:
         summary.write(f'Database location: {db_dir}\n')
         summary.write(f'Guide sequence (length): {guide_file} ({marker_len})\n')
@@ -403,7 +403,7 @@ def make_main(db_dir,
     guide_len = mpp.get_guide_len(guide_db)
     print('Building map...')
     map_prefix = f'{db_dir}/reference'
-    map_matrix_file, map_acc_file, map_nrows, map_ncols = mpp.build_map(db_seqs, guide_db, map_prefix, evalue, threads)
+    map_matrix_file, map_acc_file, map_nrows, map_ncols = mpp.build_map(db_seqs, guide_db, map_prefix, guide_len, evalue, threads)
     print('Sequence mapping is done!')
     print('Finished building database!')
     

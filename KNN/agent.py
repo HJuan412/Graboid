@@ -64,7 +64,6 @@ cost_mat[[2,2,4,4],[1,3,1,3]] = 2
 
 #%%
 from Graboid.calibration import cal_main
-from Graboid.classification import cls_classify
 #%% distance calculations
 sites = cal_main.get_sites(gain, np.arange(5,26,5))
 dists = cal_main.get_distances(agent.data.R.collapsed, sites, cost_mat)
@@ -77,131 +76,8 @@ classifications, supports = cal_main.classify(dists, lin, k_range, criterion='or
 grid_classif = cal_main.GridResult(n_range, k_range, classifications, lin.columns.values, sites)
 grid_supp = cal_main.GridResult(n_range, k_range, supports, lin.columns.values)
 
+
 #%%
-# #%% orbital definitions
-# sorted_distances = np.sort(dists, axis=2)[:,:,1:]
-# sorted_distances_idxs = np.argsort(dists, axis=2)[:, :, 1:]
-
-
-# #%% classification functions
-
-# # calculate weights
-# def build_weights_mat(weights, sizes):
-#     # builds a 2d array of shape [ #queries, max number of neighbours among all queries]
-#     # each row contains the weights of the neighbours of a given query
-#     weight_lists = []
-#     for seq_weights, seq_sizes in zip(weights, sizes):
-#         weight_lists.append(np.concatenate([np.full(size, weight) for size, weight in zip(seq_sizes, seq_weights)]))
-    
-#     neighs = [len(seq) for seq in weight_lists]
-#     n_cols = np.max(neighs)
-#     weights_mat = np.zeros((len(weights), n_cols))
-#     for idx, (seq, nghs) in enumerate(zip(weight_lists, neighs)):
-#         weights_mat[idx, :nghs] = seq
-#     return weights_mat
-
-# def get_orbital_weights(orbitals, orbital_sizes, k_range, weight_func):
-#     k_weights = [weight_func(orbitals[:,:k]) for k in k_range]
-#     k_sizes = [orbital_sizes[:,:k] for k in k_range]
-#     weights = [build_weights_mat(w, s) for w, s in zip(k_weights, k_sizes)]
-#     return weights
-
-# # build support tables
-# def replace_vals(matrix):
-#     vals = np.unique(matrix)
-#     new_mat = np.zeros(matrix.shape, dtype=np.int32)
-#     for idx, v in enumerate(vals):
-#         new_mat[matrix == v] = idx
-#     return new_mat
-
-# def get_supports_mat(weights, sorted_distances_idxs):
-#     clipped_idxs = sorted_distances_idxs[:, :weights[-1].shape[1]]
-#     neigh_idxs = np.unique(clipped_idxs)
-#     supports_mat = np.zeros((len(weights), sorted_distances_idxs.shape[0], len(neigh_idxs)), dtype=np.float32)
-    
-#     replaced_idxs = replace_vals(clipped_idxs)
-    
-#     for k, k_weights in enumerate(weights):
-#         k_dist_idxs = replaced_idxs[:, :k_weights.shape[1]]
-#         for idx, (w, d) in enumerate(zip(k_weights, k_dist_idxs)):
-#             supports_mat[k, idx, d] = w
-#     return supports_mat, neigh_idxs
-
-# # calculate taxon supports
-# def get_tax_support(lineage, supports, neigh_idxs):
-#     clipped_lineage = lineage.iloc[neigh_idxs].copy()
-#     clipped_lineage['neigh_idxs'] = np.arange(clipped_lineage.shape[0])
-    
-#     taxa_supports = []
-#     taxa_idxs = []
-#     for rk in clipped_lineage.drop(columns='neigh_idxs').columns:
-#         rk_taxa = np.unique(clipped_lineage[rk])
-#         rk_lineage = clipped_lineage.set_index(rk)['neigh_idxs']
-#         rk_supp = np.zeros((supports.shape[0], supports.shape[1], len(rk_taxa)))
-        
-#         for tax_idx, tax in enumerate(rk_taxa):
-#             tax_neighs = rk_lineage.loc[[tax]].values
-#             rk_supp[:,:, tax_idx] = supports[:,:,tax_neighs].sum(axis=2)
-#         taxa_supports.append(rk_supp)
-#         taxa_idxs.append(rk_taxa)
-#     return taxa_supports, taxa_idxs
-
-# def norm_supports(tax_suports):
-#     normalized = []
-#     for rk in tax_suports:
-#         # softmax supports
-#         exp_supports = np.exp(rk)
-#         exp_sum = exp_supports.sum(axis=2)
-#         exp_sum = exp_sum[:,:, np.newaxis]
-#         normalized.append(exp_supports / exp_sum)
-#     return normalized
-
-
-# # classify
-# def get_classification(normalized_support, tax_ids):
-#     classif_support = np.array([np.max(rk, axis=2) for rk in normalized_support]).transpose(1,2,0)
-#     best_pos = np.array([np.argmax(rk, axis=2) for rk in normalized_support]).transpose(1,2,0)
-    
-#     classif = np.array([tax_ids[idx][best_pos[:,:,idx]] for idx in range(best_pos.shape[2])]).transpose(1,2,0)
-    
-#     return classif, classif_support
-
-# def n_classify(sorted_dists, sorted_indexes, k_range, lineage):
-    
-#     # get orbitals + orbital sizes
-#     orbitals, orbital_sizes = cal_main.find_orbitals(sorted_dists, k_range.max())
-    
-#     # calculate orbital weights using the three methods
-#     u_weights = get_orbital_weights(orbitals, orbital_sizes, k_range, cls_classify.unweighted)
-#     w_weights = get_orbital_weights(orbitals, orbital_sizes, k_range, cls_classify.wknn)
-#     d_weights = get_orbital_weights(orbitals, orbital_sizes, k_range, cls_classify.dwknn)
-    
-#     # build neighbour support matrixes (neigh indexes are the same for all)
-#     u_supports, neigh_idxs = get_supports_mat(u_weights, sorted_indexes)
-#     w_supports, neigh_idxs = get_supports_mat(w_weights, sorted_indexes)
-#     d_supports, neigh_idxs = get_supports_mat(d_weights, sorted_indexes)
-    
-#     # calcualte taxon supports
-#     u_tax_supports, u_tax_ids = get_tax_support(lineage, u_supports, neigh_idxs)
-#     w_tax_supports, w_tax_ids = get_tax_support(lineage, w_supports, neigh_idxs)
-#     d_tax_supports, d_tax_ids = get_tax_support(lineage, d_supports, neigh_idxs)
-#     # normalize supports
-#     u_norm = norm_supports(u_tax_supports)
-#     w_norm = norm_supports(w_tax_supports)
-#     d_norm = norm_supports(d_tax_supports)
-    
-#     # get classifications (+ support of winner taxon)
-#     u_classif, u_classif_support = get_classification(u_norm, u_tax_ids)
-#     w_classif, w_classif_support = get_classification(w_norm, w_tax_ids)
-#     d_classif, d_classif_support = get_classification(d_norm, d_tax_ids)
-    
-#     classifications = np.array([u_classif, w_classif, d_classif]).transpose(1,0,2,3)
-#     classification_supports = np.array([u_classif_support, w_classif_support, d_classif_support]).transpose(1,0,2,3)
-    
-#     return classifications, classification_supports
-
-# k_range=np.arange(1,5)
-# result, result_supps = n_classify(sorted_distances[0], sorted_distances_idxs[0], k_range, agent.data.R.lineage_collapsed)
 
 #%%
 import numba as nb
@@ -352,7 +228,12 @@ class GridMetricsInd:
                                   'n':pd.Series(np.array(list(self.n_range.keys()))[max_indices[0]], index=index),
                                   'k':pd.Series(np.array(list(self.k_range.keys()))[max_indices[1]], index=index),
                                   'Method':pd.Series(np.array(['u', 'w', 'd'])[max_indices[2]], index=index)}).drop(index=0, level=1)
-        
+    
+    def get_rank_best(self, rank=None):
+        if rank is None:
+            return self.best.groupby(['n', 'k', 'Method']).agg(lambda x : x.shape[0]).sort_values('Score', ascending=False)
+        return self.best.loc[rank].groupby(['n', 'k', 'Method']).agg(lambda x : x.shape[0]).sort_values('Score', ascending=False)
+    
 class GridMetrics:
     def __init__(self, acc_grid, prc_grid, rec_grid, f1_grid):
         acc_grid.get_best()
@@ -366,5 +247,3 @@ class GridMetrics:
     
 
 mets = get_metrics(conf, agent.data.R.lineage_collapsed.shape[0])
-
-#b.groupby(['n', 'k', 'Method']).agg(lambda x : x.shape[0])

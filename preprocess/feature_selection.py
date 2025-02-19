@@ -177,8 +177,8 @@ def get_information_gain(matrix, tax_tab, omit_missing=False):
     tax_tab : pandas.DataFrame
         Dataframe containing the taxonomic classification for each sequence.
         Each column of the dataframe correspond to a givenn taxonomic rank.
-    count_missing : bool, optional
-        Fake missing values into account for entropy calculations.
+    omit_missing : bool, optional
+        Do not take missing values into account for entropy calculations.
         The default is False.
 
     Returns

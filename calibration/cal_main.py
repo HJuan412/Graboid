@@ -194,6 +194,31 @@ def save_classifications(cls_dir, out_dir):
 
 #%% window definition
 def set_sliding_windows(size, step, max_pos):
+    """
+    Generates coordinates for the sliding windows
+
+    Parameters
+    ----------
+    size : int
+        Window size.
+    step : int
+        Window displacement.
+    max_pos : int
+        Length of the marker sequence.
+
+    Raises
+    ------
+    Exception
+        If either the window size exceeds the length of the marker sequence or
+        the displacement leaves gaps between windows.
+
+    Returns
+    -------
+    windows : numpy.array
+        2d array of shape [ # windows, 2 ], containing the start and end
+        coordinates of each window.
+
+    """
     if size >= max_pos:
         raise Exception(f'Given window size: {size} is equal or greater than the total length of the alignment {max_pos}, please use a smaller window size.')
     if step > size:
@@ -269,46 +294,37 @@ def get_distances(matrix, sites, cost_mat):
 #%% classification
 # 0. find orbitals ###############################################################
 @nb.njit
-def get_orbitals(sorted_dists, k=1):
-    # get up to the (k+1)th distance orbital for each query
-    # sorted dists is a 2d array of shape [ #queries, #references ]
-    # k is the number of orbitals to select (1 by default)
-    
-    # returns 2d array of shape [ #queries, k+1 ], indicating the radius of each orbital
-    
-    # preinitialize orbitals array
-    orbitals = np.full((sorted_dists.shape[0], k+1), -1, dtype=np.float32)
-    
-    # extract k smallest distances for each query
-    for idx, row in enumerate(sorted_dists):
-        orbs = np.unique(row)[:k+1]
-        orbitals[idx, :len(orbs)] = orbs
-    return orbitals
+def find_orbitals(sorted_distances, k=1):
+    """
+    Builds two 2d arrays containing the radii and population size of each
+    orbital (up to the kth) of each query sequence.
 
-@nb.njit
-def get_orbital_sizes(sorted_dists, orbitals):
-    # count the number of neighbours in each orbital for each query
-    # sorted dists is a 2d array of shape [ #queries, #references ]
-    # orbitals is a 2d array of shape [ #queries, k+1 ], indicating the radii of the orbitals
-    
-    # returns 2d array of shape [ #queries, k ], indicating the number of neighours in each orbital
-    
-    # preinitialize sizes array
-    orbital_sizes = np.full((orbitals.shape[0], orbitals.shape[1]-1), 0)
-    
-    # count the number of neighbours in each (>=k) orbital for each query
-    for idx0, orb in enumerate(orbitals.T[1:]):
-        for idx1, (_orb, row) in enumerate(zip(orb, sorted_dists)):
-            orbital_sizes[idx1, idx0] = np.argmax(row == _orb)
-    return orbital_sizes
+    Parameters
+    ----------
+    sorted_distances : numpy.array
+        2d array containig sorted distance values.
+    k : int
+        Number of orbitals to select for each query.
 
-def find_orbitals(sorted_distances, k):
-    # build two 2d arrays, containing the radii and population size of each orbital
-    # (up to the kth) of each query sequence
+    Returns
+    -------
+    orbital_radii : numpy.array
+        2d array of shape (#queries, k) containing the radii of the k first
+        orbitals of each query.
+    orbital_sizes : numpy.array
+        2d array of shape (#queries, k) containing the population sizes of the
+        k first orbitals of each query.
+
+    """
+    orbital_radii = np.full((sorted_distances.shape[0], k), -1, dtype=np.float32)
+    orbital_sizes = np.full((sorted_distances.shape[0], k), -1, dtype=np.int32)
     
-    orbitals = get_orbitals(sorted_distances, k)
-    orbital_sizes = get_orbital_sizes(sorted_distances, orbitals)
-    return orbitals, orbital_sizes
+    for idx, row in enumerate(sorted_distances):
+        radii = np.unique(row)
+        orbital_radii[idx] = radii[:k]
+        for r_idx, r in enumerate(radii[:k]):
+            orbital_sizes[idx, r_idx] = np.sum(row == r)
+    return orbital_radii, orbital_sizes
 
 # 1.0 calculate orbital weights ###################################################
 

@@ -165,10 +165,10 @@ def sans_tax_entropy(matrix, tax_tab, omit_missing=True):
 def get_information_gain(matrix, tax_tab, omit_missing=False):
     """
     Calculate the information gain for each site (column) for each taxon.
-    Information gain for a given taxon in a given site is taken as the negative
-    of decrease of entropy in that site when the representatives of the taxon
-    in question are removed. High gain values mean the site is a good signal
-    for the taxon.
+    Information gain for a given taxon in a given site is taken as the
+    difference in entropy between the complete dataset and the dataset
+    resulting of removing the instances of the taxon in question.
+    High gain values mean the site is a good signal for the taxon.
 
     Parameters
     ----------

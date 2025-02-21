@@ -329,9 +329,29 @@ def find_orbitals(sorted_distances, k=1):
 # 1.0 calculate orbital weights ###################################################
 
 def build_weights_mat(weights, sizes):
-    # builds a matrix containing the weights of all neighbours for all queries (for a single value of k)
-    # returns a 2d array of shape [ #queries, max # of neighbours among all queries]
-    # each row contains the weights of the neighbours of a given query
+    """
+    Builds a matrix containing the weights of all neighbours for all queries
+    (for a single value of k).
+    Returns a 2d array of shape [ #queries, max # of neighbours among all queries]
+    each row contains the weights of the neighbours of a given query.
+
+    Parameters
+    ----------
+    weights : numpy.array
+        2d array containing the calculated weights for each orbital (up to the
+        k-th).
+    sizes : numpy.array
+        2d array of shape (#queries, k) containing the population sizes of the
+        k first orbitals of each query.
+
+    Returns
+    -------
+    weights_mat : numpy.array
+        2d array containing the calculated weights for each neighbour of each
+        query (up to the k-th orbital).
+
+    """
+    
     weight_lists = []
     for seq_weights, seq_sizes in zip(weights, sizes):
         weight_lists.append(np.concatenate([np.full(size, weight) for size, weight in zip(seq_sizes, seq_weights)]))
@@ -347,13 +367,34 @@ def build_weights_mat(weights, sizes):
         weights_mat[idx, :nghs] = seq
     return weights_mat
 
-def get_orbital_weights(orbitals, orbital_sizes, k_range, weight_func):
-    # builds a list of 2d arrays containing the weights for each neighbour of each query
-    # each 2d array corresponds to a value of k and shape [ #queries, max # of neighbours among all queries (for that value of k)]
-    # this is performed for the orbitals of a single value of n
+def get_orbital_weights(orbital_radii, orbital_sizes, k_range, weight_func):
+    """
+    Builds a list of 2d arrays containing the weights for each neighbour of
+    each query each 2d array corresponds to a value of k and shape
+    [ #queries, max # of neighbours among all queries (for that value of k)]
+    this is performed for the orbitals of a single value of n.
+
+    Parameters
+    ----------
+    orbital_radii : numpy.array
+        2d array containing the radii of the orbitals of each query.
+    orbital_sizes : numpy.array
+        2d array containing the population sizes of the orbitals of each query.
+    k_range : numpy.array
+        Range of values of k.
+    weight_func : func
+        Weighting function.
+
+    Returns
+    -------
+    weights : list
+        List of 2d arrays (one per value of k) containing calculated neighbour
+        weights. Each array has shape [ #queires, max #neighbours for k ]
+
+    """
     
     # calculate orbital weights for each value of k
-    k_weights = [weight_func(orbitals[:,:k]) for k in k_range]
+    k_weights = [weight_func(orbital_radii[:,:k]) for k in k_range]
     # build weights matrix
     k_sizes = [orbital_sizes[:,:k] for k in k_range]
     weights = [build_weights_mat(w, s) for w, s in zip(k_weights, k_sizes)]
@@ -371,12 +412,27 @@ def replace_vals(matrix):
     return new_mat
 
 def get_supports_mat(weights, sorted_distances_idxs):
-    # builds set of arrays assigning the corresponding weight to each neighbour depending on their distance to the query.
-    # returns:
-        # supports_mat: 3d-array of shape [ range_k, #queries, max neighbours ]
+    """
+    Builds set of arrays assigning the weight of each reference sequence to
+    each query sequence depending on their distance to said query.
+
+    Parameters
+    ----------
+    weights : list
+        List of arrays containing neighbour weights for each value of k.
+    sorted_distances_idxs : numpy.array
+        2d array containing the sorted by distance indexes of neighbouring
+        sequences to each query sequence.
+
+    Returns
+    -------
+    supports_mat : numpy.array
+        3d array of shape [ range_k, #queries, max neighbours ]
             # each layer of the array contains the weights of all neighbours (cols) to all queries (rows) for a given value of k
-        # neigh_idxs: array containing the neighbour column indexes (inidcate their relative position to their respective queries)
-    
+    neigh_idxs : numpy.array
+        Array containing the neighbour column indexes (inidcate their relative position to their respective queries).
+
+    """
         
     # get involved neighbours, clip sorted_disstances_idxs at the size of the largest weight matrix
     clipped_idxs = sorted_distances_idxs[:, :weights[-1].shape[1]]

@@ -456,10 +456,28 @@ def get_supports_mat(weights, sorted_distances_idxs):
 # 3. get taxa supports ###########################################################
 
 def get_tax_support(lineage, supports, neigh_idxs):
-    # calculates the accumulated support (sum of weights) for each taxon
-    # returns:
-        # taxa_supports: list of 3d arrays of shape [ #queries, #values of k, #taxa in rank], one element per taxonomic ranks
-        # taxa_idxs: list of arrays indicating the taxonomic id corresponding to each column of the taxa_supports arrays (same number of elements)
+    """
+    Calculates the accumulated support (sum of weights) for each taxon.
+    
+    Parameters
+    ----------
+    lineage : pandas.DataFrame
+        Dataframe contaiing the taxonomic information for each instance for a
+        number of taxonomic ranks.
+    supports : numpy.array
+        3d array containing neighbour support for each value of k.
+    neigh_idxs : numpy.array
+        Array containing the neighbour indexes of each column (axis 2) in the
+        supports array.
+
+    Returns
+    -------
+    taxa_supports : list
+        List of 3d arrays of shape [ #values of k, #queries, #taxa in rank], one element per taxonomic ranks.
+    taxa_idxs : list
+        List of arrays indicating the taxonomic id corresponding to each column of the taxa_supports arrays (same number of elements).
+
+    """
     
     # extract lineages of neighbours
     clipped_lineage = lineage.iloc[neigh_idxs].copy()
@@ -498,7 +516,33 @@ def norm_supports(tax_suports):
 
 # 4. final classification ########################################################
 def get_classification(normalized_support, tax_ids):
+    """
+    Assigns taxonomic classifications
+
+    Parameters
+    ----------
+    normalized_support : list
+        List of 3d arrays of shape [range of k, #queries, #taxa in rank]. One
+        array per rank.
+    tax_ids : list
+        List of arrays containing the taxonomic ids for each column in each of
+        the 3d arrays contained in normalized support.
+
+    Returns
+    -------
+    classif : numpy.array
+        3d array of shape [ range of k, #queries, #ranks ] containing the
+        assigned classification for each query in each rank for each value of k.
+    classif_support : numpy.array
+        3d array of shape [ range of k, #queries, #ranks ] containing the
+        support for each assigned classification.
+
+    """
     # identify the taxon with the most support for each query in each rank
+        # max function along axis 2 returns 2d array of shape [values of k, #queries]
+        # one array generated for each rank, merged into a single 3d array of shape [#ranks, values of k, #queries]
+        # array transposed into shape [values of k, #queries, #ranks]
+    # same process of argmax to get classification
     classif_support = np.array([np.max(rk, axis=2) for rk in normalized_support]).transpose(1,2,0)
     best_pos = np.array([np.argmax(rk, axis=2) for rk in normalized_support]).transpose(1,2,0)
     
@@ -540,40 +584,36 @@ def n_classify(sorted_dists, sorted_indexes, k_range, lineage):
     
     return classifications, classification_supports
 
-def classify(distances, lineage, k_range, criterion='orbit', threads=1):
+def classify(distances, lineage, n_range, k_range, sites, criterion='orbit', threads=1):
     """
     Generates KNN classifications for the provided distance arrays.
 
     Parameters
     ----------
     distances : numpy.array
-        3d array of shape (# levels of n, # seqs in window, # seqs in window),
-        diagonal elements are -1.
+         3d array of shape (# levels of n, # seqs in window, # seqs in window),
+         diagonal elements are -1.
     lineage : pandas.DataFrame
-        Dataframe containing the taxonomic IDs for each reference sequence.
-        Each column corresponds to the sequence's classification at a given
-        rank.
+         Dataframe containing the taxonomic IDs for each reference sequence.
+         Each column corresponds to the sequence's classification at a given
+         rank.
+    n_range : TYPE
+        DESCRIPTION.
     k_range : numpy.array
-        Range of values of K to be used in the classification.
+         Range of values of K to be used in the classification.
+    sites : TYPE
+        DESCRIPTION.
     criterion : string, optional
-        Neighbour selection criterion, possible values are "orbit"/"neighbour". The default is 'orbit'.
+         Neighbour selection criterion, possible values are "orbit"/"neighbour". The default is 'orbit'.
     threads : int, optional
-        Number of parallel tasks. The default is 1.
+         Number of parallel tasks. The default is 1.
 
     Returns
     -------
-    classifications : numpy.array
-        5d array of shape (# levels of n,
-                           # values of k,
-                           3 (weighting methods: unweighted, wknn, dwknn),
-                           # query sequences,
-                           # taxonomic ranks).
-        The first 3 dimensions correspond to a given cell of the grid search.
-        Array values correspond to assigned taxonomic ID  for each query/rank
-        for each parameter combination.
-    classification_supports : numpy.array
-        5d array containing the calculated support for the assigned
-        claassifications (shape is the same as the classifications array).
+    grid_classifications : GridResult
+        Contains classifications for each query/rank and each combination of n/k/method.
+    grid_supports : GridResult
+        Contains classification supports for each query/rank and each combination of n/k/method.
 
     """
     
@@ -585,6 +625,7 @@ def classify(distances, lineage, k_range, criterion='orbit', threads=1):
     classifications = []
     classification_supports = []
     
+    # TODO: filter out distance arrays for redundant values of n
     with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
         futures = [executor.submit(n_classify, n_dists, n_sort_idxs, k_range, lineage) for n_dists, n_sort_idxs in zip(sorted_distances, sorted_distances_idxs)]
         for future in concurrent.futures.as_completed(futures):
@@ -595,7 +636,9 @@ def classify(distances, lineage, k_range, criterion='orbit', threads=1):
     classifications = np.array(classifications)
     classification_supports = np.array(classification_supports)
     
-    return classifications, classification_supports
+    grid_classifications = GridResult(n_range, k_range, classifications, lineage.columns.values, sites)
+    grid_supports = GridResult(n_range, k_range, classification_supports, lineage.columns.values)
+    return grid_classifications, grid_supports
     
 #%% calibration funcs
 def calibrate_sliding(data, w_size, w_step, max_n, step_n, max_k, step_k, row_thresh=.2, col_thresh=.1, min_seqs=50, rank='genus', min_n=5, min_k=3, criterion='orbit', collapse_hm=True, threads=1):

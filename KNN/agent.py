@@ -78,53 +78,120 @@ grid_supp = cal_main.GridResult(n_range, k_range, supports, lin.columns.values)
 
 
 #%%
-
-#%%
 import numba as nb
 
 @nb.njit
 def build_confusion_single(res, lin, taxa):
+    # initialize confusion matrix
     confusion = np.zeros((res.shape[0], res.shape[1], len(taxa), len(taxa)), dtype=np.int32)
+    # axis 2 holds real taxa, axis 3 holds predicted taxa
     for idx0, tax0 in enumerate(taxa):
         for idx1, tax1 in enumerate(taxa):
+            # count number of instances of tax0 predicted as tax1
             confusion[:,:,idx0, idx1] = np.sum((lin == tax0) & (res == tax1), axis=2)
     return confusion
 
 def build_rank_confusion(rk_results, rk_lineage):
+    """
+    Build confusion matrix for a given rank.
+
+    Parameters
+    ----------
+    rk_results : numpy.array
+        3d array of shape [range_k, #methods, #queries] containing predicted classifications at a given rank for each query and each combination of k/method.
+    rk_lineage : numpy.array
+        Array containing the real taxonomic classification of each query sequence at the given rank.
+
+    Returns
+    -------
+    confusion : numpy.array
+        4d array [range_k, #methods, #taxa_in_rank, #taxa_in_rank]. Contains confusion for each taxa in rank
+    uniq_tax : numpy.array
+        Array containing taxonomic IDs of every taxa in rank.
+
+    """
+    # reshape lineage array to match results -> rsulting shape is [range_k, #methods, # queries]
     reshaped_lin = np.tile(rk_lineage, (rk_results.shape[0], rk_results.shape[1], 1))
+    # list unique taxa in the real lineage
     uniq_tax = np.unique(np.append(rk_lineage.values, 0))
+    # build confusion matrix
     confusion = build_confusion_single(rk_results, reshaped_lin, uniq_tax)
     return confusion, uniq_tax
 
 def build_n_confusion(results, lineage):
+    """
+    Build confusion matrix for the classification results for a given value of n
+
+    Parameters
+    ----------
+    results : numpy.array
+        Array of shape [range k, #methods, #queries, #ranks].
+    lineage : pandas.DataFrame
+        Dataframe containing the taxonomic information of each reference sequence.
+
+    Returns
+    -------
+    n_confusion : list
+        List of 4d arrays of shape [range_k, #methods, #taxa_in_rank, #taxa_in_rank].
+        Each array contains the confusion matrices for each k-method combination for a given taxonomic rank.
+        Axis 2 holds real taxa, axis 3 holds predicted taxa
+    n_taxa : list
+        List of arrays. Each array contains the unique taxa contained in each taxonomic rank (used to index columns and rows (axes 2 & 3) of the confusion matrices).
+
+    """
+    # initialize lists
     n_confusion = []
     n_taxa = []
+    # generate confusion matrices for each rank
     for rk_idx, rk in enumerate(lineage.columns):
+        # extract rank predictions & real lineage
         rk_results = results[:,:,:,rk_idx]
         rk_lineage = lineage.iloc[:,rk_idx]
+        # build confusion matrix of rank
         rk_confusion, rk_taxa = build_rank_confusion(rk_results, rk_lineage)
         n_confusion.append(rk_confusion)
         n_taxa.append(rk_taxa)
     return n_confusion, n_taxa
 
 def build_confusion(results_grid, lineage):
+    """
+    Builds the confusion matrices of each parameter combination for each taxonomic range.
+
+    Parameters
+    ----------
+    results_grid : cal_main.GridResult
+        Object containing the predicted taxonomic classification of each query for each parameter combination in each rank.
+    lineage : pandas.DataFrame
+        Dataframe containing the taxonomic information of each reference sequence.
+
+    Returns
+    -------
+    result : cal_main.GridConfusion
+        Object containing the generated confusion matrices for each parameter combination in each taxon of each rank.
+
+    """
     confusion = []
-    taxa = []
+    taxa = [] # taxa is the same for each value of n, is overwritten every time
+    # build confusion tables for each value of n
     for n_results in results_grid.grid:
         n_confusion, taxa = build_n_confusion(n_results, lineage)
         confusion.append(n_confusion)
     n_ranks = len(taxa)
+    
+    # merge n confusion matrices for each rank, building the 5d arrays of shape [range_n, range_k, #methods, #taxa, #taxa]
     confusion2 = []
     for rk in range(n_ranks):
         confusion2.append(np.array([n_conf[rk] for n_conf in confusion]))
-    result = GridConfusion(results_grid.n_range, results_grid.k_range, results_grid.mth_range, confusion2, taxa, results_grid.ranks, lineage.shape[0])
+    
+    # build Grid class
+    result = GridConfusion(results_grid.n_range, results_grid.k_range, confusion2, taxa, results_grid.ranks, lineage.shape[0])
     return result
     
 class GridConfusion:
-    def __init__(self, n_range, k_range, mth_range, confusion, taxa, ranks, n_seqs):
+    def __init__(self, n_range, k_range, confusion, taxa, ranks, n_seqs):
         self.n_range = n_range
         self.k_range = k_range
-        self.mth_range = mth_range
+        self.mth_range = {'unweighted':0, 'u':0, 'wknn':1, 'w':1, 'dwknn':2, 'd':2}
         self.confusion = {rk:rk_confusion for rk, rk_confusion in zip(ranks, confusion)}
         self.taxa = {rk:rk_taxa for rk, rk_taxa in zip(ranks, taxa)}
         self.ranks = ranks

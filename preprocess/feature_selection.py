@@ -118,7 +118,10 @@ def build_tax_series(tax_tab):
         tax_series.append(_tab.set_index(rk)['idx'])
     # sort series (cluster taxa occurrences together) and remove unknown values (0)
     tax_series = pd.concat(tax_series).sort_index()
-    tax_series.drop(index=0)
+    try:
+        tax_series.drop(index=0)
+    except:
+        pass
     
     return tax_series
 

@@ -49,6 +49,46 @@ agent = KNNagent()
 agent.load_data('test/nem_18s/')
 
 #%%
+cost_mat = np.zeros((5,5))
+cost_mat[0] = 1.25
+cost_mat[:,0] = 1.25
+cost_mat[[1,3], [3,1]] = 1
+cost_mat[[2,4], [4,2]] = 1
+cost_mat[[1,1,3,3],[2,4,2,4]] = 2
+cost_mat[[2,2,4,4],[1,3,1,3]] = 2
+
+#%%
+from Graboid.KNN import calibrator
+
+result = calibrator.calibrate_sliding(agent.data.R, 300, 100, 25, 5, 3, 1, cost_mat, threads = 6)
+#%%
+import functools
+import pandas as pd
+
+
+grids = result[1]
+
+def get_n_matrix(grids, n_range):
+    n_matrix = pd.DataFrame(False, index=np.arange(len(grids)), columns=n_range)
+    for idx, g in enumerate(grids):
+        n_matrix.loc[idx, g.n_range.keys()] = True
+    return n_matrix
+
+res = calibrator.GridFinal(result[0], result[1], np.arange(5,26,5), np.arange(1,4,1))
+
+
+
+
+
+
+
+
+
+
+
+
+
+#%%
 from Graboid.preprocess import feature_selection
 
 agent.data.select_region(400, 600)

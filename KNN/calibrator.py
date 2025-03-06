@@ -131,7 +131,7 @@ class GridMetrics:
         return self.f1.k_range
 
 class GridFinal:
-    def __init__(self, windows, grids, n_range, k_range):
+    def __init__(self, windows, grids, n_range, k_range, cost_matrix):
         self.windows = windows
         self.grids = grids
         self.ranks = grids[0].ranks
@@ -139,6 +139,7 @@ class GridFinal:
         self.n_vals = get_n_matrix(grids, n_range)
         self.n_range = n_range
         self.k_range = k_range
+        self.cost_matrix = cost_matrix
 
     def get_best(self, metric):
         score = pd.DataFrame(.0, index=self.taxa.index, columns=np.arange(len(self.windows)))
@@ -796,7 +797,29 @@ def get_n_matrix(grids, n_range):
     return n_matrix
 
 #%% calibration funcs
-def calibrate_sliding(data, w_size, w_step, max_n, step_n, max_k, step_k, cost_matrix, row_thresh=.2, col_thresh=.1, min_seqs=50, rank='genus', min_n=5, min_k=3, criterion='orbit', collapse_hm=True, threads=1):
+def calibrate_window(data, win_coors, row_thresh, cost_matrix, n_range, k_range, criterion, threads):
+    try:
+        data.select_region(win_coors[0], win_coors[1])
+        data.collapse(row_thresh)
+    except Exception as excp:
+        raise Exception(f'Window {win_coors} ommited ({excp})')
+    gain, counts = feature_selection.get_information_gain(data.collapsed, data.lineage_collapsed)
+    window_grid = grid_search(data.collapsed, data.lineage_collapsed, gain, cost_matrix, n_range, k_range, criterion, threads)
+    return window_grid
+
+def calibrate_sliding(data,
+                      w_size,
+                      w_step,
+                      max_n,
+                      step_n,
+                      max_k,
+                      step_k,
+                      cost_matrix,
+                      row_thresh=.2,
+                      min_n=5,
+                      min_k=1,
+                      criterion='orbit',
+                      threads=1):
     # get window coordinates
     windows = set_sliding_windows(w_size, w_step, data.shape[1])
     window_grids = []
@@ -810,21 +833,37 @@ def calibrate_sliding(data, w_size, w_step, max_n, step_n, max_k, step_k, cost_m
     for idx, win in enumerate(windows):
         print(f'Calibrating window {win} ({idx+1} of {len(windows)})')
         try:
-            data.select_region(win[0], win[1])
-            data.collapse(row_thresh)
+            window_grid = calibrate_window(data, win, row_thresh, cost_matrix, n_range, k_range, criterion, threads)
+            window_grids.append(window_grid)
         except Exception as excp:
-            print(f'Window {win} ommited ({excp})')
+            print(excp)
             missed_windows.append(idx)
-            continue
-        gain, counts = feature_selection.get_information_gain(data.collapsed, data.lineage_collapsed)
-        window_grid = grid_search(data.collapsed, data.lineage_collapsed, gain, cost_matrix, n_range, k_range)
-        window_grids.append(window_grid)
+        # try:
+        #     data.select_region(win[0], win[1])
+        #     data.collapse(row_thresh)
+        # except Exception as excp:
+        #     print(f'Window {win} ommited ({excp})')
+        #     missed_windows.append(idx)
+        #     continue
+        # gain, counts = feature_selection.get_information_gain(data.collapsed, data.lineage_collapsed)
+        # window_grid = grid_search(data.collapsed, data.lineage_collapsed, gain, cost_matrix, n_range, k_range, criterion, threads)
+        # window_grids.append(window_grid)
     windows = np.delete(windows, missed_windows, axis=0)
-    # result = GridFinal(windows, window_grids, n_range, k_range)
-    # return result
-    return windows, window_grids
+    result = GridFinal(windows, window_grids, n_range, k_range, cost_matrix)
+    return result
 
-def calibrate_custom(data, w_coords, max_n, step_n, max_k, step_k, cost_matrix, row_thresh=.2, col_thresh=.1, min_seqs=50, rank='genus', min_n=5, min_k=3, criterion='orbit', collapse_hm=True, threads=1):
+def calibrate_custom(data,
+                     w_coords,
+                     max_n,
+                     step_n,
+                     max_k,
+                     step_k,
+                     cost_matrix,
+                     row_thresh=.2,
+                     min_n=5,
+                     min_k=1,
+                     criterion='orbit',
+                     threads=1):
     # get window coordinates
     windows = set_custom_windows(w_coords, data.shape[1])
     window_grids = []
@@ -834,17 +873,31 @@ def calibrate_custom(data, w_coords, max_n, step_n, max_k, step_k, cost_matrix, 
     k_range = np.arange(min_k, max_k + 1, step_k)
     
     # run calibration for each window
-    for win in windows:
-        data.select_region(win[0], win[1])
-        data.collapse(row_thresh)
-        gain, counts = feature_selection.get_information_gain(data.collapsed, data.lineage_collapsed)
-        window_grid = grid_search(data.collapsed, data.lineage_collapsed, gain, cost_matrix, n_range, k_range)
-        window_grids.append(window_grid)
+    missed_windows = []
+    for idx, win in enumerate(windows):
+        print(f'Calibrating window {win} ({idx+1} of {len(windows)})')
+        try:
+            window_grid = calibrate_window(data, win, row_thresh, cost_matrix, n_range, k_range, criterion, threads)
+            window_grids.append(window_grid)
+        except Exception as excp:
+            print(excp)
+            missed_windows.append(idx)
+        # try:
+        #     data.select_region(win[0], win[1])
+        #     data.collapse(row_thresh)
+        # except Exception as excp:
+        #     print(f'Window {win} ommited ({excp})')
+        #     missed_windows.append(idx)
+        #     continue
+        # gain, counts = feature_selection.get_information_gain(data.collapsed, data.lineage_collapsed)
+        # window_grid = grid_search(data.collapsed, data.lineage_collapsed, gain, cost_matrix, n_range, k_range, criterion, threads)
+        # window_grids.append(window_grid)
     
-    result = GridFinal(windows, window_grids, n_range, k_range)
+    windows = np.delete(windows, missed_windows, axis=0)
+    result = GridFinal(windows, window_grids, n_range, k_range, cost_matrix)
     return result
 
-def grid_search(matrix, lineage, gain, cost_mat, n_range, k_range, row_thresh=.2, col_thresh=.1, min_seqs=50, rank='genus', criterion='orbit', collapse_hm=True, threads=1):    
+def grid_search(matrix, lineage, gain, cost_mat, n_range, k_range, criterion='orbit', threads=1):    
     # get sites arrays
     sites, n_range = get_sites(gain, n_range)
     # calculate distances

@@ -10,7 +10,7 @@ Created on Thu Aug  1 11:43:13 2024
 import numpy as np
 import pandas as pd
 
-from concept_learner.ranks import Rank
+from Graboid.concept_learner.ranks import Rank
 
 #%% functions
 def one_hot_encode(matrix):

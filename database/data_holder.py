@@ -14,8 +14,8 @@ import os
 import pandas as pd
 
 # graboid libraries
-from mapping import mapping as mpp
-from preprocess import sequence_collapse, consensus_taxonomy
+from Graboid.mapping import mapping as mpp
+from Graboid.preprocess import sequence_collapse, consensus_taxonomy
 #%% functions
 def load_map(map_file):
     # map_file: __map.npz file

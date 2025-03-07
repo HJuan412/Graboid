@@ -11,7 +11,7 @@ import concurrent.futures
 import numpy as np
 import pandas as pd
 
-from concept_learner.concept import Concept
+from Graboid.concept_learner.concept import Concept
 #%% functions
 def build_concept(taxon, rank_name, tax_idxs, matrix):
     """

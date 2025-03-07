@@ -419,5 +419,5 @@ def retrieve_data(taxon,
     out_seqs, out_taxs, nseqs = fetch(taxon, marker, out_dir, exclude, tmp_dir, warn_dir, max_attempts, rm_temp, db_name)
     
     # generate taxonomy files
-    lineage_file, taxonomy_file, name_file = arrange_taxonomy(out_dir, out_taxs, names_tab, nodes_tab, ranks)
+    lineage_file, taxonomy_file, name_file = arrange_taxonomy(out_dir, out_taxs, names_tab, nodes_tab, ranks, db_name)
     return out_seqs, out_taxs, lineage_file, taxonomy_file, name_file, nseqs

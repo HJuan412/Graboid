@@ -248,7 +248,7 @@ class R(Data):
 
         """
         # collapse reference taxonomy data
-        filtered_accs = self.y[self.valid]
+        filtered_accs = self.taxonomy.TaxId[self.valid]
         self.y_collapsed = consensus_taxonomy.collapse_taxonomies(self.branches, filtered_accs, self.lineage_tab)
         self.lineage_collapsed = self.lineage_tab.loc[self.y_collapsed].reset_index(drop=True)
 

@@ -14,24 +14,9 @@ import os
 import pandas as pd
 
 # graboid libraries
+from Graboid.database import database
 from Graboid.mapping import mapping as mpp
 from Graboid.preprocess import sequence_collapse, consensus_taxonomy
-#%% functions
-def load_map(map_file):
-    # map_file: __map.npz file
-    
-    # load a map file and the corresponding accession file
-    # from npz file, extract: alignment map, bounds array, coverage array
-    # calculate normalized coverage
-    map_ = np.load(map_file)
-    matrix = map_['matrix']
-    bounds = map_['bounds']
-    coverage = map_['coverage']
-    coverage_norm = coverage / coverage.max()
-    # retrieve accession list
-    accs = map_['accs']
-    
-    return matrix, accs, bounds, coverage, coverage_norm
 
 #%% classes
 class Data:
@@ -44,8 +29,8 @@ class Data:
     """        
     @property
     def shape(self):
-        if hasattr(self, 'map'):
-            return self.map.shape
+        if hasattr(self, 'matrix'):
+            return self.matrix.shape
         return None
     
     def filter_sites(self, min_coverage=.0):
@@ -73,7 +58,7 @@ class Data:
     
     def select_region(self, start=None, end=None, indexes=None):
         """
-        Select a specific region or a set of positions of the alignment map, retaining the previously
+        Select a specific region or a set of positions of the alignment matrix, retaining the previously
         filtered sites
 
         Parameters
@@ -91,7 +76,7 @@ class Data:
 
         """
         
-        self.region = np.full(self.map.shape[1], False)
+        self.region = np.full(self.matrix.shape[1], False)
         if not indexes is None:
             self.region[indexes] = True
         else:
@@ -126,7 +111,7 @@ class Data:
         # attribute valid indicates selected sequences:
             # For the reference dataset these are the sequences with known classification at the required rank
             # For the query dataset, all sequences are valid (attribute is kept for compatibility)
-        filtered_map = self.map[self.valid][:, self.region]
+        filtered_map = self.matrix[self.valid][:, self.region]
         
         # only collapse if region selection is up to date and collapsing is outdated
         if self.to_date_region:
@@ -150,6 +135,7 @@ class R(Data):
     """
     Child of Data, meant to hold the reference dataset.
     """
+    
     def load(self, ref_dir, min_coverage=.0, required_rank='family'):
         """
         Load reference database. Apply minimum coverage filter and select sequences
@@ -176,38 +162,53 @@ class R(Data):
 
         """
         
-        if not os.path.isdir(ref_dir):
-            raise Exception(f'Database directory {ref_dir} not found')
-        self.ref_dir = ref_dir
-        try:
-            self.summary = pd.read_csv(f'{ref_dir}/summary.csv', index_col=0, header=None, skiprows=1)[1]
-        except FileNotFoundError:
-            raise (f'Could not find summary file in directory {ref_dir}')
+        gdb = database.load_database(ref_dir)
         
-        self.guide = self.summary['guide_file']
-        self.seqs = self.summary['seq_file']
-        self.tax_file = self.summary['tax_file']
-        self.lin_file = self.summary['lineages_file']
-        self.names_file = self.summary['names_file']
-        self.blast_db = self.summary['blast_db']
-        self.map_file = self.summary['map_file']
-        self.ranks = self.summary['ranks']
+        self.matrix = gdb.matrix
+        self.accs = gdb.accs
+        self.bounds = gdb.bounds
+        self.coverage = gdb.coverage
+        self.coverage_norm = gdb.coverage_norm
+        self.taxonomy = gdb.taxonomy
+        self.names_tab = gdb.names_tab
+        self.lineage_tab = gdb.lineage_tab
+        self.lineage = gdb.lineage
+        self.db_dir = gdb.db_dir
+        self.tax_counts = gdb.tax_counts
+        self.unk_counts = gdb.unk_counts
         
-        files = 'guide seqs tax_file lin_file names_file map_file'.split()
-        for fl in files:
-            if not os.path.isfile(getattr(self, fl)):
-                raise Exception(f'Missing {fl} file!')
+        # if not os.path.isdir(ref_dir):
+        #     raise Exception(f'Database directory {ref_dir} not found')
+        # self.ref_dir = ref_dir
+        # try:
+        #     self.summary = pd.read_csv(f'{ref_dir}/summary.csv', index_col=0, header=None, skiprows=1)[1]
+        # except FileNotFoundError:
+        #     raise (f'Could not find summary file in directory {ref_dir}')
+        
+        # self.guide = self.summary['guide_file']
+        # self.seqs = self.summary['seq_file']
+        # self.tax_file = self.summary['tax_file']
+        # self.lin_file = self.summary['lineages_file']
+        # self.names_file = self.summary['names_file']
+        # self.blast_db = self.summary['blast_db']
+        # self.map_file = self.summary['map_file']
+        # self.ranks = self.summary['ranks']
+        
+        # files = 'guide seqs tax_file lin_file names_file map_file'.split()
+        # for fl in files:
+        #     if not os.path.isfile(getattr(self, fl)):
+        #         raise Exception(f'Missing {fl} file!')
 
-        # load map files
-        self.map, self.accs, self.bounds, self.coverage, self.coverage_norm = load_map(self.map_file)
+        # # load map files
+        # self.map, self.accs, self.bounds, self.coverage, self.coverage_norm = load_map(self.map_file)
         
-        # load taxonomy data
-        ref_tax = pd.read_csv(self.tax_file, names=['Accession', 'TaxId'], skiprows=[0])
-        self.y = ref_tax.set_index('Accession').loc[self.accs, 'TaxId'].to_numpy()
-        self.lineage_tab = pd.read_csv(self.lin_file, index_col=0)
-        self.names_tab = pd.read_csv(self.names_file, index_col=0)['SciName']
+        # # load taxonomy data
+        # ref_tax = pd.read_csv(self.tax_file, names=['Accession', 'TaxId'], skiprows=[0])
+        # self.y = ref_tax.set_index('Accession').loc[self.accs, 'TaxId'].to_numpy()
+        # self.lineage_tab = pd.read_csv(self.lin_file, index_col=0)
+        # self.names_tab = pd.read_csv(self.names_file, index_col=0)['SciName']
         
-        self.lineage = self.lineage_tab.loc[self.y] # subsection of lineage_tab corresponding to the reference instances
+        # self.lineage = self.lineage_tab.loc[self.y] # subsection of lineage_tab corresponding to the reference instances
         
         
         # apply coverage threshold
@@ -257,7 +258,7 @@ class Q(Data):
     """
     @property
     def valid(self):
-        return np.full(self.map.shape[0], True)
+        return np.full(self.matrix.shape[0], True)
     
     def load(self,
              qry_file,
@@ -316,7 +317,7 @@ class Q(Data):
         qry_map_file, qry_acc_file, nrows, ncols = mpp.build_map(qry_file, blast_db, map_prefix, threads=threads, clip=False)
         
         # load map files
-        self.map, self.accs, self.bounds, self.coverage, self.coverage_norm = load_map(qry_map_file, qry_acc_file)
+        self.matrix, self.accs, self.bounds, self.coverage, self.coverage_norm = database.load_map(qry_map_file, qry_acc_file)
         
         # apply coverage threshold
         self.filter_sites(min_coverage)
@@ -342,7 +343,7 @@ class Q(Data):
         """
         # shorter version of load query, load pre-generated query map files
         # load query dataset
-        self.map, self.accs, self.bounds, self.coverage, self.coverage_norm = load_map(qry_map_file, qry_acc_file)
+        self.matrix, self.accs, self.bounds, self.coverage, self.coverage_norm = database.load_map(qry_map_file, qry_acc_file)
         
         # apply coverage threshold
         self.filter_sites(min_coverage)

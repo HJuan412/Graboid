@@ -14,7 +14,7 @@ import concurrent.futures
 import numpy as np
 import pandas as pd
 
-from data_holder import DataHolder
+from Graboid.database.data_holder import DataHolder
 # ignore numpy warnings when division by 0 appears
 np.seterr(divide='ignore')
 

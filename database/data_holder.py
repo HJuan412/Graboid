@@ -312,41 +312,6 @@ class Q(Data):
         # apply coverage threshold
         self.filter_sites(min_coverage)
     
-    def get_map(self, matrix, accs, bounds, store_file=False, qry_out='QUERY', min_coverage=.95):
-        """
-        Get pre loaded query array
-
-        Parameters
-        ----------
-        matrix : numpy.array
-            Query aignment array.
-        accs : numpy.array
-            Array of query accessions.
-        bounds : numpy.array
-            Array containing query alignment boundaries.
-        store_file : bool, optional
-            Save the passed query data into a file. The default is False.
-        qry_out : string, optional
-            Name of the output file for the passed query data. The default is 'QUERY'.
-        min_coverage : float, optional
-            Minimum coverage threshold to apply during site filtering.
-            The default is .95.
-
-        Returns
-        -------
-        None.
-
-        """
-        self.matrix = matrix
-        self.accs = accs
-        self.bounds = bounds
-        coverage = (matrix != 0).sum(axis=0)
-        if store_file:
-            np.savez_compressed(qry_out, bounds=bounds, accs=np.array(accs), matrix=matrix, coverage=coverage)
-        
-        # apply coverage threshold
-        self.filter_sites(min_coverage)
-    
     def collapse_postprocess(self):
         """
         Generate a map indicating the effective sequence branch to which each

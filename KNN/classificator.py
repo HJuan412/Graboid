@@ -55,7 +55,10 @@ def classify(query, reference, cost_mat, n, k, method, criterion='orbit', thread
     except KeyError:
         raise Exception(f'Invalid weighting method: {method}, avaliable methods are \'unweighted\'  \'wknn\'  \'dwknn\'')
     # calculate distances
-    distances = cls_distance.get_distances(query.collapsed[:, sites], reference.collapsed[:, sites], cost_mat)
+    query_encoded = cls_distance.one_hot_encode(query.collapsed[:, sites])
+    ref_encoded = cls_distance.one_hot_encode(reference.collapsed[:, sites])
+    #distances = cls_distance.get_distances(query.collapsed[:, sites], reference.collapsed[:, sites], cost_mat)
+    distances = cls_distance.get_distances3(query_encoded, ref_encoded, cost_mat)
     
     # sort distances (remove first column from each layer (it's always distance to self))
     sorted_distances = np.sort(distances, axis=1)[1:]

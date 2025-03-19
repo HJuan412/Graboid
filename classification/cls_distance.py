@@ -8,7 +8,6 @@ Distance calculation functions
 """
 
 #%% libraries
-import numba as nb
 import numpy as np
 #%% fucntions
 def combine(window):
@@ -40,22 +39,14 @@ def get_distances(qry_window, ref_window, cost_mat):
                 for q in idxs_q: dist_array[q, idxs_r] += dist
     return dist_array
 
-def get_distances2(query, reference, cost):
-    distances = np.zeros((query.shape[0], reference.shape[0]))
-    
-    q_indexes = np.arange(query.shape[0])
-    r_indexes = np.arange(reference.shape[0])
-    for i in np.arange(query.shape[1]):
-        query_val_indexes = [q_indexes[query_val] for query_val in query[:,i].T]
-        ref_val_indexes = [r_indexes[ref_val] for ref_val in reference[:,i].T]
-        
-        for q_val, q_idxs in enumerate(query_val_indexes):
-            new_distances = np.zeros(reference.shape[0])
-            for r_val, r_idxs in enumerate(ref_val_indexes):
-                new_distances[r_idxs] = cost[q_val, r_val]
-            distances[q_idxs] += new_distances
-    return distances
+#%% new faster functions
+import concurrent.futures
+import numba as nb
 
+def one_hot_encode(matrix):
+    encoded = np.array([matrix == i for i in range(5)]).transpose(1,2,0)
+    return encoded
+# get_distances3 is ~6 times faster than get_distances
 @nb.njit
 def get_distances3(query, reference, cost):
     distances = np.zeros((query.shape[0], reference.shape[0]))
@@ -73,9 +64,7 @@ def get_distances3(query, reference, cost):
             distances[q_idxs] += new_distances
     return distances
 
-import timeit
-import concurrent.futures
-
+# undergoing testing, may allow even faster calculation for very large query sets
 def get_distances_multi_2(query, reference, cost, threads=1, workers=10):
     n_queries = np.arange(query.shape[0])
     chunks = np.array_split(n_queries, threads * workers)
@@ -85,4 +74,3 @@ def get_distances_multi_2(query, reference, cost, threads=1, workers=10):
         distances = np.concatenate([future.result() for future in concurrent.futures.as_completed(futures)], axis=0)
     return distances
 
-#timeit.timeit('get_distances_multi_2(query, reference, cost, threads=1)', number=10, globals=globals())

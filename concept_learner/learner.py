@@ -209,4 +209,5 @@ class ConceptLearner:
             signals[rk] = rk_signals
         signals = pd.concat(signals, axis=1)
         called_taxa = pd.concat(called_taxa, axis=1)
-        self.result = Result(signals, called_taxa, self.lineage_tab, ranks)
+        result = Result(signals, called_taxa, self.lineage_tab, ranks)
+        return result

@@ -58,9 +58,6 @@ class KNNagent:
                  cost_matrix='s1v2',
                  criterion='orbit',
                  threads=1,
-                 evalue=0.005,
-                 query_name='QUERY',
-                 min_coverage=.95,
                  *taxa):
         
         try:

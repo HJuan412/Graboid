@@ -177,40 +177,6 @@ class R(Data):
         self.tax_counts = gdb.tax_counts
         self.unk_counts = gdb.unk_counts
         
-        # if not os.path.isdir(ref_dir):
-        #     raise Exception(f'Database directory {ref_dir} not found')
-        # self.ref_dir = ref_dir
-        # try:
-        #     self.summary = pd.read_csv(f'{ref_dir}/summary.csv', index_col=0, header=None, skiprows=1)[1]
-        # except FileNotFoundError:
-        #     raise (f'Could not find summary file in directory {ref_dir}')
-        
-        # self.guide = self.summary['guide_file']
-        # self.seqs = self.summary['seq_file']
-        # self.tax_file = self.summary['tax_file']
-        # self.lin_file = self.summary['lineages_file']
-        # self.names_file = self.summary['names_file']
-        # self.blast_db = self.summary['blast_db']
-        # self.map_file = self.summary['map_file']
-        # self.ranks = self.summary['ranks']
-        
-        # files = 'guide seqs tax_file lin_file names_file map_file'.split()
-        # for fl in files:
-        #     if not os.path.isfile(getattr(self, fl)):
-        #         raise Exception(f'Missing {fl} file!')
-
-        # # load map files
-        # self.map, self.accs, self.bounds, self.coverage, self.coverage_norm = load_map(self.map_file)
-        
-        # # load taxonomy data
-        # ref_tax = pd.read_csv(self.tax_file, names=['Accession', 'TaxId'], skiprows=[0])
-        # self.y = ref_tax.set_index('Accession').loc[self.accs, 'TaxId'].to_numpy()
-        # self.lineage_tab = pd.read_csv(self.lin_file, index_col=0)
-        # self.names_tab = pd.read_csv(self.names_file, index_col=0)['SciName']
-        
-        # self.lineage = self.lineage_tab.loc[self.y] # subsection of lineage_tab corresponding to the reference instances
-        
-        
         # apply coverage threshold
         self.filter_sites(min_coverage)
         
@@ -314,15 +280,15 @@ class Q(Data):
         if mpp.check_fasta(qry_file) == 0:
             raise Exception(f'Error: Query file {qry_file} is not a valid fasta file')
         
-        qry_map_file, qry_acc_file, nrows, ncols = mpp.build_map(qry_file, blast_db, map_prefix, threads=threads, clip=False)
+        qry_map_file, nrows, ncols, accs = mpp.build_map(qry_file, blast_db, map_prefix, threads=threads, clip=False)
         
         # load map files
-        self.matrix, self.accs, self.bounds, self.coverage, self.coverage_norm = database.load_map(qry_map_file, qry_acc_file)
+        self.matrix, self.accs, self.bounds, self.coverage, self.coverage_norm = database.load_map(qry_map_file)
         
         # apply coverage threshold
         self.filter_sites(min_coverage)
     
-    def load_quick(self, qry_map_file, qry_acc_file, min_coverage=.95):
+    def load_quick(self, qry_map_file, min_coverage=.95):
         """
         Load preexisting query alignment map.
 
@@ -330,8 +296,6 @@ class Q(Data):
         ----------
         qry_map_file : str
             Path to the query map file.
-        qry_acc_file : str
-            Path to the query accessions file.
         min_coverage : float, optional
             Minimum coverage threshold to apply during site filtering.
             The default is .95.
@@ -343,7 +307,7 @@ class Q(Data):
         """
         # shorter version of load query, load pre-generated query map files
         # load query dataset
-        self.matrix, self.accs, self.bounds, self.coverage, self.coverage_norm = database.load_map(qry_map_file, qry_acc_file)
+        self.matrix, self.accs, self.bounds, self.coverage, self.coverage_norm = database.load_map(qry_map_file)
         
         # apply coverage threshold
         self.filter_sites(min_coverage)

@@ -111,7 +111,7 @@ def get_lineage_calls(calls_tab, lineage_tab):
     calls_tab : pandas.DataFrame
         Calls tab returned by the classify method. Index: query, columns: (rank, taxa)
     lineage_tab : pandas.DataFrame
-        Lineage table of reference dataset.
+        Lineage table of each TAXA represented in reference dataset.
 
     Returns
     -------
@@ -184,29 +184,42 @@ class ConceptLearner:
     def __getitem__(self, rank):
         return self.ranks[rank]
     
-    def load_data(self, matrix, lineage_tab, lineage_collapsed, names_tab):
-        self.matrix = one_hot_encode(matrix)
-        self.lineage_tab = lineage_tab
-        self.lineage_collapsed = lineage_collapsed
-        self.lineage_flat = flatten_lineage(lineage_collapsed)
-        self.names_tab = names_tab
-        self.ranks = {rk:Rank(rk) for rk in lineage_tab.columns}
+    # def load_data(self, data):
+    #     self.matrix = one_hot_encode(data.R.collapsed)
+    #     self.lineage_tab = data.lineage_tab # table containing the lineage of each TAXA present in the dataset
+    #     self.lineage_collapsed = data.R.lineage_collapsed
+    #     self.lineage_flat = flatten_lineage(self.lineage_collapsed)
+    #     self.names_tab = data.R.names_tab
+    #     self.ranks = {rk:Rank(rk) for rk in self.lineage_tab.columns}
     
-    def learn(self, threads=1):
+    # def learn(self, threads=1):
+    #     for rank in self.ranks.values():
+    #         rank.learn(self.matrix, self.lineage_collapsed, self.lineage_flat, threads=threads)
+    
+    def learn(self, data, threads=1):
+        self.matrix = one_hot_encode(data.R.collapsed)
+        self.lineage_tab = data.R.lineage_tab # table containing the lineage of each TAXA present in the dataset
+        self.lineage_collapsed = data.R.lineage_collapsed
+        self.lineage_flat = flatten_lineage(self.lineage_collapsed)
+        self.names_tab = data.R.names_tab
+        self.ranks = {rk:Rank(rk) for rk in self.lineage_tab.columns}
         for rank in self.ranks.values():
             rank.learn(self.matrix, self.lineage_collapsed, self.lineage_flat, threads=threads)
     
-    def classify(self, query, clear_multi, *ranks, **kwargs):
+    def classify(self, data, clear_multi, *ranks):
         if len(ranks) == 0:
             ranks = self.ranks.keys()
         
         signals = {}
         called_taxa = {}
+        
+        encoded_query = one_hot_encode(data.Q.collapsed)
         for rk in ranks:
             rank = self.ranks[rk]
-            rk_calls, rk_signals = rank.classify(query, clear_multi)
+            rk_calls, rk_signals = rank.classify(encoded_query, clear_multi)
             called_taxa[rk] = rk_calls
             signals[rk] = rk_signals
         signals = pd.concat(signals, axis=1)
         called_taxa = pd.concat(called_taxa, axis=1)
-        self.result = Result(signals, called_taxa, self.lineage_tab, ranks)
+        result = Result(signals, called_taxa, self.lineage_tab, ranks)
+        return result

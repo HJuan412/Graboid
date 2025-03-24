@@ -171,7 +171,7 @@ class Result:
         # build new calls tab with cleaned calls
         new_call_tab = {}
         for col in clean_calls.columns:
-            rk_calls = pd.DataFrame(False, index=clean_calls.index.get_level_values(0).unique(), columns=clean_calls[col].unique())
+            rk_calls = pd.DataFrame(False, index=self.calls.index, columns=clean_calls[col].unique())
             for q, subtab in clean_calls.groupby(level=0):
                 rk_calls.loc[q, subtab[col].unique()] = True
             new_call_tab[col] = rk_calls

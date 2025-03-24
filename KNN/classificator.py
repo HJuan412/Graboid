@@ -61,8 +61,8 @@ def classify(query, reference, cost_mat, n, k, method, criterion='orbit', thread
     distances = cls_distance.get_distances3(query_encoded, ref_encoded, cost_mat)
     
     # sort distances (remove first column from each layer (it's always distance to self))
-    sorted_distances = np.sort(distances, axis=1)[1:]
-    sorted_distances_idxs = np.argsort(distances, axis=1)[1:]
+    sorted_distances = np.sort(distances, axis=1)[:,1:]
+    sorted_distances_idxs = np.argsort(distances, axis=1)[:,1:]
     
     # 0. get orbitals + orbital sizes
     orbitals, orbital_sizes = calibrator.find_orbitals(sorted_distances, k)

@@ -16,10 +16,10 @@ from Graboid.preprocess import feature_selection
 #%%
 class KNNResult:
     def __init__(self, classif_tab, classif_tab_named, support_tab, ranks, start, end, n, k, method, sites, q_branches):
-        self.classification = pd.DataFrame(classif_tab, columns=ranks.split())
-        self.classification_named = pd.DataFrame(classif_tab_named, columns=ranks.split())
-        self.supports = pd.DataFrame(support_tab, columns=ranks.split())
-        self.ranks = ranks.split()
+        self.classification = pd.DataFrame(classif_tab, columns=ranks)
+        self.classification_named = pd.DataFrame(classif_tab_named, columns=ranks)
+        self.supports = pd.DataFrame(support_tab, columns=ranks)
+        self.ranks = ranks
         self.start = start
         self.end = end
         self.n = n

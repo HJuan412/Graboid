@@ -9,6 +9,7 @@ Build Graboid database from a provided fasta file.
 A taxonomy table must be provided 
 """
 
+from Bio.SeqIO.FastaIO import SimpleFastaParser as sfp
 import logging
 import numpy as np
 import os
@@ -46,6 +47,11 @@ def fetch(fasta_file, out_dir, db_name='FASTA', mv=False):
         shutil.copy(fasta_file, out_seqs)
     return out_seqs
 
+def get_accessions(fasta_file):
+    # extract accession codes to guide taxonomy construction process
+    with open(fasta_file, 'r') as handle:
+        accessions = [acc for acc, seq in sfp(handle)]
+    return accessions
 #%% Process taxonomy data
 def detect_separator(line):
     """
@@ -158,7 +164,7 @@ def build_name_table(lineage_tab, names_tab):
     names = names_tab.loc[np.unique(lineage_tab)]
     return names
 
-def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, ranks, db_name='FASTA'):
+def arrange_taxonomy(out_dir, tax_source, accessions, names_tab, nodes_tab, ranks, db_name='FASTA'):
     """
     Generate the taxonomy, lineage, and names tables for the generated records.
 
@@ -196,6 +202,7 @@ def arrange_taxonomy(out_dir, tax_source, names_tab, nodes_tab, ranks, db_name='
 
     # parse taxonomy data
     source_taxonomy = parse_source_tax(tax_source)
+    source_taxonomy = source_taxonomy.loc[accessions]
     acc_taxids = get_acc_taxids(source_taxonomy, names_tab)
     
     # build taxonomy tables
@@ -259,8 +266,9 @@ def retrieve_data(fasta_file,
     
     # retrieve data
     out_seqs = fetch(fasta_file, out_dir, mv)
+    accessions = get_accessions(fasta_file)
     nseqs = fetch_tools.count_seqs(fasta_file)
     
     # generate taxonomy files
-    lineage_file, taxonomy_file, name_file = arrange_taxonomy(out_dir, taxonomy_file, names_tab, nodes_tab, ranks, db_name)
+    lineage_file, taxonomy_file, name_file = arrange_taxonomy(out_dir, taxonomy_file, accessions, names_tab, nodes_tab, ranks, db_name)
     return out_seqs, lineage_file, taxonomy_file, name_file, nseqs

@@ -9,6 +9,7 @@ This script contains the data holder class used to load graboid databases and qu
 """
 
 #%% libraries
+from glob import glob
 import numpy as np
 import os
 import pandas as pd
@@ -130,12 +131,11 @@ class Data:
                 pass
         else:
             raise Exception('Region selection is not up to date, call select_region method and try again')
-    
+
 class R(Data):
     """
     Child of Data, meant to hold the reference dataset.
-    """
-    
+    """    
     def load(self, ref_dir, min_coverage=.0, required_rank='family'):
         """
         Load reference database. Apply minimum coverage filter and select sequences
@@ -162,20 +162,45 @@ class R(Data):
 
         """
         
-        gdb = database.load_database(ref_dir)
+        # check ref directory
+        if not os.path.isdir(ref_dir):
+            raise Exception(f'Database directory {ref_dir} not found')
         
-        self.matrix = gdb.matrix
-        self.accs = gdb.accs
-        self.bounds = gdb.bounds
-        self.coverage = gdb.coverage
-        self.coverage_norm = gdb.coverage_norm
-        self.taxonomy = gdb.taxonomy
-        self.names_tab = gdb.names_tab
-        self.lineage_tab = gdb.lineage_tab
-        self.lineage = gdb.lineage
-        self.db_dir = gdb.db_dir
-        self.tax_counts = gdb.tax_counts
-        self.unk_counts = gdb.unk_counts
+        # locate database files
+        db_files = {'seqs_file':f'{ref_dir}/reference.seqs',
+                    'tax_file':f'{ref_dir}/reference.taxonomy',
+                    'lin_file':f'{ref_dir}/reference.lineage',
+                    'names_file':f'{ref_dir}/reference.names',
+                    'map_file':f'{ref_dir}/reference__map.npz'}
+        
+        for file, filename in db_files.items():
+            if not os.path.isfile(filename):
+                raise Exception(f'Missing {file} file!')
+        
+        # check blast_db directory & files
+        blastdb_dir = f'{ref_dir}/guide'
+        if not os.path.isdir(blastdb_dir):
+            raise Exception('Missing blast db directory')
+        blastdb_files = glob(f'{blastdb_dir}/guide_db*')
+        if len(blastdb_files) != 9:
+            #raise Exception(f'Found {len(blastdb_files)} files, expected 9')
+            # todo: replace this with a warning
+            pass
+        
+        # load map data
+        map_ = np.load(db_files['map_file'])
+        self.matrix,self.bounds, self.coverage, self.accs = map_['matrix'], map_['bounds'], map_['coverage'], map_['accs']
+        self.coverage_norm = self.coverage / self.coverage.max()
+        
+        # load taxonomy data
+        self.taxonomy = pd.read_csv(db_files['tax_file'], names=['Accession', 'TaxId'], skiprows=[0], index_col=0).loc[self.accs]
+        self.lineage_tab = pd.read_csv(db_files['lin_file'], index_col=0)
+        self.lineage = self.lineage_tab.loc[self.taxonomy.TaxId] # subsection of lineage_tab corresponding to the reference instances
+        self.names_tab = pd.read_csv(db_files['names_file'], index_col=0)['SciName']
+        self.tax_counts = self.lineage.apply(lambda x : len(np.unique(x[x != 0])))
+        self.unk_counts = (self.lineage == 0).sum(axis = 0)
+        
+        self.blast_db = f'{blastdb_dir}/guide_db'
         
         # apply coverage threshold
         self.filter_sites(min_coverage)
@@ -230,6 +255,7 @@ class Q(Data):
              qry_file,
              qry_dir,
              blast_db,
+             marker_len,
              evalue=0.0005,
              dropoff=0.05,
              min_height=0.1,
@@ -280,7 +306,7 @@ class Q(Data):
         if mpp.check_fasta(qry_file) == 0:
             raise Exception(f'Error: Query file {qry_file} is not a valid fasta file')
         
-        qry_map_file, nrows, ncols, accs = mpp.build_map(qry_file, blast_db, map_prefix, threads=threads, clip=False)
+        qry_map_file, nrows, ncols, accs = mpp.build_map(qry_file, blast_db, map_prefix, marker_len, threads=threads, clip=False)
         
         # load map files
         self.matrix, self.accs, self.bounds, self.coverage, self.coverage_norm = database.load_map(qry_map_file)
@@ -416,6 +442,7 @@ class DataHolder:
         self.Q.load(qry_file,
                     qry_dir,
                     self.R.blast_db,
+                    self.R.matrix.shape[1],
                     evalue=evalue,
                     dropoff=dropoff,
                     min_height=min_height,

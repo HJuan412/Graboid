@@ -9,11 +9,8 @@ Director script for database creation, exporting & updating (maybe)
 """
 
 #%% libraries
-from glob import glob
 import logging
-import numpy as np
 import os
-import pandas as pd
 import re
 import shutil
 from Bio import Entrez
@@ -330,87 +327,3 @@ class Constructor:
         self.get_remote(taxon, marker, ncbi, bold, chunk_size, max_attempts, ranks, workers=threads)
         self.build_map(evalue, threads)
         # self.build_summ()
-
-class GraboidDatabase:
-    def __init__(self,
-                 matrix,
-                 accs,
-                 bounds,
-                 coverage,
-                 coverage_norm,
-                 taxonomy,
-                 names_tab,
-                 lineage_tab,
-                 db_dir):
-        self.matrix = matrix
-        self.accs = accs
-        self.bounds = bounds
-        self.coverage = coverage
-        self.coverage_norm = coverage_norm
-        self.taxonomy = taxonomy
-        self.names_tab = names_tab
-        self.lineage_tab = lineage_tab
-        self.summary()
-        self.db_dir = db_dir
-        
-    @property
-    def lineage(self):
-        # subsection of lineage_tab corresponding to the reference instances
-        return self.lineage_tab.loc[self.taxonomy.TaxId]
-    
-    def summary(self):
-        self.tax_counts = self.lineage.apply(lambda x : len(np.unique(x[x != 0])))
-        self.unk_counts = (self.lineage == 0).sum(axis = 0)
-    
-def load_map(map_file):
-    # map_file: __map.npz file
-    
-    # load a map file and the corresponding accession file
-    # from npz file, extract: alignment map, bounds array, coverage array
-    # calculate normalized coverage
-    map_ = np.load(map_file)
-    matrix = map_['matrix']
-    bounds = map_['bounds']
-    coverage = map_['coverage']
-    coverage_norm = coverage / coverage.max()
-    # retrieve accession list
-    accs = map_['accs']
-    
-    return matrix, accs, bounds, coverage, coverage_norm
-
-def load_database(db_dir):
-    if not os.path.isdir(db_dir):
-        raise Exception(f'Database directory {db_dir} not found')
-    
-    # locate database files
-    db_files = {'seqs_file':f'{db_dir}/reference.seqs',
-                'tax_file':f'{db_dir}/reference.taxonomy',
-                'lin_file':f'{db_dir}/reference.lineage',
-                'names_file':f'{db_dir}/reference.names',
-                'map_file':f'{db_dir}/reference__map.npz'}
-    blastdb_dir = f'{db_dir}/guide'
-    
-    for file, filename in db_files.items():
-        if not os.path.isfile(filename):
-            raise Exception(f'Missing {file} file!')
-    
-    # check blast_db directory & files
-    if not os.path.isdir(blastdb_dir):
-        raise Exception('Missing blast db directory')
-    blastdb_files = glob(f'{blastdb_dir}/guide_db*')
-    if len(blastdb_files) != 9:
-        #raise Exception(f'Found {len(blastdb_files)} files, expected 9')
-        # todo: replace this with a warning
-        pass
-    
-    
-    # load map files
-    matrix, accs, bounds, coverage, coverage_norm = load_map(db_files['map_file'])
-    
-    # load taxonomy data
-    taxonomy = pd.read_csv(db_files['tax_file'], names=['Accession', 'TaxId'], skiprows=[0], index_col=0).loc[accs]
-    lineage_tab = pd.read_csv(db_files['lin_file'], index_col=0)
-    names_tab = pd.read_csv(db_files['names_file'], index_col=0)['SciName']
-    
-    result = GraboidDatabase(matrix, accs, bounds, coverage, coverage_norm, taxonomy, names_tab, lineage_tab, db_dir)
-    return result

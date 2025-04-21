@@ -224,7 +224,7 @@ def retrieve_data(fasta_file,
                   names_tab,
                   nodes_tab,
                   ranks=['phylum', 'class', 'order', 'family', 'genus', 'species'],
-                  db_name='FASTA',
+                  db_name='reference',
                   mv=False):
     """
     Retrieve sequence and taxonomy data from a fasta file and accompanying
@@ -265,7 +265,7 @@ def retrieve_data(fasta_file,
     out_dir = re.sub('/$', '', out_dir)
     
     # retrieve data
-    out_seqs = fetch(fasta_file, out_dir, mv)
+    out_seqs = fetch(fasta_file, out_dir, db_name, mv)
     accessions = get_accessions(fasta_file)
     nseqs = fetch_tools.count_seqs(fasta_file)
     

@@ -87,6 +87,8 @@ def parse_source_tax(tax_file):
         sep = detect_separator(lines[0])
         for line in lines:
             cols = line.split(sep)
+            # filter out empty levels
+            cols = [col for col in cols if col != '']
             # select accession & last 3 taxa
             records.append([cols[0]] + cols[-3:])
     source_tax = pd.DataFrame(records).set_index(0)

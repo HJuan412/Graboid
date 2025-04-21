@@ -135,7 +135,11 @@ class Data:
 class R(Data):
     """
     Child of Data, meant to hold the reference dataset.
-    """    
+    """
+    @property
+    def ranks(self):
+        return self.lineage.columns.values
+    
     def load(self, ref_dir, min_coverage=.0, required_rank='family'):
         """
         Load reference database. Apply minimum coverage filter and select sequences
@@ -309,7 +313,9 @@ class Q(Data):
         qry_map_file, nrows, ncols, accs = mpp.build_map(qry_file, blast_db, map_prefix, marker_len, threads=threads, clip=False)
         
         # load map files
-        self.matrix, self.accs, self.bounds, self.coverage, self.coverage_norm = database.load_map(qry_map_file)
+        map_ = np.load(qry_map_file)
+        self.matrix,self.bounds, self.coverage, self.accs = map_['matrix'], map_['bounds'], map_['coverage'], map_['accs']
+        self.coverage_norm = self.coverage / self.coverage.max()
         
         # apply coverage threshold
         self.filter_sites(min_coverage)

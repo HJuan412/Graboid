@@ -797,16 +797,6 @@ def get_n_matrix(grids, n_range):
     return n_matrix
 
 #%% calibration funcs
-def calibrate_window(data, win_coors, row_thresh, cost_matrix, n_range, k_range, criterion, threads):
-    try:
-        data.select_region(win_coors[0], win_coors[1])
-        data.collapse(row_thresh)
-    except Exception as excp:
-        raise Exception(f'Window {win_coors} ommited ({excp})')
-    gain, counts = feature_selection.get_information_gain(data.collapsed, data.lineage_collapsed)
-    window_grid = grid_search(data.collapsed, data.lineage_collapsed, gain, cost_matrix, n_range, k_range, criterion, threads)
-    return window_grid
-
 def calibrate_sliding(data,
                       w_size,
                       w_step,
@@ -896,6 +886,16 @@ def calibrate_custom(data,
     windows = np.delete(windows, missed_windows, axis=0)
     result = GridFinal(windows, window_grids, n_range, k_range, cost_matrix)
     return result
+
+def calibrate_window(data, win_coors, row_thresh, cost_matrix, n_range, k_range, criterion, threads):
+    try:
+        data.select_region(win_coors[0], win_coors[1])
+        data.collapse(row_thresh)
+    except Exception as excp:
+        raise Exception(f'Window {win_coors} ommited ({excp})')
+    gain, counts = feature_selection.get_information_gain(data.collapsed, data.lineage_collapsed)
+    window_grid = grid_search(data.collapsed, data.lineage_collapsed, gain, cost_matrix, n_range, k_range, criterion, threads)
+    return window_grid
 
 def grid_search(matrix, lineage, gain, cost_mat, n_range, k_range, criterion='orbit', threads=1):    
     # get sites arrays

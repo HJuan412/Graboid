@@ -206,7 +206,7 @@ class ConceptLearner:
         for rank in self.ranks.values():
             rank.learn(self.matrix, self.lineage_collapsed, self.lineage_flat, threads=threads)
     
-    def classify(self, data, clear_multi, *ranks):
+    def classify(self, data, clear_multi, min_signal=.9, *ranks):
         if len(ranks) == 0:
             ranks = self.ranks.keys()
         
@@ -216,7 +216,7 @@ class ConceptLearner:
         encoded_query = one_hot_encode(data.Q.collapsed)
         for rk in ranks:
             rank = self.ranks[rk]
-            rk_calls, rk_signals = rank.classify(encoded_query, clear_multi)
+            rk_calls, rk_signals = rank.classify(encoded_query, min_signal, clear_multi)
             called_taxa[rk] = rk_calls
             signals[rk] = rk_signals
         signals = pd.concat(signals, axis=1)

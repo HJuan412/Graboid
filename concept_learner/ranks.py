@@ -125,15 +125,17 @@ class Rank:
         self.get_confusion(lineage_tab[self.name])
     
 
-    def classify(self, query, clear_multi=True):
+    def classify(self, query, min_signal=.9, clear_multi=True):
         # calculate signals for every taxon/query
         rank_signals = {}
         for tax, concept in self.taxa.items():
             rank_signals[tax] = concept.get_signal(query) / concept.n_rules
         rank_signals = pd.DataFrame(rank_signals)
         
-        # filter out taxa with no calls (signal value of 1)
-        called_taxa = rank_signals.loc[:, (rank_signals == 1).any(axis=0)] == 1
+        # get called taxa (taxa with signal above min_signal for a given query)
+        called_taxa = rank_signals >= min_signal
+        # only extract ranks with at least one call (signal >= min_signal for at least one query)
+        called_taxa = called_taxa.loc[:, called_taxa.any(axis=0)]
         
         if clear_multi:
             # find queries with multiple taxon calls for the current rank

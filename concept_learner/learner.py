@@ -50,7 +50,7 @@ def get_orphaned(lineage):
     """
     orphaned = pd.Series(False, index=lineage.index)
     lineage = pd.concat([lineage.iloc[:,0], lineage], axis=1)
-    listed_parents = pd.Series({tax:row[np.argmax(row == 0) - 2] for tax, row in lineage.iterrows()})
+    listed_parents = pd.Series({tax:row.iloc[np.argmax(row == 0) - 2] for tax, row in lineage.iterrows()})
     for tax, par in listed_parents.items():
         orphaned[tax] = par not in listed_parents.index.droplevel(0)
     return orphaned
@@ -221,5 +221,6 @@ class ConceptLearner:
             signals[rk] = rk_signals
         signals = pd.concat(signals, axis=1)
         called_taxa = pd.concat(called_taxa, axis=1)
-        result = Result(signals, called_taxa, self.lineage_tab, ranks)
+        called_ranks = called_taxa.columns.get_level_values(0).unique()
+        result = Result(signals, called_taxa, self.lineage_tab, called_ranks)
         return result

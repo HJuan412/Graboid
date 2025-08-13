@@ -126,7 +126,12 @@ def get_lineage_calls(calls_tab, lineage_tab):
     lineage_calls = {}
     for idx, q in enumerate(calls_tab.values):
         lineage_calls[idx] = lineage_tab.loc[taxa[q]]
-    lineage_calls = pd.concat(lineage_calls)
+    try:
+        lineage_calls = pd.concat(lineage_calls)
+    except ValueError:
+        # there may be no calls at all, return an empty frame
+        lineage_calls = pd.DataFrame()
+            
     return lineage_calls
 
 def evaluate_lineage_calls(lineage_calls, level=-1):

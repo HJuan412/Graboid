@@ -1,0 +1,2 @@
+[[Elias et al 2007]]: *Limited performance of DNA barcoding in a diverse community of tropical butterflies*
+[[Whitworth et al 2007]]: *DNA barcoding cannot reliably identify species of the blowfly genus Protocalliphora (Diptera: Calliphoridae)*
